@@ -97,6 +97,9 @@ export function check(program: Program): CheckError[] {
         if (declaredContracts.has(decl.name)) errors.push({ message: `Duplicate contract name '${decl.name}'` });
         else declaredContracts.set(decl.name, decl);
         break;
+      case 'PluginDecl':
+        // Plugin package names are free-form strings — no duplication check needed (same plugin can be re-declared in merged imports)
+        break;
     }
   }
 

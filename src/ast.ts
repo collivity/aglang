@@ -123,6 +123,11 @@ export interface ContractDecl {
   endpoints: ContractEndpoint[];
 }
 
+export interface PluginDecl {
+  kind: 'PluginDecl';
+  packageName: string;  // npm package or executable name, e.g. "aglc-roslyn"
+}
+
 export type Declaration =
   | NodeDecl
   | DataDecl
@@ -133,6 +138,7 @@ export type Declaration =
   | StateMachineDecl
   | PermissionDecl
   | ContractDecl
+  | PluginDecl
   | TestDecl;
 
 export interface Program {

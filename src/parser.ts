@@ -6,7 +6,7 @@ import type {
   InvariantDecl, InvariantRule, TestDecl, AssertStmt,
   QueryChain, Selector, Quantifier,
   StateMachineDecl, TransitionRule, PermissionDecl, PermissionRule,
-  ContractDecl, ContractEndpoint,
+  ContractDecl, ContractEndpoint, PluginDecl,
 } from './ast.ts';
 
 export class ParseError extends Error {
@@ -385,6 +385,13 @@ export function parse(tokens: Token[]): Program {
     return { kind: 'ContractDecl', name, endpoints };
   }
 
+  // plugin "package-name"
+  function parsePluginDecl(): PluginDecl {
+    expect('KEYWORD', 'plugin');
+    const packageName = expect('STRING').value;
+    return { kind: 'PluginDecl', packageName };
+  }
+
   // test NAME { assert ... }
   function parseTestDecl(): TestDecl {
     expect('KEYWORD', 'test');
@@ -414,6 +421,7 @@ export function parse(tokens: Token[]): Program {
         case 'machine':    declarations.push(parseStateMachineDecl()); break;
         case 'permission': declarations.push(parsePermissionDecl()); break;
         case 'contract':   declarations.push(parseContractDecl()); break;
+        case 'plugin':     declarations.push(parsePluginDecl()); break;
         case 'test':       declarations.push(parseTestDecl()); break;
         default:
           throw new ParseError(`unexpected keyword '${t.value}'`, t);

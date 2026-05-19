@@ -6,7 +6,7 @@ import { extname } from 'path';
 import type { ChangedComponent } from './diff-parser.ts';
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
 import type { ExtractorPlugin, FlowFact } from '../analyzers/plugin.ts';
-import { isBlocking } from '../analyzers/plugin.ts';
+import { isBlocking, discoverPlugins } from '../analyzers/plugin.ts';
 import { csharpPlugin } from '../analyzers/csharp.ts';
 import { kotlinPlugin } from '../analyzers/kotlin.ts';
 
@@ -43,7 +43,9 @@ export async function generateDeltaAssertions(
   artifact: ArchitectureArtifact,
   options: { strict?: boolean; plugins?: ExtractorPlugin[] } = {},
 ): Promise<DeltaResult> {
-  const plugins = [...BUILT_IN_PLUGINS, ...(options.plugins ?? [])];
+  // Discover external plugins declared in the artifact, then merge with built-ins and caller-supplied
+  const externalPlugins = discoverPlugins(artifact.plugins ?? []);
+  const plugins = [...BUILT_IN_PLUGINS, ...externalPlugins, ...(options.plugins ?? [])];
   const extensionMap = buildExtensionMap(plugins);
   const strict = options.strict ?? false;
 

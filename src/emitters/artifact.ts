@@ -48,6 +48,8 @@ export interface ArchitectureArtifact {
     implements: string[];
     consumes: string[];
   }>;
+  // External extractor plugin package names declared in the spec
+  plugins: string[];
 }
 
 export function emitArtifact(program: Program, sourcePath: string): ArchitectureArtifact {
@@ -62,6 +64,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   const permissions: ArchitectureArtifact['permissions'] = [];
   const contracts: ArchitectureArtifact['contracts'] = [];
   const componentContracts: ArchitectureArtifact['componentContracts'] = [];
+  const plugins: string[] = [];
 
   for (const decl of program.declarations) {
     if (decl.kind === 'ComponentDecl') {
@@ -131,6 +134,11 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
         })),
       });
     }
+    if (decl.kind === 'PluginDecl') {
+      if (!plugins.includes(decl.packageName)) {
+        plugins.push(decl.packageName);
+      }
+    }
   }
 
   return {
@@ -146,6 +154,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
     permissions,
     contracts,
     componentContracts,
+    plugins,
   };
 }
 

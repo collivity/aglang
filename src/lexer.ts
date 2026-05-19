@@ -27,6 +27,8 @@ const KEYWORDS = new Set([
   'machine', 'permission', 'transition', 'when',
   // Contract block
   'contract',
+  // External extractor plugin declaration
+  'plugin',
 ]);
 
 // Matches numbers optionally followed by a time/rate unit: 100ms, 5s, 1000rps
