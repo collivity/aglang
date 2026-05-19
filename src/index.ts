@@ -14,6 +14,7 @@ import { runGate } from './runtime/gate.ts';
 import { runContractGate } from './runtime/contract-gate.ts';
 import { formatVerdict, formatVerdictJson } from './runtime/diagnostic.ts';
 import type { ArchitectureArtifact } from './emitters/artifact.ts';
+import { generateSpec } from './generate.ts';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -31,6 +32,7 @@ aglc — Architecture Ground Language Compiler
 
 Commands:
   aglc compile <file.ag>                              Compile .ag spec → architecture.o
+  aglc generate [projectRoot] [--out <file.ag>]       Scan codebase → auto-generate starter .ag spec
   aglc emit-context --arch <arch.o> [--out <path>]   Emit AGENTS.md for AI agents
   aglc emit-skill   --arch <arch.o> [--out <path>]   Emit skill.json manifest for AI agents
   aglc install [--project <dir>] [--arch <arch.o>]   Install pre-commit git hook
@@ -471,6 +473,21 @@ function getArg(flag: string): string | undefined {
     if (!hclPath) usage();
     const outPath = getArg('--out');
     await importTfCmd(hclPath!, outPath);
+
+  } else if (command === 'generate') {
+    const projectRoot = resolve(args[1] ?? '.');
+    const outPath = getArg('--out');
+    const projectName = getArg('--name');
+    const result = await generateSpec(projectRoot, { projectName });
+    if (outPath) {
+      const { writeFileSync } = await import('fs');
+      writeFileSync(outPath, result.ag, 'utf8');
+      log(`✓ Generated ${outPath}`);
+    } else {
+      process.stdout.write(result.ag + '\n');
+    }
+    log(`  Components: ${result.components} | Infrastructure nodes: ${result.infrastructureNodes} | Contracts: ${result.contracts}`);
+    for (const w of result.warnings) log(`  ⚠ ${w}`);
 
   } else {
     usage();

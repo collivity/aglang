@@ -1,19 +1,13 @@
 // Contract gate — validates API contracts between implementing and consuming components.
 // Checks that routes declared in `contract` blocks match actual code in implementing/consuming components.
 
-import { readdirSync, readFileSync } from 'fs';
-import { promises as fsPromises } from 'fs';
+import { readdirSync } from 'fs';
 import { resolve, join } from 'path';
 import micromatch from 'micromatch';
 import type { ArchitectureArtifact, ArtifactEndpoint } from '../emitters/artifact.ts';
-import { normalizeRoute, extractRoutesFromTypeScript, type RouteFact } from '../analyzers/typescript.ts';
-import { extractRoutesFromCSharp } from '../analyzers/csharp.ts';
-import { extractRoutesFromPython } from '../analyzers/python.ts';
-import { extractRoutesFromGo } from '../analyzers/golang.ts';
-import { extractRoutesFromRust } from '../analyzers/rust.ts';
-import { extractRoutesFromJava, extractRoutesFromScala } from '../analyzers/java.ts';
-import { extractServerRoutesFromTypeScript } from '../analyzers/typescript-server.ts';
-import { extractRoutesFromSwift } from '../analyzers/swift.ts';
+import { normalizeRoute } from '../analyzers/typescript.ts';
+import { extractServerRoutes, extractClientRoutes } from '../analyzers/routes.ts';
+import type { RouteFact } from '../analyzers/routes.ts';
 
 export interface ContractViolation {
   type: 'implements_undeclared' | 'consumes_undeclared' | 'consumes_method_mismatch';
@@ -54,50 +48,6 @@ function collectFiles(dir: string, extensions: string[]): string[] {
     // ignore unreadable dirs
   }
   return results;
-}
-
-// Extract server-side route definitions (implements check) — parallel IO
-async function extractServerRoutes(filePaths: string[]): Promise<RouteFact[]> {
-  const results = await Promise.all(
-    filePaths.map(async (filePath) => {
-      let content: string;
-      try { content = await fsPromises.readFile(filePath, 'utf8'); } catch { return []; }
-      if (filePath.endsWith('.cs') || filePath.endsWith('.csx')) {
-        return extractRoutesFromCSharp(content, filePath);
-      } else if (filePath.endsWith('.py') || filePath.endsWith('.pyw')) {
-        return extractRoutesFromPython(content, filePath);
-      } else if (filePath.endsWith('.go')) {
-        return extractRoutesFromGo(content, filePath);
-      } else if (filePath.endsWith('.rs')) {
-        return extractRoutesFromRust(content, filePath);
-      } else if (filePath.endsWith('.java')) {
-        return extractRoutesFromJava(content, filePath);
-      } else if (filePath.endsWith('.scala')) {
-        return extractRoutesFromScala(content, filePath);
-      } else if (filePath.match(/\.[mc]?[tj]sx?$/)) {
-        return extractServerRoutesFromTypeScript(content, filePath);
-      } else if (filePath.endsWith('.swift')) {
-        return extractRoutesFromSwift(content, filePath);
-      }
-      return [];
-    }),
-  );
-  return results.flat();
-}
-
-// Extract client-side fetch/HTTP calls (consumes check) — parallel IO
-async function extractClientRoutes(filePaths: string[]): Promise<RouteFact[]> {
-  const results = await Promise.all(
-    filePaths.map(async (filePath) => {
-      let content: string;
-      try { content = await fsPromises.readFile(filePath, 'utf8'); } catch { return []; }
-      if (filePath.endsWith('.ts') || filePath.endsWith('.tsx') || filePath.endsWith('.js') || filePath.endsWith('.jsx')) {
-        return extractRoutesFromTypeScript(content, filePath);
-      }
-      return [];
-    }),
-  );
-  return results.flat();
 }
 
 // Expand a component glob into all matching files under projectRoot.
