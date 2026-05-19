@@ -3,23 +3,24 @@
   "version": "0.1.0",
   "description": "Architecture Ground Language — dual-compiler system that enforces architectural rules against real code at git-commit time using Z3 SMT solving",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "build/aglc.js",
   "bin": {
-    "aglc": "./dist/index.js"
+    "aglc": "./build/aglc.js"
   },
   "engines": {
     "node": ">=18"
   },
   "scripts": {
     "build": "tsup",
+    "typecheck": "tsc --noEmit",
     "prepare": "npm run build",
     "start": "tsx src/index.ts",
     "test": "vitest run",
     "dev": "tsx src/index.ts",
     "docs:dev": "vitepress dev docs",
-    "docs:build": "vitepress build docs",
+    "docs:build": "node scripts/build-docs.mjs",
     "docs:preview": "vitepress preview docs",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run typecheck && npm run build && npm test"
   },
   "keywords": [
     "architecture",
@@ -44,7 +45,7 @@
     "url": "https://github.com/collivity/aglang/issues"
   },
   "files": [
-    "dist",
+    "build/aglc.js",
     "stdlib",
     "README.md",
     "LICENSE"

@@ -1,66 +1,54 @@
 # Contracts
 
-Contracts define the agreed-upon interface shape between two components. They serve two purposes:
+Contracts define the HTTP, GraphQL, gRPC, or queue interface shape a component implements or consumes.
 
-1. **Documentation** — machine-readable record of what Component A expects from Component B
-2. **Enforcement** — future versions can verify that the actual implementation matches the contract
-
-## Basic syntax
+## HTTP syntax
 
 ```ag
-contract PaymentToLedger {
-  between: PaymentService and LedgerService
-  endpoints: [
-    "POST /ledger/debit",
-    "POST /ledger/credit",
-    "GET  /ledger/balance/{accountId}"
-  ]
+contract PaymentsApi {
+  GET  "/api/payments/{id}" -> Payment
+  POST "/api/payments"      -> Payment
+}
+
+component ApiControllers {
+  runs_on: api_backend
+  paths: "web/api/Controllers/**/*.cs"
+  implements: PaymentsApi
+}
+
+component CreatorUi {
+  runs_on: web_client
+  paths: "creator-ui/src/**/*.ts"
+  consumes: PaymentsApi
+}
+```
+
+## Other endpoint types
+
+```ag
+contract RealtimeApi {
+  query GetOrder(OrderInput) -> Order
+  mutation CreateOrder(CreateOrderInput) -> Order
+  rpc ProvisionVps(ProvisionRequest) returns (ProvisionReply)
+  publishes "orders.created"
+  subscribes "payments.captured"
 }
 ```
 
 ## Importing from OpenAPI
 
-If you have an existing OpenAPI 3.x specification, you can import it directly:
-
 ```bash
 aglc import-openapi swagger.json --out contracts.ag
 ```
 
-The importer generates `contract` blocks for each path in the spec, which you can then refine.
-
-## Importing from Terraform
-
-Infrastructure contracts can be imported from Terraform:
-
-```bash
-aglc import-tf main.tf --out infra.ag
-```
-
-This generates `node` declarations for each Terraform resource.
-
-## Combining contracts with invariants
-
-```ag
-contract StripeIntegration {
-  between: PaymentService and StripeGateway
-  endpoints: [
-    "POST /v1/charges",
-    "POST /v1/refunds"
-  ]
-}
-
-invariant StripeOnlyViaPayment {
-  # Only the PaymentService may call out to StripeGateway
-  deny flow PublicAPI -> StripeGateway
-}
-```
+The importer generates contract blocks from OpenAPI paths and response schemas.
 
 ## Contract enforcement
 
 Contracts are currently used for:
 
-- **Spec generation** (`aglc generate` auto-detects API routes)
-- **Context emission** (`aglc emit-context` includes contract endpoints in AGENTS.md)
-- **Z3 assertions** (endpoint mismatches can be expressed as violations)
+- **Spec generation**: `aglc generate` auto-detects API routes.
+- **Context emission**: `aglc emit-context` includes contract endpoints in `AGENTS.md`.
+- **Commit-time contract gate**: implementing components must expose declared routes, and consuming components warn on undeclared or method-mismatched calls.
 
-Contract-level diff checking (comparing declared vs actual endpoints on each commit) is on the roadmap.
+The contract gate runs as part of `aglc check` and `aglc check-file` when components declare `implements` or `consumes`.

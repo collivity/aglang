@@ -1,6 +1,4 @@
-import { defineConfig } from 'vitepress'
-
-export default defineConfig({
+module.exports = {
   title: 'aglang',
   description: 'Architecture Ground Language — agent-first architectural guardrails enforced at git-commit time via Z3 SMT solving.',
   base: '/aglang/',
@@ -24,7 +22,7 @@ export default defineConfig({
         items: [
           { text: 'What is aglang?', link: '/guide/getting-started' },
           { text: 'Quick Setup (aglc add)', link: '/guide/generate' },
-          { text: 'How it works →', link: '/how-it-works' },
+          { text: 'How it works ->', link: '/how-it-works' },
         ]
       },
       {
@@ -57,7 +55,7 @@ export default defineConfig({
     ],
 
     footer: {
-      message: 'Released under the MIT License.',
+      message: 'Released under the ISC License.',
       copyright: 'Copyright © 2025 Collivity'
     },
 
@@ -77,4 +75,4 @@ export default defineConfig({
     ['meta', { name: 'og:title', content: 'aglang — Architectural Guardrails for AI Agents' }],
     ['meta', { name: 'og:description', content: 'Enforce architectural rules at git-commit time using SMT solving. Works with C#, Python, TypeScript, Go, Rust, JVM, Swift.' }],
   ]
-})
+};

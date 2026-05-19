@@ -13,6 +13,33 @@ export interface FlowFact {
   evidence: string;   // human-readable description of what was detected
   file: string;       // absolute path to the file containing the evidence
   line?: number;      // line number (if known)
+  graphEvidence?: {
+    graphFactId: string;
+    kind: string;
+    extractor?: string;
+    file?: string;
+    line?: number;
+    evidence: string;
+  };
+}
+
+export interface GraphFactEvidence {
+  extractor?: string;
+  file?: string;
+  line?: number;
+  message?: string;
+}
+
+export interface GraphFact {
+  id: string;
+  kind: string;
+  subject: string;
+  target?: string;
+  technology?: string;
+  model?: string;
+  route?: string;
+  confidence: Confidence;
+  evidence: GraphFactEvidence;
 }
 
 export interface ExtractorInput {
@@ -32,6 +59,12 @@ export interface ExtractorPlugin {
    * Implementations should batch-load project context if needed.
    */
   extract(input: ExtractorInput): Promise<FlowFact[]> | FlowFact[];
+  /**
+   * Optional graph-native extraction path. New extractors should prefer this.
+   * The runtime still falls back to extract() and normalizes legacy FlowFact[]
+   * into graph facts for compatibility.
+   */
+  extractGraph?(input: ExtractorInput): Promise<GraphFact[]> | GraphFact[];
 }
 
 // ─── Subprocess plugin protocol ───────────────────────────────────────────────

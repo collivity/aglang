@@ -377,15 +377,15 @@ Any npm package that exports `{ info(), extract(input) }` and responds to `--inf
 git clone https://github.com/collivity/aglang
 cd aglang
 npm install
-npm run build    # tsup → dist/index.js (~160KB, bundles z3-solver WASM)
+npm run build    # tsup -> build/aglc.js
 npm test         # vitest — 127 tests across 9 test files
 ```
 
 ```bash
 # Try the bundled Collivity example
-node dist/index.js compile examples/collivity.ag
-node dist/index.js check-file --arch examples/architecture.o --file examples/BadController.cs
-node dist/index.js emit-context --arch examples/architecture.o
+node build/aglc.js compile examples/collivity.ag
+node build/aglc.js check-file --arch examples/architecture.o --file examples/BadController.cs
+node build/aglc.js emit-context --arch examples/architecture.o
 ```
 
 ---
@@ -404,4 +404,4 @@ The codebase is production-grade in design but still a pre-release (`0.1.0`). Wh
 
 ## License
 
-ISC — see [LICENSE](LICENSE).
+ISC — see [LICENSE](https://github.com/collivity/aglang/blob/master/LICENSE).

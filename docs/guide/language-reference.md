@@ -106,11 +106,8 @@ Contracts define agreed-upon interface shapes between components, optionally imp
 
 ```ag
 contract <Name> {
-  between: <A> and <B>
-  endpoints: [
-    "GET /users/{id}",
-    "POST /orders"
-  ]
+  GET  "/users/{id}" -> User
+  POST "/orders"     -> Order
 }
 ```
 
@@ -130,7 +127,7 @@ Cyclic imports are detected and rejected at compile time.
 ## Comments
 
 ```ag
-# Single-line comment
+// Single-line comment
 
-# There are no block comments
+// There are no block comments
 ```

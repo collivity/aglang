@@ -11,6 +11,7 @@
 // establish the actual architectural rules.
 
 import { readdirSync, readFileSync, existsSync } from 'fs';
+import type { Dirent } from 'fs';
 import { join, relative, extname, basename, sep } from 'path';
 import type { ExtractorPlugin, FlowFact } from './analyzers/plugin.ts';
 import { csharpPlugin } from './analyzers/csharp.ts';
@@ -170,7 +171,7 @@ function isWorkspaceRoot(manifestFile: string): boolean {
 
 function walkForManifests(dir: string, results: Manifest[], depth = 0): void {
   if (depth > 8) return;
-  let entries: ReturnType<typeof readdirSync>;
+  let entries: Dirent<string>[];
   try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
 
   for (const entry of entries) {
@@ -207,7 +208,7 @@ function collectFiles(dir: string, exts: Set<string>, limit = 300): string[] {
   const results: string[] = [];
   function walk(d: string): void {
     if (results.length >= limit) return;
-    let entries: ReturnType<typeof readdirSync>;
+    let entries: Dirent<string>[];
     try { entries = readdirSync(d, { withFileTypes: true }); } catch { return; }
     for (const entry of entries) {
       if (results.length >= limit) return;

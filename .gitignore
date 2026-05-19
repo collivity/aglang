@@ -1,5 +1,7 @@
 node_modules/
+.npm-cache/
 dist/
+build/
 *.js.map
 .env
 .env.*
@@ -12,3 +14,8 @@ examples/debug.smt2
 *.png
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+docs/site/
+docs/temp/
+docs-build/
+.vitepress-out/
+site/

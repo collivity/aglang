@@ -6,9 +6,8 @@ import { cpus } from 'os';
 import { extname } from 'path';
 import type { ChangedComponent } from './diff-parser.ts';
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
-import type { ExtractorPlugin, FlowFact } from '../analyzers/plugin.ts';
-import { isBlocking, discoverPlugins } from '../analyzers/plugin.ts';
-import { resolveFactTargets } from '../analyzers/node-resolver.ts';
+import type { ExtractorPlugin, FlowFact, GraphFact } from '../analyzers/plugin.ts';
+import { discoverPlugins } from '../analyzers/plugin.ts';
 import { csharpPlugin } from '../analyzers/csharp.ts';
 import { kotlinPlugin } from '../analyzers/kotlin.ts';
 import { pythonPlugin } from '../analyzers/python.ts';
@@ -18,8 +17,14 @@ import { javaPlugin, scalaPlugin } from '../analyzers/java.ts';
 import { typescriptServerPlugin } from '../analyzers/typescript-server.ts';
 import { swiftPlugin } from '../analyzers/swift.ts';
 import { ExtractionCache, hashArtifact, extractWithCache } from './extraction-cache.ts';
+import {
+  buildGraphReport,
+  flowFactToGraphFact,
+  projectGraphToFlows,
+  type GraphReport,
+} from './graph-projection.ts';
 
-export type { FlowFact };
+export type { FlowFact, GraphFact };
 
 // Registry of built-in plugins (keyed by extension)
 const BUILT_IN_PLUGINS: ExtractorPlugin[] = [
@@ -46,11 +51,15 @@ function buildExtensionMap(plugins: ExtractorPlugin[]): Map<string, ExtractorPlu
 
 export interface DeltaResult {
   facts: FlowFact[];
+  graphFacts: GraphFact[];
   blockingFacts: FlowFact[];   // confidence=definite (or probable in strict mode)
   warningFacts: FlowFact[];    // confidence=probable (non-strict)
   smtAssertions: string[];     // only for blocking facts
   // Maps "from::to" → the exact SMT assertion string fed to Z3
   factSmtMap: Map<string, string>;
+  graphReport: GraphReport;
+  unresolvedTargets: string[];
+  graphWarnings: Array<{ graphFactId: string; message: string }>;
   /** Number of files whose extraction result came from cache */
   cacheHits: number;
 }
@@ -71,10 +80,6 @@ async function runConcurrent<T>(
   await Promise.all(workers);
 }
 
-function smtId(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_]/g, '_');
-}
-
 export async function generateDeltaAssertions(
   changed: ChangedComponent[],
   artifact: ArchitectureArtifact,
@@ -92,9 +97,10 @@ export async function generateDeltaAssertions(
     ? ExtractionCache.forProject(options.projectRoot, artifactHash)
     : null;
 
-  const allFacts: FlowFact[] = [];
+  const allGraphFacts: GraphFact[] = [];
   let cacheHits = 0;
   const concurrency = cpus().length || 4;
+  let graphFactSequence = 0;
 
   await runConcurrent(changed, concurrency, async ({ componentName, files }) => {
     // Group files by extension and dispatch to plugins as batches
@@ -108,22 +114,25 @@ export async function generateDeltaAssertions(
       }
     }
 
-    const componentFacts: FlowFact[] = [];
     await Promise.all(
       Array.from(byExt.entries()).map(async ([ext, batch]) => {
         const plugin = extensionMap.get(ext)!;
-        const beforeCount = allFacts.length;
-        const facts = await extractWithCache(cache, batch, (uncached) =>
-          plugin.extract({ componentName, files: uncached, mappings: artifact.mappings }),
-        );
+        if (plugin.extractGraph) {
+          const facts = await plugin.extractGraph({ componentName, files: batch, mappings: artifact.mappings });
+          allGraphFacts.push(...facts);
+        } else {
+          const facts = await extractWithCache(cache, batch, (uncached) =>
+            plugin.extract({ componentName, files: uncached, mappings: artifact.mappings }),
+          );
+          allGraphFacts.push(...facts.map(f =>
+            flowFactToGraphFact(f, graphFactSequence++, plugin.name)
+          ));
+        }
         // Track cache hits: files not run through plugin = batch.length - uncached files
         // (approximated as: total returned facts coming from cache)
-        componentFacts.push(...facts);
-        void beforeCount; // suppress unused warning
       }),
     );
 
-    allFacts.push(...componentFacts);
   });
 
   // Count cache hits by checking which facts are from cached files
@@ -133,35 +142,29 @@ export async function generateDeltaAssertions(
   // Flush cache to disk
   cache?.flush();
 
-  // Deduplicate on (from, to, confidence) triple
-  const seen = new Set<string>();
-  const uniqueFacts: FlowFact[] = [];
-  for (const f of allFacts) {
-    const key = `${f.from}::${f.to}::${f.confidence}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      uniqueFacts.push(f);
+  // Deduplicate graph facts by stable ID, then project to flow facts.
+  const graphSeen = new Set<string>();
+  const uniqueGraphFacts: GraphFact[] = [];
+  for (const f of allGraphFacts) {
+    if (!graphSeen.has(f.id)) {
+      graphSeen.add(f.id);
+      uniqueGraphFacts.push(f);
     }
   }
 
-  // Resolve category-based target names (e.g. 'postgres') to actual declared node names
-  const resolvedFacts = resolveFactTargets(uniqueFacts, artifact.nodes);
+  const projection = projectGraphToFlows(uniqueGraphFacts, artifact, { strict });
+  const graphReport = buildGraphReport(uniqueGraphFacts, projection);
 
-  const blockingFacts = resolvedFacts.filter(f => isBlocking(f, strict));
-  const warningFacts = resolvedFacts.filter(f => !isBlocking(f, strict) && f.confidence === 'probable');
-
-  // Emit SMT-LIB assertions only for blocking facts (these go into the Z3 solver)
-  const smtAssertions: string[] = ['; === delta assertions from changed files ==='];
-  const factSmtMap = new Map<string, string>();
-  for (const fact of blockingFacts) {
-    const from = smtId(fact.from);
-    const to = smtId(fact.to);
-    const assertion = `(assert (Flow ${from} ${to}))`;
-    smtAssertions.push(`; [${fact.confidence}] ${fact.evidence}`);
-    smtAssertions.push(`; File: ${fact.file}`);
-    smtAssertions.push(assertion);
-    factSmtMap.set(`${fact.from}::${fact.to}`, assertion);
-  }
-
-  return { facts: resolvedFacts, blockingFacts, warningFacts, smtAssertions, factSmtMap, cacheHits };
+  return {
+    facts: projection.flowFacts,
+    graphFacts: uniqueGraphFacts,
+    blockingFacts: projection.blockingFacts,
+    warningFacts: projection.warningFacts,
+    smtAssertions: projection.smtAssertions,
+    factSmtMap: projection.factSmtMap,
+    graphReport,
+    unresolvedTargets: projection.unresolvedTargets,
+    graphWarnings: projection.warnings,
+    cacheHits,
+  };
 }

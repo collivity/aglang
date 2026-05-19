@@ -24,6 +24,14 @@ export interface GateViolation {
     evidence: string;
     file: string;
   };
+  graph_evidence?: {
+    graphFactId: string;
+    kind: string;
+    extractor?: string;
+    file?: string;
+    line?: number;
+    evidence: string;
+  };
   message: string;
   // Z3 proof: exact SMT assertions that caused UNSAT — this is the mathematical evidence
   z3_proof: Z3Proof;
@@ -114,6 +122,7 @@ export async function runGate(
               evidence: fact.evidence,
               file: fact.file,
             },
+            ...(fact.graphEvidence ? { graph_evidence: fact.graphEvidence } : {}),
             message: `Component '${fact.from}' must NOT directly access '${fact.to}' (invariant: ${invariant.name})`,
             z3_proof: {
               permanent_constraint: permanentConstraint,
@@ -141,6 +150,7 @@ export async function runGate(
           evidence: fact.evidence,
           file: fact.file,
         },
+        ...(fact.graphEvidence ? { graph_evidence: fact.graphEvidence } : {}),
         message: `Component '${fact.from}' flow to '${fact.to}' violates architectural constraints`,
         z3_proof: {
           permanent_constraint: `(assert (=> (Flow ${smtId(fact.from)} ${smtId(fact.to)}) false))`,

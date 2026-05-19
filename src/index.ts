@@ -32,13 +32,14 @@ aglc — Architecture Ground Language Compiler
 
 Commands:
   aglc add [projectRoot] [--name <n>] [--out <file.ag>]     One-shot agent setup: generate → compile → hook → skill.json
-  aglc compile <file.ag>                                     Compile .ag spec → architecture.o
+  aglc compile <file.ag> [--out <arch.o>]                    Compile .ag spec → architecture.o
   aglc generate [projectRoot] [--out <file.ag>]             Scan codebase → auto-generate starter .ag spec
   aglc emit-context --arch <arch.o> [--out <path>]          Emit AGENTS.md for AI agents
   aglc emit-skill   --arch <arch.o> [--out <path>]          Emit skill.json manifest for AI agents
   aglc install [--project <dir>] [--arch <arch.o>]          Install pre-commit git hook
   aglc check --arch <arch.o> --project <dir> [--repo-filter <Name>] [--json]  Check staged git diff vs architecture
   aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt]  Analyze a specific file
+  aglc graph --arch <arch.o> [--file <f> | --project <dir>] [--json]  Emit graph facts and Z3 flow projections
   aglc import-openapi <swagger.json> [--out <file.ag>]       Import OpenAPI 3.x spec → .ag contracts
   aglc import-tf <main.tf> [--out <file.ag>]                Import Terraform → .ag node declarations
 
@@ -49,10 +50,27 @@ Flags:
   process.exit(1);
 }
 
+async function componentForFile(artifact: ArchitectureArtifact, absFile: string): Promise<string | undefined> {
+  const { default: micromatch } = await import('micromatch');
+  for (const [comp, glob] of Object.entries(artifact.mappings)) {
+    if (micromatch.isMatch(absFile, `**/${glob}`) || micromatch.isMatch(absFile, glob)) {
+      return comp;
+    }
+  }
+
+  for (const [comp, glob] of Object.entries(artifact.mappings)) {
+    const keyword = glob.split('/').find(p => p && !p.includes('*'));
+    if (keyword && absFile.includes(keyword)) {
+      return comp;
+    }
+  }
+  return undefined;
+}
+
 // ─────────────────────────────────────────────────────────────
 // COMPILE
 // ─────────────────────────────────────────────────────────────
-async function compile(agPath: string) {
+async function compile(agPath: string, outOverride?: string) {
   const absPath = resolve(agPath);
   if (!existsSync(absPath)) {
     logErr(`Error: file not found: ${absPath}`);
@@ -85,8 +103,15 @@ async function compile(agPath: string) {
   log(`[aglc] Translating to SMT-LIB...`);
   const artifact = emitArtifact(ast, absPath);
 
-  const outPath = resolve(dirname(absPath), 'architecture.o');
-  writeArtifact(artifact, outPath);
+  const outPath = resolve(outOverride ?? resolve(dirname(absPath), 'architecture.o'));
+  try {
+    writeArtifact(artifact, outPath);
+  } catch (e) {
+    logErr(`Error: could not write architecture artifact: ${outPath}`);
+    logErr(`  ${(e as Error).message}`);
+    logErr(`  Try a writable output path with: aglc compile ${agPath} --out <path>`);
+    process.exit(1);
+  }
 
   log(`\n✓ Compiled successfully → ${outPath}`);
   log(`  Components: ${Object.keys(artifact.mappings).length}`);
@@ -314,26 +339,7 @@ async function checkFile(archPath: string, filePath: string) {
   const artifact: ArchitectureArtifact = loadArtifact(readFileSync(archPath, 'utf8'));
   const absFile = resolve(filePath);
 
-  // Find which component this file belongs to
-  const { default: micromatch } = await import('micromatch');
-  let componentName: string | undefined;
-  for (const [comp, glob] of Object.entries(artifact.mappings)) {
-    if (micromatch.isMatch(absFile, `**/${glob}`) || micromatch.isMatch(absFile, glob)) {
-      componentName = comp;
-      break;
-    }
-  }
-
-  if (!componentName) {
-    // Fallback: match by directory keyword
-    for (const [comp, glob] of Object.entries(artifact.mappings)) {
-      const keyword = glob.split('/').find(p => p && !p.includes('*'));
-      if (keyword && absFile.includes(keyword)) {
-        componentName = comp;
-        break;
-      }
-    }
-  }
+  const componentName = await componentForFile(artifact, absFile);
 
   if (!componentName) {
     if (jsonMode) {
@@ -411,6 +417,55 @@ async function checkFile(archPath: string, filePath: string) {
     console.log(formatVerdict(verdict));
   }
   process.exit(verdict.passed ? 0 : 1);
+}
+
+// ─────────────────────────────────────────────────────────────
+// GRAPH (debug graph projection output)
+// ─────────────────────────────────────────────────────────────
+async function graphCommand(archPath: string, filePath: string | undefined, projectRoot: string | undefined) {
+  if (!existsSync(archPath)) {
+    logErr(`Error: architecture.o not found: ${archPath}`);
+    process.exit(1);
+  }
+
+  const artifact: ArchitectureArtifact = loadArtifact(readFileSync(archPath, 'utf8'));
+  let changed;
+
+  if (filePath) {
+    if (!existsSync(filePath)) {
+      logErr(`Error: file not found: ${filePath}`);
+      process.exit(1);
+    }
+    const absFile = resolve(filePath);
+    const componentName = await componentForFile(artifact, absFile);
+    if (!componentName) {
+      const empty = {
+        facts: [],
+        projections: { flow: [] },
+        smt: { assertions: ['; === delta assertions from graph projections ==='] },
+        unresolvedTargets: [],
+        warnings: [{ graphFactId: '', message: `File does not belong to any tracked component: ${absFile}` }],
+      };
+      process.stdout.write(JSON.stringify(empty, null, 2) + '\n');
+      process.exit(0);
+    }
+    changed = [{ componentName, files: [absFile] }];
+  } else {
+    const absProject = resolve(projectRoot ?? '.');
+    changed = parseDiff(absProject, artifact);
+  }
+
+  const delta = await generateDeltaAssertions(changed, artifact);
+  if (jsonMode) {
+    process.stdout.write(JSON.stringify(delta.graphReport, null, 2) + '\n');
+  } else {
+    log(`[aglc] Graph facts: ${delta.graphFacts.length}`);
+    log(`[aglc] Flow projections: ${delta.facts.length}`);
+    log(`[aglc] SMT assertions: ${delta.smtAssertions.filter(s => s.startsWith('(assert')).length}`);
+    for (const w of delta.graphWarnings) {
+      log(`  warning: ${w.message}`);
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -551,7 +606,7 @@ function getArg(flag: string): string | undefined {
   } else if (command === 'compile') {
     const agFile = args[1];
     if (!agFile) usage();
-    await compile(agFile!);
+    await compile(agFile!, getArg('--out'));
 
   } else if (command === 'install') {
     const projectRoot = getArg('--project') ?? '.';
@@ -579,6 +634,12 @@ function getArg(flag: string): string | undefined {
     const filePath = getArg('--file');
     if (!filePath) usage();
     await checkFile(archPath, filePath!);
+
+  } else if (command === 'graph') {
+    const archPath = getArg('--arch') ?? 'architecture.o';
+    const filePath = getArg('--file');
+    const projectRoot = getArg('--project');
+    await graphCommand(archPath, filePath, projectRoot);
 
   } else if (command === 'import-openapi') {
     const specPath = args[1];
