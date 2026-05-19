@@ -10,7 +10,7 @@ hero:
     alt: aglang architecture pipeline diagram
   actions:
     - theme: brand
-      text: Get Started
+      text: Get Started →
       link: /guide/getting-started
     - theme: alt
       text: View on GitHub
@@ -19,15 +19,15 @@ hero:
 features:
   - icon: 🏗️
     title: Architecture as Code
-    details: Write human-readable `.ag` files that describe your system's components, data flows, and invariants.
+    details: Write human-readable .ag files that describe your system components, data flows, and invariants.
 
   - icon: 🤖
     title: Agent-First Design
-    details: Run `aglc add` once — AI agents get a `skill.json` manifest and `AGENTS.md` context so they understand your rules automatically.
+    details: Run aglc add once — AI agents get a skill.json manifest and AGENTS.md context so they understand your rules automatically.
 
   - icon: 🔒
     title: Git-Commit Enforcement
-    details: A pre-commit hook runs Z3 SMT solving against every staged change. Violations are rejected with precise diagnostics — before the commit lands.
+    details: A pre-commit hook runs Z3 SMT solving against every staged change. Violations are rejected with precise diagnostics before the commit lands.
 
   - icon: 🌐
     title: 8 Language Extractors
@@ -41,3 +41,17 @@ features:
     title: Pluggable & Extensible
     details: Add custom extractors via the plugin protocol. Import from OpenAPI or Terraform. Works with any codebase, any team size.
 ---
+
+## Install
+
+```bash
+npm install -g @collivity/aglang
+```
+
+Then bootstrap any project with one command:
+
+```bash
+aglc add /path/to/your/project
+```
+
+Architecture spec, compiled artifact, git hook, and AI agent manifest — all set up automatically. [Full getting-started guide →](./guide/getting-started)
