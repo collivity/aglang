@@ -3,7 +3,7 @@
   "displayName": "aglang",
   "description": "Language support for aglang (.ag) — architecture guardrails enforced via Z3 SMT solving",
   "version": "0.1.0",
-  "publisher": "collivity",
+  "publisher": "Pantelispanka",
   "license": "MIT",
   "repository": {
     "type": "git",
