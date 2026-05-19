@@ -20,8 +20,9 @@ npm install github:collivity/aglang
 
 **Requirements:**
 - **Node.js** ≥ 18 — [nodejs.org](https://nodejs.org)
-- **Z3 solver** — `pip install z3-solver` &nbsp;or&nbsp; `brew install z3` (macOS)
 - A git repository
+
+> Z3 is bundled via the `z3-solver` npm package (WebAssembly) — no system install needed.
 
 ---
 
