@@ -149,7 +149,7 @@ function analyzeFile(
   // Direct `new` instantiation of infrastructure clients (probable — could be in test helpers)
   const newInstClients: Array<[RegExp, string]> = [
     [/new\s+ApplicationDbContext\s*\(/g,    'postgres_db'],
-    [/new\s+MongoClient\s*\(/g,             'postgres_db'],  // mongo maps to generic db; override node in spec if needed
+    [/new\s+MongoClient\s*\(/g,             'mongodb'],
     [/new\s+AmazonS3Client\s*\(/g,          'object_store'],
     [/new\s+BlobServiceClient\s*\(/g,       'object_store'],
     [/new\s+ConnectionMultiplexer\s*\(/g,   'cache'],

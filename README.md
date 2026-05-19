@@ -1,6 +1,8 @@
 # aglang · Architecture Ground Language
 
-**aglang** is a dual-compiler system that enforces architectural rules against real code at git-commit time using Z3 SMT solving. You describe your system's topology, components, invariants, and API contracts in a `.ag` spec file. The compiler turns those rules into mathematical constraints and checks every staged change against them before the commit lands.
+**aglang** is a dual-compiler system that enforces architectural rules against real code at git-commit time using Z3 SMT solving. Describe your system's topology, components, invariants, and API contracts in a `.ag` spec file. The compiler turns those rules into mathematical constraints and checks every staged change against them before the commit lands.
+
+Designed as an **agent-first guardrail**: `aglc generate` scans your codebase and produces a starter `.ag` file — AI agents can then refine the rules and every future commit (human or agent) is gated against them.
 
 ---
 
@@ -10,13 +12,13 @@
 [Developer / Agent edits code]
          │
          ▼
-  git commit (hook)
+  git commit (pre-commit hook)
          │
          ▼
-  aglc check-diff        ← parses staged files, extracts flow facts
+  aglc check              ← git diff → extracts flow facts from staged files
          │
          ▼
-  Z3 SMT solver          ← evaluates spec constraints against facts
+  Z3 SMT solver           ← evaluates spec constraints against delta facts
          │
     ┌────┴────┐
   UNSAT      SAT
@@ -24,42 +26,56 @@
   Allow      Reject + structured JSON proof
 ```
 
-1. **Build time** — `aglc compile spec.ag` produces `architecture.o` (a JSON artifact with SMT constraints + path mappings).
-2. **Commit time** — the installed git hook runs `aglc check-diff`, extracts flow facts from staged C#, TypeScript, or Kotlin files, feeds them and the compiled constraints to Z3, and blocks the commit if any invariant is violated.
+1. **Build time** — `aglc compile spec.ag` produces `architecture.o` (a JSON artifact with SMT-LIB2 constraints + component→path mappings).
+2. **Commit time** — the pre-commit hook runs `aglc check`, extracts flow facts from staged files (8 languages supported), feeds them with the compiled constraints to Z3, and blocks the commit if any invariant is violated.
+3. **Agent bootstrap** — `aglc generate` scans any codebase, detects manifests (`package.json`, `*.csproj`, `go.mod`, `Cargo.toml`, …), extracts routes, and emits a compilable starter `.ag` file an agent can immediately extend with invariant rules.
 
 ---
 
-## Features
+## Requirements
 
-| Feature | Description |
-|---|---|
-| **Topology nodes** | Model edge clients, servers, clusters, databases, caches, queues, object stores |
-| **Components** | Map source-code globs to topology nodes |
-| **Flow invariants** | Deny illegal data flows between components/nodes — checked by Z3 at every commit |
-| **Contracts** | Declare REST/GraphQL API endpoint shapes; enforce that implementing components expose them and consuming components only call declared routes |
-| **State machines** | Model entity lifecycle states and allowed transitions |
-| **Permissions** | Declare role-based access rules per state |
-| **Data & enums** | Define domain types for documentation and future extraction |
-| **Multi-file specs** | Split large specs with `import "other.ag"` — shared DAG imports are deduplicated |
-| **Agents context** | `aglc emit-context` produces `AGENTS.md` — a precise architectural brief for AI coding agents |
-| **Skill manifest** | `aglc emit-skill` produces `skill.json` — a machine-readable skill descriptor for agent tool registries |
-| **Structured errors** | All violations include JSON proof blocks with component names, file paths, and Z3 models |
+- **Node.js ≥ 18** (WASM-based Z3 solver requires async/WASM support)
+- Git (for the pre-commit hook and `aglc check`)
+
+---
+
+## Installation
+
+```bash
+# Global install (recommended for the CLI)
+npm install -g aglang
+
+# Or run without installing
+npx aglc --help
+
+# Or add to a project
+npm install --save-dev aglang
+```
 
 ---
 
 ## Quick start
 
+### Option A — Agent bootstrap (recommended for existing codebases)
+
 ```bash
-npm install -g aglang          # or: npx aglc
+# 1. Scan your project and generate a starter spec
+aglc generate ./my-project --out my-project.ag --name MyProject
+
+# 2. Review and add invariant rules to my-project.ag, then compile
+aglc compile my-project.ag
+
+# 3. Install the git hook in the implementation repo
+aglc install --project ./my-project --arch architecture.o
 ```
 
-### 1 — Write a spec
+### Option B — Write a spec by hand
 
 ```ag
 // myapp.ag
 node web : edge_desktop { trust: untrusted }
-node api : server       { trust: trusted }
-node db  : postgres     { trust: trusted }
+node api : server       { trust: trusted   }
+node db  : postgres     { trust: trusted   }
 
 component Frontend {
   runs_on: web
@@ -78,37 +94,55 @@ component Data {
 
 invariant Layered {
   deny flow Frontend -> db   // frontend must never touch DB directly
-  deny flow Api -> db        // API must go through Data layer
+  deny flow Api -> db        // API layer must go through Data layer
 }
 ```
 
-### 2 — Compile
-
 ```bash
 aglc compile myapp.ag
-# ✔ Compiled successfully → architecture.o
+# ✔ Compiled → architecture.o
 #   Components: 3  Invariants: 1  Contracts: 0
+
+aglc install --project . --arch architecture.o
+# ✔ Installed pre-commit hook → .git/hooks/pre-commit
 ```
 
-### 3 — Install the git hook
-
-```bash
-aglc install --arch architecture.o
-# Installed pre-commit hook → .git/hooks/pre-commit
-```
-
-From now on, every `git commit` is checked against your architecture. Violations block the commit:
+Every `git commit` is now checked. Violations are blocked with evidence:
 
 ```
 Arch Compilation Error (Rule: Layered)
   deny flow Api -> db
 
-  Detected: ApiService → db (definite)
+  Detected: Api → db (definite)
   Evidence: ApplicationDbContext injected via constructor
-  File:     src/api/UserService.ts (line 12)
+  File:     src/api/UserService.cs
 
 Commit aborted.
 ```
+
+---
+
+## Features
+
+| Feature | Status | Description |
+|---|---|---|
+| **Topology nodes** | ✅ | Model edge clients, servers, clusters, databases, caches, queues, object stores |
+| **Components** | ✅ | Map source-code globs to topology nodes |
+| **Flow invariants** | ✅ | Deny illegal data flows — checked by Z3 at every commit |
+| **Contracts** | ✅ | Declare REST/GraphQL API endpoint shapes; enforce implements + consumes at commit time |
+| **State machines** | ✅ | Model entity lifecycle states and allowed transitions |
+| **Permissions** | ✅ | Declare role-based access rules per state |
+| **Data & enums** | ✅ | Define domain types for documentation |
+| **Multi-file specs** | ✅ | Split large specs with `import "other.ag"` — shared DAG imports are deduplicated |
+| **`aglc generate`** | ✅ | Scan any codebase and auto-emit a starter `.ag` spec (agent bootstrap) |
+| **Import OpenAPI** | ✅ | `aglc import-openapi swagger.json` → `.ag` contract blocks |
+| **Import Terraform** | ✅ | `aglc import-tf main.tf` → `.ag` node declarations |
+| **Plugin protocol** | ✅ | Extend extraction via npm packages implementing the `aglc-plugin` protocol |
+| **Agent context** | ✅ | `aglc emit-context` produces `AGENTS.md` — machine-verified architectural brief |
+| **Skill manifest** | ✅ | `aglc emit-skill` produces `skill.json` for agent tool registries |
+| **JSON verdicts** | ✅ | All check commands emit structured JSON with Z3 proofs (`--json`) |
+| **Extraction cache** | ✅ | SHA-256 keyed file cache in `.aglang-cache/` — skips re-analysing unchanged files |
+| **Parallel extraction** | ✅ | All extractors run concurrently (CPU-capped pool) |
 
 ---
 
@@ -138,8 +172,8 @@ component Frontend {
 ```
 
 The contract gate checks:
-- **implements** — the C# controller exposes every declared route (missing routes = error)
-- **consumes** — the TypeScript client only calls declared routes (undeclared fetch calls = warning)
+- **implements** — every declared route must be exposed by the component (missing routes = error)
+- **consumes** — the client may only call declared routes (undeclared `fetch` calls = warning)
 
 ---
 
@@ -178,21 +212,23 @@ component <name> {
 // Invariant
 invariant <name> {
   deny flow <ComponentOrNode> -> <ComponentOrNode>
-  require encryption <Component>                   // advisory (emits warning only)
+  require encryption <Component>  // advisory — emits warning, does not block commit
 }
 
 // API contract
 contract <name> {
-  GET  "/api/path/{param}"  -> ResponseType
-  POST "/api/path"          -> ResponseType
-  // PUT, DELETE, PATCH also supported
+  GET    "/api/path/{param}"  -> ResponseType
+  POST   "/api/path"          -> ResponseType
+  PUT    "/api/path/{id}"     -> ResponseType
+  DELETE "/api/path/{id}"     -> ResponseType
+  PATCH  "/api/path/{id}"     -> ResponseType
 }
 
 // State machine
 statemachine <EntityName> {
   states: Draft | Active | Archived
   transitions {
-    Draft -> Active    { by: Admin | Editor }
+    Draft  -> Active   { by: Admin | Editor }
     Active -> Archived { by: Admin }
   }
 }
@@ -209,7 +245,7 @@ data <Name> {
 
 enum <Name> { Variant | Variant }
 
-// Import
+// Multi-file
 import "relative/path/other.ag"
 ```
 
@@ -220,21 +256,24 @@ import "relative/path/other.ag"
 | Command | Description |
 |---|---|
 | `aglc compile <file.ag>` | Compile spec → `architecture.o` |
-| `aglc check-diff --arch <arch.o>` | Check git staged files (used by hook) |
+| `aglc generate [dir] [--out <file.ag>] [--name <n>]` | Scan codebase → starter `.ag` spec |
+| `aglc check --arch <arch.o> --project <dir>` | Check staged git diff (used by hook) |
 | `aglc check-file --arch <arch.o> --file <path>` | Check a single file (dev/debug) |
-| `aglc emit-context --arch <arch.o>` | Write `AGENTS.md` (agent context brief) |
-| `aglc emit-skill --arch <arch.o>` | Write `skill.json` (agent skill manifest) |
-| `aglc install --arch <arch.o>` | Install pre-commit git hook |
+| `aglc emit-context --arch <arch.o> [--out <path>]` | Write `AGENTS.md` (agent context brief) |
+| `aglc emit-skill --arch <arch.o> [--out <path>]` | Write `skill.json` (agent skill manifest) |
+| `aglc install [--project <dir>] [--arch <arch.o>]` | Install pre-commit git hook |
+| `aglc import-openapi <swagger.json> [--out <f.ag>]` | Import OpenAPI 3.x → `.ag` contracts |
+| `aglc import-tf <main.tf> [--out <f.ag>]` | Import Terraform → `.ag` node declarations |
 
 **Flags:**
-- `--json` — output structured JSON verdict (for CI/agent consumption)
-- `--dump-smt` — print the raw SMT-LIB2 constraints (debugging)
+- `--json` — machine-readable JSON to stdout (progress logs go to stderr)
+- `--dump-smt` — write the raw SMT-LIB2 script to `examples/debug.smt2`
 
 ---
 
 ## JSON verdict schema (v2)
 
-All commands that check code emit a JSON object when `--json` is passed:
+All check commands emit a JSON object when `--json` is passed:
 
 ```jsonc
 {
@@ -246,7 +285,7 @@ All commands that check code emit a JSON object when `--json` is passed:
     {
       "type": "flow_violation",
       "invariant": "Layered",
-      "rule": { "kind": "deny_flow", "from": "Api", "to": "db" },
+      "rule": { "kind": "DenyFlow", "from": "Api", "to": "db" },
       "detected": {
         "from": "Api",
         "to": "db",
@@ -254,7 +293,12 @@ All commands that check code emit a JSON object when `--json` is passed:
         "evidence": "ApplicationDbContext injected via constructor",
         "file": "/abs/path/to/file.cs"
       },
-      "message": "..."
+      "message": "...",
+      "z3_proof": {
+        "permanent_constraint": "(assert (=> (Flow Api db) false))",
+        "delta_assertion": "(assert (Flow Api db))",
+        "explanation": "Z3 returned UNSAT — both assertions cannot be simultaneously true"
+      }
     }
   ],
   "contract_violations": [
@@ -280,20 +324,52 @@ All commands that check code emit a JSON object when `--json` is passed:
 
 aglang is designed as a first-class tool for AI coding agents:
 
-- **`AGENTS.md`** — generated by `aglc emit-context`, gives the agent a precise brief: topology, component paths, allowed flows, contracts, state machines, and permission rules.
-- **`skill.json`** — a machine-readable skill descriptor that agents can register as a tool.
-- **Structured JSON errors** — every Z3 violation includes exact file paths, component names, and a proof object so agents can locate and fix the violation without hallucinating.
-- **Fail-closed** — git diff failures and Z3 `unknown` results block the commit rather than silently allowing it.
+- **`aglc generate`** — a setup agent runs this once to bootstrap guardrails for any codebase; outputs a compilable `.ag` file to review and extend.
+- **`AGENTS.md`** — generated by `aglc emit-context`, gives agents a precise brief: topology, component paths, allowed flows, contracts, state machines, and permission rules. Fits in any context window.
+- **`skill.json`** — a machine-readable skill descriptor agents can register as a tool.
+- **Structured JSON errors** — every Z3 violation includes exact file paths, component names, and the Z3 proof object so agents can locate and fix violations without hallucinating.
+- **Fail-closed** — git diff failures and Z3 `unknown` results block the commit; nothing is silently allowed.
+
+### Typical agent workflow
+
+```
+1. Setup agent: aglc generate . --out arch.ag
+   → reviews, adds invariant rules, runs: aglc compile arch.ag
+   → runs: aglc install --arch architecture.o
+
+2. Coding agents: edit code → git commit
+   → pre-commit hook fires: aglc check --arch architecture.o --project .
+   → Z3 blocks commit if invariant is violated
+   → agent reads the structured JSON error, fixes the violation, recommits
+```
 
 ---
 
 ## Supported extractors
 
-| Language | What is extracted |
-|---|---|
-| **C# (.cs)** | Constructor injection, `new` instantiation, HttpClient base URLs, EF Core DbContext, Dapper, Redis, S3, Azure Blob, MongoDB, Kafka, RabbitMQ, SignalR |
-| **TypeScript / TSX** | `fetch()` calls (method + URL extraction), Axios (planned) |
-| **Kotlin (.kt)** | Retrofit annotations, OkHttp, Room, WorkManager |
+| Language | Extensions | What is extracted |
+|---|---|---|
+| **C#** | `.cs` | Constructor injection (DI), EF Core DbContext, HttpClient, Redis, S3/Blob, MongoDB, Kafka, RabbitMQ, SignalR |
+| **TypeScript / JS** | `.ts`, `.tsx`, `.js`, `.jsx` | `fetch()` calls (method + URL), Express/Fastify route declarations |
+| **Python** | `.py` | SQLAlchemy, Django ORM, psycopg2, Redis, Celery, requests/httpx calls |
+| **Go** | `.go` | `database/sql`, GORM, Redis, Kafka, HTTP client calls |
+| **Rust** | `.rs` | `sqlx`, `diesel`, `redis`, `reqwest`, `tokio` |
+| **Java / Scala** | `.java`, `.scala` | Spring Data, Hibernate, JDBC, Kafka, Redis, RestTemplate |
+| **Kotlin** | `.kt` | Retrofit, OkHttp, Room, WorkManager, Ktor |
+| **Swift / iOS** | `.swift` | URLSession, Alamofire, CoreData, CloudKit, Combine network calls |
+
+All extractors run in parallel with a CPU-capped concurrency pool. Results are cached by file SHA-256 in `.aglang-cache/` — unchanged files are never re-analysed.
+
+### Plugin protocol
+
+Third-party extractors can be loaded as npm packages:
+
+```ag
+// In your .ag spec file
+plugin "aglc-plugin-my-extractor"
+```
+
+Any npm package that exports `{ info(), extract(input) }` and responds to `--info` / `--extract` CLI flags qualifies. Run `npx aglc` — the plugin is auto-discovered and invoked for each file batch matching its declared extensions.
 
 ---
 
@@ -303,15 +379,28 @@ aglang is designed as a first-class tool for AI coding agents:
 git clone https://github.com/your-org/aglang
 cd aglang
 npm install
-npm run build     # produces dist/index.js
-npm test          # vitest — 41 tests
+npm run build    # tsup → dist/index.js (~160KB, bundles z3-solver WASM)
+npm test         # vitest — 127 tests across 9 test files
 ```
 
 ```bash
 # Try the bundled Collivity example
 node dist/index.js compile examples/collivity.ag
 node dist/index.js check-file --arch examples/architecture.o --file examples/BadController.cs
+node dist/index.js emit-context --arch examples/architecture.o
 ```
+
+---
+
+## What's left before publishing
+
+The codebase is production-grade in design but still a pre-release (`0.1.0`). What to do before `npm publish`:
+
+1. **Set a GitHub remote** — `git remote add origin https://github.com/your-org/aglang`
+2. **Add `"repository"` to `package.json`** — required by npm
+3. **Benchmark extraction accuracy** — measure false-positive rate against real codebases
+4. **LSP / VS Code extension** — `.ag` syntax highlighting and autocomplete
+5. **Semantic extraction** (stretch goal) — replace regex with Roslyn (C#) / tsc API (TS) for deeper accuracy
 
 ---
 

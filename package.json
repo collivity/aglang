@@ -1,11 +1,14 @@
 {
   "name": "aglang",
   "version": "0.1.0",
-  "description": "Architecture Ground Language — Dual-Compiler System",
+  "description": "Architecture Ground Language — dual-compiler system that enforces architectural rules against real code at git-commit time using Z3 SMT solving",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
     "aglc": "./dist/index.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "scripts": {
     "build": "tsup",
@@ -14,10 +17,34 @@
     "dev": "tsx src/index.ts",
     "prepublishOnly": "npm run build && npm test"
   },
-  "keywords": ["architecture", "compiler", "z3", "smt", "devtools", "agents"],
+  "keywords": [
+    "architecture",
+    "compiler",
+    "z3",
+    "smt",
+    "devtools",
+    "agents",
+    "guardrails",
+    "git-hook",
+    "static-analysis",
+    "architecture-as-code"
+  ],
   "author": "aglang contributors",
   "license": "ISC",
-  "files": ["dist", "stdlib", "README.md", "LICENSE"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/aglang"
+  },
+  "homepage": "https://github.com/your-org/aglang#readme",
+  "bugs": {
+    "url": "https://github.com/your-org/aglang/issues"
+  },
+  "files": [
+    "dist",
+    "stdlib",
+    "README.md",
+    "LICENSE"
+  ],
   "devDependencies": {
     "@types/node": "^25.9.0",
     "tsup": "^8.5.1",
