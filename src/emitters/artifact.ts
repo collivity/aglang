@@ -1,7 +1,14 @@
 // Emits the compiled architecture.o artifact
-import type { Program, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, NodeDecl, StateMachineDecl, PermissionDecl, ContractDecl } from '../ast.ts';
+import type { Program } from '../ast.ts';
 import { translate } from '../smt/translator.ts';
 import { writeFileSync } from 'fs';
+
+export type ArtifactEndpoint =
+  | { kind: 'http'; method: string; path: string; returnType?: string }
+  | { kind: 'graphql'; operation: string; operationName: string; inputTypes?: string[]; returnType?: string }
+  | { kind: 'grpc'; rpcName: string; inputMessage: string; outputMessage: string }
+  | { kind: 'queue_publish'; topic: string }
+  | { kind: 'queue_subscribe'; topic: string };
 
 export interface ArchitectureArtifact {
   schemaVersion: number;
@@ -40,7 +47,7 @@ export interface ArchitectureArtifact {
   // API contracts declared in the spec
   contracts: Array<{
     name: string;
-    endpoints: Array<{ method: string; path: string; returnType?: string }>;
+    endpoints: ArtifactEndpoint[];
   }>;
   // Which components implement or consume which contracts
   componentContracts: Array<{
@@ -127,11 +134,19 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
     if (decl.kind === 'ContractDecl') {
       contracts.push({
         name: decl.name,
-        endpoints: decl.endpoints.map(e => ({
-          method: e.method,
-          path: e.path,
-          ...(e.returnType ? { returnType: e.returnType } : {}),
-        })),
+        endpoints: decl.endpoints.map(ep => {
+          if (ep.kind === 'http') {
+            return { kind: 'http' as const, method: ep.method, path: ep.path, ...(ep.returnType ? { returnType: ep.returnType } : {}) };
+          } else if (ep.kind === 'graphql') {
+            return { kind: 'graphql' as const, operation: ep.operation, operationName: ep.operationName, ...(ep.inputTypes?.length ? { inputTypes: ep.inputTypes } : {}), ...(ep.returnType ? { returnType: ep.returnType } : {}) };
+          } else if (ep.kind === 'grpc') {
+            return { kind: 'grpc' as const, rpcName: ep.rpcName, inputMessage: ep.inputMessage, outputMessage: ep.outputMessage };
+          } else if (ep.kind === 'queue_publish') {
+            return { kind: 'queue_publish' as const, topic: ep.topic };
+          } else {
+            return { kind: 'queue_subscribe' as const, topic: ep.topic };
+          }
+        }),
       });
     }
     if (decl.kind === 'PluginDecl') {
@@ -142,7 +157,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   }
 
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     sourcePath,
     constraints,
     mappings,
@@ -160,4 +175,20 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
 
 export function writeArtifact(artifact: ArchitectureArtifact, outPath: string): void {
   writeFileSync(outPath, JSON.stringify(artifact, null, 2), 'utf8');
+}
+
+export function loadArtifact(json: string): ArchitectureArtifact {
+  const raw = JSON.parse(json) as Record<string, unknown>;
+  const contracts = raw.contracts as Array<{ name: string; endpoints: unknown[] }> | undefined;
+  if (Array.isArray(contracts)) {
+    for (const c of contracts) {
+      if (Array.isArray(c.endpoints)) {
+        c.endpoints = c.endpoints.map((ep: unknown) => {
+          const e = ep as Record<string, unknown>;
+          return e.kind ? e : { kind: 'http', ...e };
+        });
+      }
+    }
+  }
+  return raw as unknown as ArchitectureArtifact;
 }

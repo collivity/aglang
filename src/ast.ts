@@ -111,11 +111,12 @@ export interface PermissionDecl {
   rules: PermissionRule[];
 }
 
-export interface ContractEndpoint {
-  method: string;       // 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
-  path: string;         // e.g. "/api/products/{productId}/capture-sessions"
-  returnType?: string;  // e.g. "CaptureSessionDto[]" (advisory)
-}
+export type ContractEndpoint =
+  | { kind: 'http'; method: string; path: string; returnType?: string }
+  | { kind: 'graphql'; operation: 'query' | 'mutation' | 'subscription'; operationName: string; inputTypes?: string[]; returnType?: string }
+  | { kind: 'grpc'; rpcName: string; inputMessage: string; outputMessage: string }
+  | { kind: 'queue_publish'; topic: string }
+  | { kind: 'queue_subscribe'; topic: string };
 
 export interface ContractDecl {
   kind: 'ContractDecl';

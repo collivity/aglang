@@ -196,8 +196,18 @@ export function emitAgentsMarkdown(artifact: ArchitectureArtifact): string {
       lines.push(`| Method | Route | Return Type |`);
       lines.push(`|--------|-------|-------------|`);
       for (const ep of contract.endpoints) {
-        const returnType = ep.returnType ?? '—';
-        lines.push(`| \`${ep.method}\` | \`${ep.path}\` | \`${returnType}\` |`);
+        if (ep.kind === 'http') {
+          lines.push(`| \`${ep.method}\` | \`${ep.path}\` | \`${ep.returnType ?? '—'}\` |`);
+        } else if (ep.kind === 'graphql') {
+          const args = ep.inputTypes?.length ? `(${ep.inputTypes.join(', ')})` : '';
+          lines.push(`| \`${ep.operation}\` | \`${ep.operationName}${args}\` | \`${ep.returnType ?? '—'}\` |`);
+        } else if (ep.kind === 'grpc') {
+          lines.push(`| \`rpc\` | \`${ep.rpcName}(${ep.inputMessage}) → ${ep.outputMessage}\` | — |`);
+        } else if (ep.kind === 'queue_publish') {
+          lines.push(`| publishes | \`${ep.topic}\` | — |`);
+        } else if (ep.kind === 'queue_subscribe') {
+          lines.push(`| subscribes | \`${ep.topic}\` | — |`);
+        }
       }
       lines.push('');
     }

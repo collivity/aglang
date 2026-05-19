@@ -4,7 +4,7 @@
 import { readdirSync, readFileSync } from 'fs';
 import { resolve, join } from 'path';
 import micromatch from 'micromatch';
-import type { ArchitectureArtifact } from '../emitters/artifact.ts';
+import type { ArchitectureArtifact, ArtifactEndpoint } from '../emitters/artifact.ts';
 import { normalizeRoute, extractRoutesFromTypeScript, type RouteFact } from '../analyzers/typescript.ts';
 import { extractRoutesFromCSharp } from '../analyzers/csharp.ts';
 import { extractRoutesFromPython } from '../analyzers/python.ts';
@@ -146,10 +146,11 @@ export function runContractGate(
   const contractsByName = new Map(artifact.contracts.map(c => [c.name, c]));
 
   // Build normalized endpoint set per contract: `METHOD normalized-path` → endpoint
-  const contractEndpointIndex = new Map<string, Map<string, { method: string; path: string; returnType?: string }>>();
+  const contractEndpointIndex = new Map<string, Map<string, Extract<ArtifactEndpoint, { kind: 'http' }>>>();
   for (const contract of artifact.contracts) {
-    const index = new Map<string, { method: string; path: string; returnType?: string }>();
+    const index = new Map<string, Extract<ArtifactEndpoint, { kind: 'http' }>>();
     for (const ep of contract.endpoints) {
+      if (ep.kind !== 'http') continue;
       const key = `${ep.method} ${normalizeContractPath(ep.path)}`;
       index.set(key, ep);
     }
@@ -220,6 +221,7 @@ export function runContractGate(
           const contract = contractsByName.get(contractName);
           if (!contract) continue;
           for (const ep of contract.endpoints) {
+            if (ep.kind !== 'http') continue;
             const key = `${ep.method} ${normalizeContractPath(ep.path)}`;
             if (!allNormalized.has(key)) {
               violations.push({

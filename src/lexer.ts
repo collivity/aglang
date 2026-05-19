@@ -26,7 +26,7 @@ const KEYWORDS = new Set([
   // State machine + permission keywords
   'machine', 'permission', 'transition', 'when',
   // Contract block
-  'contract',
+  'contract', 'query', 'mutation', 'subscription', 'rpc', 'publishes', 'subscribes',
   // External extractor plugin declaration
   'plugin',
 ]);

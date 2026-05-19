@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'fs';
 import { resolve, dirname, basename } from 'path';
 import { check } from './checker.ts';
-import { emitArtifact, writeArtifact } from './emitters/artifact.ts';
+import { emitArtifact, writeArtifact, loadArtifact } from './emitters/artifact.ts';
 import { emitAgentsMarkdown } from './emitters/agents.ts';
 import { emitSkillManifest, writeSkillManifest } from './emitters/skill.ts';
 import { loadAndMerge, ImportError } from './importer.ts';
@@ -36,6 +36,8 @@ Commands:
   aglc install [--project <dir>] [--arch <arch.o>]   Install pre-commit git hook
   aglc check --arch <arch.o> --project <dir> [--json] Check staged git diff vs architecture
   aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt]  Analyze a specific file
+  aglc import-openapi <swagger.json> [--out <file.ag>]    Import OpenAPI 3.x spec → .ag contracts
+  aglc import-tf <main.tf> [--out <file.ag>]             Import Terraform → .ag node declarations
 
 Flags:
   --json      Output machine-readable JSON to stdout; progress logs go to stderr
@@ -157,7 +159,7 @@ function emitContext(archPath: string, outPath: string) {
     process.exit(1);
   }
 
-  const artifact: ArchitectureArtifact = JSON.parse(readFileSync(archPath, 'utf8'));
+  const artifact: ArchitectureArtifact = loadArtifact(readFileSync(archPath, 'utf8'));
   const md = emitAgentsMarkdown(artifact);
   writeFileSync(outPath, md, 'utf8');
   log(`✓ Emitted context → ${outPath}`);
@@ -175,7 +177,7 @@ function emitSkill(archPath: string, outPath: string) {
     process.exit(1);
   }
 
-  const artifact: ArchitectureArtifact = JSON.parse(readFileSync(archPath, 'utf8'));
+  const artifact: ArchitectureArtifact = loadArtifact(readFileSync(archPath, 'utf8'));
   const manifest = emitSkillManifest(artifact, archPath);
   writeSkillManifest(manifest, outPath);
   log(`✓ Emitted skill manifest → ${outPath}`);
@@ -192,7 +194,7 @@ async function checkDiff(archPath: string, projectRoot: string) {
     process.exit(1);
   }
 
-  const artifact: ArchitectureArtifact = JSON.parse(readFileSync(archPath, 'utf8'));
+  const artifact: ArchitectureArtifact = loadArtifact(readFileSync(archPath, 'utf8'));
   const absProject = resolve(projectRoot);
 
   log(`[aglc] Parsing git diff in ${absProject}...`);
@@ -274,7 +276,7 @@ async function checkFile(archPath: string, filePath: string) {
   }
 
   const dumpSmt = args.includes('--dump-smt');
-  const artifact: ArchitectureArtifact = JSON.parse(readFileSync(archPath, 'utf8'));
+  const artifact: ArchitectureArtifact = loadArtifact(readFileSync(archPath, 'utf8'));
   const absFile = resolve(filePath);
 
   // Find which component this file belongs to
@@ -377,6 +379,48 @@ async function checkFile(archPath: string, filePath: string) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// IMPORT-OPENAPI
+// ─────────────────────────────────────────────────────────────
+async function importOpenApiCmd(specPath: string, outPath: string | undefined) {
+  const { importOpenApi } = await import('./import-openapi.ts');
+  const { readFileSync, writeFileSync } = await import('fs');
+  if (!existsSync(specPath)) {
+    logErr(`Error: file not found: ${specPath}`);
+    process.exit(1);
+  }
+  const json = readFileSync(specPath, 'utf8');
+  const result = importOpenApi(json);
+  if (outPath) {
+    writeFileSync(outPath, result.ag, 'utf8');
+    log(`✓ Imported OpenAPI spec → ${outPath}`);
+  } else {
+    process.stdout.write(result.ag);
+  }
+  log(`  Contracts: ${result.contracts}, Endpoints: ${result.endpoints}, Data types: ${result.dataTypes}`);
+}
+
+// ─────────────────────────────────────────────────────────────
+// IMPORT-TF
+// ─────────────────────────────────────────────────────────────
+async function importTfCmd(hclPath: string, outPath: string | undefined) {
+  const { importTerraform } = await import('./import-tf.ts');
+  const { readFileSync, writeFileSync } = await import('fs');
+  if (!existsSync(hclPath)) {
+    logErr(`Error: file not found: ${hclPath}`);
+    process.exit(1);
+  }
+  const hcl = readFileSync(hclPath, 'utf8');
+  const result = importTerraform(hcl);
+  if (outPath) {
+    writeFileSync(outPath, result.ag, 'utf8');
+    log(`✓ Imported Terraform → ${outPath}`);
+  } else {
+    process.stdout.write(result.ag);
+  }
+  log(`  Nodes imported: ${result.nodes}, Resource types skipped (unmapped): ${result.skipped}`);
+}
+
+// ─────────────────────────────────────────────────────────────
 // Main dispatch
 // ─────────────────────────────────────────────────────────────
 function getArg(flag: string): string | undefined {
@@ -415,6 +459,18 @@ function getArg(flag: string): string | undefined {
     const filePath = getArg('--file');
     if (!filePath) usage();
     await checkFile(archPath, filePath!);
+
+  } else if (command === 'import-openapi') {
+    const specPath = args[1];
+    if (!specPath) usage();
+    const outPath = getArg('--out');
+    await importOpenApiCmd(specPath!, outPath);
+
+  } else if (command === 'import-tf') {
+    const hclPath = args[1];
+    if (!hclPath) usage();
+    const outPath = getArg('--out');
+    await importTfCmd(hclPath!, outPath);
 
   } else {
     usage();

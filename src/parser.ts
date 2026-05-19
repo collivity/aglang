@@ -350,36 +350,83 @@ export function parse(tokens: Token[]): Program {
 
   // HTTP methods that may appear as endpoints in contract blocks
   const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']);
+  const CONTRACT_STARTERS = new Set(['query', 'mutation', 'subscription', 'rpc', 'publishes', 'subscribes']);
 
-  // Collect return type tokens (IDENT, LT, GT, LBRACKET, RBRACKET) until next endpoint or '}'
   function parseReturnType(): string {
     const parts: string[] = [];
-    while (!match('RBRACE') && !eof()) {
+    while (!match('RBRACE') && !match('SEMICOLON') && !eof()) {
       const t = peek();
       if (t.kind === 'IDENT' && HTTP_METHODS.has(t.value)) break;
+      if (t.kind === 'KEYWORD' && CONTRACT_STARTERS.has(t.value)) break;
       parts.push(advance().value);
     }
     return parts.join('').trim();
   }
 
-  // contract NAME { GET "/path" -> ReturnType  POST "/path" -> ReturnType }
   function parseContractDecl(): ContractDecl {
     expect('KEYWORD', 'contract');
     const name = expect('IDENT').value;
     const endpoints: ContractEndpoint[] = [];
     expect('LBRACE');
     while (!match('RBRACE') && !eof()) {
-      const methodTok = advance();
-      if (!HTTP_METHODS.has(methodTok.value)) {
-        throw new ParseError(`expected HTTP method (GET, POST, PUT, DELETE, PATCH)`, methodTok);
+      const t = peek();
+
+      if (t.kind === 'IDENT' && HTTP_METHODS.has(t.value)) {
+        advance();
+        const path = expect('STRING').value;
+        let returnType: string | undefined;
+        if (consume('ARROW')) {
+          const rt = parseReturnType();
+          if (rt) returnType = rt;
+        }
+        endpoints.push({ kind: 'http', method: t.value, path, ...(returnType ? { returnType } : {}) });
+
+      } else if (t.kind === 'KEYWORD' && (t.value === 'query' || t.value === 'mutation' || t.value === 'subscription')) {
+        advance();
+        const operation = t.value as 'query' | 'mutation' | 'subscription';
+        const operationName = expect('IDENT').value;
+        const inputTypes: string[] = [];
+        if (consume('LPAREN')) {
+          while (!match('RPAREN') && !eof()) {
+            advance();
+            if (consume('COLON')) {
+              inputTypes.push(expectIdent().value);
+            }
+            consume('COMMA');
+          }
+          expect('RPAREN');
+        }
+        let returnType: string | undefined;
+        if (consume('ARROW')) {
+          const rt = parseReturnType();
+          if (rt) returnType = rt;
+        }
+        endpoints.push({
+          kind: 'graphql', operation, operationName,
+          ...(inputTypes.length > 0 ? { inputTypes } : {}),
+          ...(returnType ? { returnType } : {}),
+        });
+
+      } else if (t.kind === 'KEYWORD' && t.value === 'rpc') {
+        advance();
+        const rpcName = expect('IDENT').value;
+        expect('LPAREN');
+        const inputMessage = expect('IDENT').value;
+        expect('RPAREN');
+        expect('ARROW');
+        const outputMessage = expect('IDENT').value;
+        endpoints.push({ kind: 'grpc', rpcName, inputMessage, outputMessage });
+
+      } else if (t.kind === 'KEYWORD' && (t.value === 'publishes' || t.value === 'subscribes')) {
+        advance();
+        expect('COLON');
+        const topic = expect('STRING').value;
+        endpoints.push({ kind: t.value === 'publishes' ? 'queue_publish' : 'queue_subscribe', topic });
+
+      } else {
+        throw new ParseError('expected endpoint declaration (HTTP method, query, mutation, subscription, rpc, publishes, subscribes)', t);
       }
-      const path = expect('STRING').value;
-      let returnType: string | undefined;
-      if (consume('ARROW')) {
-        const rt = parseReturnType();
-        if (rt) returnType = rt;
-      }
-      endpoints.push({ method: methodTok.value, path, ...(returnType ? { returnType } : {}) });
+      consume('SEMICOLON');
     }
     expect('RBRACE');
     return { kind: 'ContractDecl', name, endpoints };
