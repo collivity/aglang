@@ -7,13 +7,28 @@ import type { ChangedComponent } from './diff-parser.ts';
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
 import type { ExtractorPlugin, FlowFact } from '../analyzers/plugin.ts';
 import { isBlocking, discoverPlugins } from '../analyzers/plugin.ts';
+import { resolveFactTargets } from '../analyzers/node-resolver.ts';
 import { csharpPlugin } from '../analyzers/csharp.ts';
 import { kotlinPlugin } from '../analyzers/kotlin.ts';
+import { pythonPlugin } from '../analyzers/python.ts';
+import { goPlugin } from '../analyzers/golang.ts';
+import { rustPlugin } from '../analyzers/rust.ts';
+import { javaPlugin, scalaPlugin } from '../analyzers/java.ts';
+import { typescriptServerPlugin } from '../analyzers/typescript-server.ts';
 
 export type { FlowFact };
 
 // Registry of built-in plugins (keyed by extension)
-const BUILT_IN_PLUGINS: ExtractorPlugin[] = [csharpPlugin, kotlinPlugin];
+const BUILT_IN_PLUGINS: ExtractorPlugin[] = [
+  csharpPlugin,
+  kotlinPlugin,
+  pythonPlugin,
+  goPlugin,
+  rustPlugin,
+  javaPlugin,
+  scalaPlugin,
+  typescriptServerPlugin,
+];
 
 function buildExtensionMap(plugins: ExtractorPlugin[]): Map<string, ExtractorPlugin> {
   const map = new Map<string, ExtractorPlugin>();
@@ -85,8 +100,11 @@ export async function generateDeltaAssertions(
     }
   }
 
-  const blockingFacts = uniqueFacts.filter(f => isBlocking(f, strict));
-  const warningFacts = uniqueFacts.filter(f => !isBlocking(f, strict) && f.confidence === 'probable');
+  // Resolve category-based target names (e.g. 'postgres') to actual declared node names
+  const resolvedFacts = resolveFactTargets(uniqueFacts, artifact.nodes);
+
+  const blockingFacts = resolvedFacts.filter(f => isBlocking(f, strict));
+  const warningFacts = resolvedFacts.filter(f => !isBlocking(f, strict) && f.confidence === 'probable');
 
   // Emit SMT-LIB assertions only for blocking facts (these go into the Z3 solver)
   const smtAssertions: string[] = ['; === delta assertions from changed files ==='];
@@ -101,5 +119,5 @@ export async function generateDeltaAssertions(
     factSmtMap.set(`${fact.from}::${fact.to}`, assertion);
   }
 
-  return { facts: uniqueFacts, blockingFacts, warningFacts, smtAssertions, factSmtMap };
+  return { facts: resolvedFacts, blockingFacts, warningFacts, smtAssertions, factSmtMap };
 }

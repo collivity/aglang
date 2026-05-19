@@ -11,14 +11,15 @@ export interface RouteFact {
 }
 
 // Normalize a route path to positional form:
-// - Replace named params {productId:guid} / {productId} / ${productId} with {}
+// - Replace named params {productId:guid} / {productId} / ${productId} / :paramName with {}
 // - Strip trailing slash, lowercase, collapse double slashes
 export function normalizeRoute(path: string): string {
   return path
-    .replace(/\$?\{[^}]+\}/g, '{}')        // ${productId}, {productId}, {productId:guid} → {}
+    .replace(/\$?\{[^}]+\}/g, '{}')    // ${productId}, {productId}, {productId:guid} → {}
+    .replace(/:([^/]+)/g, '{}')         // Express/Go/Rust :param → {}
     .toLowerCase()
-    .replace(/\/+/g, '/')                   // collapse double slashes
-    .replace(/\/$/, '');                    // strip trailing slash
+    .replace(/\/+/g, '/')               // collapse double slashes
+    .replace(/\/$/, '');                // strip trailing slash
 }
 
 // Extract route facts from TypeScript source content.

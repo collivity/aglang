@@ -7,6 +7,11 @@ import micromatch from 'micromatch';
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
 import { normalizeRoute, extractRoutesFromTypeScript, type RouteFact } from '../analyzers/typescript.ts';
 import { extractRoutesFromCSharp } from '../analyzers/csharp.ts';
+import { extractRoutesFromPython } from '../analyzers/python.ts';
+import { extractRoutesFromGo } from '../analyzers/golang.ts';
+import { extractRoutesFromRust } from '../analyzers/rust.ts';
+import { extractRoutesFromJava, extractRoutesFromScala } from '../analyzers/java.ts';
+import { extractServerRoutesFromTypeScript } from '../analyzers/typescript-server.ts';
 
 export interface ContractViolation {
   type: 'implements_undeclared' | 'consumes_undeclared' | 'consumes_method_mismatch';
@@ -57,8 +62,19 @@ function extractServerRoutes(filePaths: string[]): RouteFact[] {
     try { content = readFileSync(filePath, 'utf8'); } catch { continue; }
     if (filePath.endsWith('.cs') || filePath.endsWith('.csx')) {
       routes.push(...extractRoutesFromCSharp(content, filePath));
+    } else if (filePath.endsWith('.py') || filePath.endsWith('.pyw')) {
+      routes.push(...extractRoutesFromPython(content, filePath));
+    } else if (filePath.endsWith('.go')) {
+      routes.push(...extractRoutesFromGo(content, filePath));
+    } else if (filePath.endsWith('.rs')) {
+      routes.push(...extractRoutesFromRust(content, filePath));
+    } else if (filePath.endsWith('.java')) {
+      routes.push(...extractRoutesFromJava(content, filePath));
+    } else if (filePath.endsWith('.scala')) {
+      routes.push(...extractRoutesFromScala(content, filePath));
+    } else if (filePath.match(/\.[mc]?[tj]sx?$/)) {
+      routes.push(...extractServerRoutesFromTypeScript(content, filePath));
     }
-    // Future: add extractors for TypeScript (Express/Next.js), Go, Python
   }
   return routes;
 }
