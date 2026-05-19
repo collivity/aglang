@@ -12,6 +12,7 @@
   "engines": {
     "vscode": "^1.82.0"
   },
+  "icon": "icons/icon.png",
   "categories": ["Programming Languages", "Linters"],
   "keywords": ["aglang", "architecture", "smt", "z3", "guardrails"],
   "activationEvents": [],
