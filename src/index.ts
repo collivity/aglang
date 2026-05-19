@@ -31,15 +31,16 @@ function usage() {
 aglc — Architecture Ground Language Compiler
 
 Commands:
-  aglc compile <file.ag>                              Compile .ag spec → architecture.o
-  aglc generate [projectRoot] [--out <file.ag>]       Scan codebase → auto-generate starter .ag spec
-  aglc emit-context --arch <arch.o> [--out <path>]   Emit AGENTS.md for AI agents
-  aglc emit-skill   --arch <arch.o> [--out <path>]   Emit skill.json manifest for AI agents
-  aglc install [--project <dir>] [--arch <arch.o>]   Install pre-commit git hook
-  aglc check --arch <arch.o> --project <dir> [--json] Check staged git diff vs architecture
+  aglc add [projectRoot] [--name <n>] [--out <file.ag>]     One-shot agent setup: generate → compile → hook → skill.json
+  aglc compile <file.ag>                                     Compile .ag spec → architecture.o
+  aglc generate [projectRoot] [--out <file.ag>]             Scan codebase → auto-generate starter .ag spec
+  aglc emit-context --arch <arch.o> [--out <path>]          Emit AGENTS.md for AI agents
+  aglc emit-skill   --arch <arch.o> [--out <path>]          Emit skill.json manifest for AI agents
+  aglc install [--project <dir>] [--arch <arch.o>]          Install pre-commit git hook
+  aglc check --arch <arch.o> --project <dir> [--json]       Check staged git diff vs architecture
   aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt]  Analyze a specific file
-  aglc import-openapi <swagger.json> [--out <file.ag>]    Import OpenAPI 3.x spec → .ag contracts
-  aglc import-tf <main.tf> [--out <file.ag>]             Import Terraform → .ag node declarations
+  aglc import-openapi <swagger.json> [--out <file.ag>]       Import OpenAPI 3.x spec → .ag contracts
+  aglc import-tf <main.tf> [--out <file.ag>]                Import Terraform → .ag node declarations
 
 Flags:
   --json      Output machine-readable JSON to stdout; progress logs go to stderr
@@ -423,15 +424,99 @@ async function importTfCmd(hclPath: string, outPath: string | undefined) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Main dispatch
+// ADD (one-shot agent bootstrap)
 // ─────────────────────────────────────────────────────────────
+async function addProject(projectRoot: string, opts: { name?: string; out?: string }) {
+  const absProject = resolve(projectRoot);
+  if (!existsSync(absProject)) {
+    logErr(`Error: directory not found: ${absProject}`);
+    process.exit(1);
+  }
+
+  const agOut = opts.out ?? resolve(absProject, 'architecture.ag');
+  const archOut = resolve(dirname(agOut), 'architecture.o');
+  const skillOut = resolve(absProject, 'skill.json');
+
+  // 1. Generate starter .ag spec
+  log(`[aglc add] Scanning ${absProject} for project manifests...`);
+  const result = await generateSpec(absProject, { projectName: opts.name });
+
+  if (result.warnings.length > 0) {
+    for (const w of result.warnings) log(`  ⚠ ${w}`);
+  }
+
+  writeFileSync(agOut, result.ag, 'utf8');
+  log(`  ✓ Generated spec → ${agOut}`);
+  log(`    Components: ${result.components} | Infra nodes: ${result.infrastructureNodes} | Contracts: ${result.contracts}`);
+
+  // 2. Compile → architecture.o
+  log(`[aglc add] Compiling spec...`);
+  let ast;
+  try {
+    ast = loadAndMerge(agOut);
+  } catch (e) {
+    logErr(`\nParse error: ${(e as Error).message}`);
+    process.exit(1);
+  }
+
+  const errors = check(ast);
+  if (errors.length > 0) {
+    logErr('\nType check errors in generated spec (please report this as a bug):');
+    for (const e of errors) logErr(`  ✗ ${e.message}`);
+    process.exit(1);
+  }
+
+  const artifact = emitArtifact(ast, agOut);
+  writeArtifact(artifact, archOut);
+  log(`  ✓ Compiled → ${archOut}`);
+
+  // 3. Install pre-commit hook
+  log(`[aglc add] Installing git pre-commit hook...`);
+  const hasGit = existsSync(resolve(absProject, '.git'));
+  if (!hasGit) {
+    log(`  ⚠ No .git directory found in ${absProject} — skipping hook installation.`);
+    log(`    Run 'git init && aglc install --project . --arch ${archOut}' manually.`);
+  } else {
+    installHook(absProject, archOut);
+  }
+
+  // 4. Emit skill.json
+  const manifest = emitSkillManifest(artifact, archOut);
+  writeSkillManifest(manifest, skillOut);
+  log(`  ✓ Emitted skill manifest → ${skillOut}`);
+
+  // 5. Summary
+  console.log(`
+╔══════════════════════════════════════════════════════════╗
+║  aglang setup complete                                   ║
+╠══════════════════════════════════════════════════════════╣
+║  Spec:       ${agOut.padEnd(43)} ║
+║  Artifact:   ${archOut.padEnd(43)} ║
+║  Skill:      ${skillOut.padEnd(43)} ║
+╠══════════════════════════════════════════════════════════╣
+║  Next steps:                                             ║
+║  1. Open ${agOut.padEnd(47)} ║
+║     Add 'invariant' blocks to enforce architectural rules ║
+║  2. Re-compile after editing:                            ║
+║     aglc compile ${agOut.padEnd(39)} ║
+║  3. Every git commit is now checked automatically        ║
+╚══════════════════════════════════════════════════════════╝`);
+}
+
+
 function getArg(flag: string): string | undefined {
   const idx = args.indexOf(flag);
   return idx >= 0 ? args[idx + 1] : undefined;
 }
 
 (async () => {
-  if (command === 'compile') {
+  if (command === 'add') {
+    const projectRoot = args[1] && !args[1].startsWith('--') ? args[1] : '.';
+    const name = getArg('--name');
+    const out = getArg('--out');
+    await addProject(projectRoot, { name, out });
+
+  } else if (command === 'compile') {
     const agFile = args[1];
     if (!agFile) usage();
     await compile(agFile!);

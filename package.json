@@ -1,5 +1,5 @@
 {
-  "name": "aglang",
+  "name": "@collivity/aglang",
   "version": "0.1.0",
   "description": "Architecture Ground Language — dual-compiler system that enforces architectural rules against real code at git-commit time using Z3 SMT solving",
   "type": "module",
@@ -12,9 +12,13 @@
   },
   "scripts": {
     "build": "tsup",
+    "prepare": "npm run build",
     "start": "tsx src/index.ts",
     "test": "vitest run",
     "dev": "tsx src/index.ts",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
     "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [
@@ -35,7 +39,7 @@
     "type": "git",
     "url": "https://github.com/collivity/aglang"
   },
-  "homepage": "https://github.com/collivity/aglang#readme",
+  "homepage": "https://collivity.github.io/aglang",
   "bugs": {
     "url": "https://github.com/collivity/aglang/issues"
   },
@@ -50,6 +54,7 @@
     "tsup": "^8.5.1",
     "tsx": "^4.22.2",
     "typescript": "^6.0.3",
+    "vitepress": "^1.6.4",
     "vitest": "^4.1.6"
   },
   "dependencies": {

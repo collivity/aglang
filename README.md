@@ -42,14 +42,14 @@ Designed as an **agent-first guardrail**: `aglc generate` scans your codebase an
 ## Installation
 
 ```bash
-# Global install (recommended for the CLI)
-npm install -g aglang
+# Global install from npm registry
+npm install -g @collivity/aglang
 
-# Or run without installing
-npx aglc --help
+# Install directly from GitHub (public repo, no registry needed)
+npm install github:collivity/aglang
 
-# Or add to a project
-npm install --save-dev aglang
+# Run without installing
+npx @collivity/aglang --help
 ```
 
 ---
@@ -59,14 +59,12 @@ npm install --save-dev aglang
 ### Option A — Agent bootstrap (recommended for existing codebases)
 
 ```bash
-# 1. Scan your project and generate a starter spec
-aglc generate ./my-project --out my-project.ag --name MyProject
+# 1. Scan your project and generate a starter spec (one-shot setup)
+npx @collivity/aglang add ./my-project --name MyProject
 
-# 2. Review and add invariant rules to my-project.ag, then compile
-aglc compile my-project.ag
-
-# 3. Install the git hook in the implementation repo
-aglc install --project ./my-project --arch architecture.o
+# The add command runs: generate → compile → install git hook → emit skill.json
+# Review my-project/architecture.ag and add invariant rules, then re-run:
+aglc compile my-project/architecture.ag
 ```
 
 ### Option B — Write a spec by hand
