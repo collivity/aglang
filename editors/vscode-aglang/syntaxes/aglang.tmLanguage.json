@@ -1,0 +1,75 @@
+{
+  "name": "aglang",
+  "scopeName": "source.ag",
+  "fileTypes": ["ag"],
+  "patterns": [
+    { "include": "#comment-line" },
+    { "include": "#comment-block" },
+    { "include": "#http-method" },
+    { "include": "#keyword-control" },
+    { "include": "#keyword-declaration" },
+    { "include": "#unit-number" },
+    { "include": "#number" },
+    { "include": "#string" },
+    { "include": "#arrow" },
+    { "include": "#type-name" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comment-line": {
+      "match": "//.*$",
+      "name": "comment.line.double-slash.ag"
+    },
+    "comment-block": {
+      "begin": "/\\*",
+      "end": "\\*/",
+      "name": "comment.block.ag"
+    },
+    "keyword-declaration": {
+      "match": "\\b(component|node|data|enum|service|invariant|contract|machine|permission|plugin|test|transition)\\b",
+      "name": "keyword.declaration.ag"
+    },
+    "keyword-control": {
+      "match": "\\b(deny|allow|flow|require|encryption|runs_on|paths|trust|connectivity|latency|failure_mode|protocol|auth|rate_limit|where|no|every|some|assert|p99|p95|p50|degrade|never|eventual|always|when|query|mutation|subscription|rpc|publishes|subscribes|on)\\b",
+      "name": "keyword.control.ag"
+    },
+    "http-method": {
+      "match": "\\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\\b",
+      "name": "support.function.http-method.ag"
+    },
+    "unit-number": {
+      "match": "\\b(\\d+(\\.\\d+)?)(ms|s|rps|rpm|mb|gb|kb)\\b",
+      "captures": {
+        "1": { "name": "constant.numeric.ag" },
+        "3": { "name": "keyword.other.unit.ag" }
+      }
+    },
+    "number": {
+      "match": "\\b\\d+(\\.\\d+)?\\b",
+      "name": "constant.numeric.ag"
+    },
+    "string": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.ag",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.ag"
+        }
+      ]
+    },
+    "arrow": {
+      "match": "->",
+      "name": "keyword.operator.arrow.ag"
+    },
+    "type-name": {
+      "match": "\\b[A-Z][a-zA-Z0-9_]*\\b",
+      "name": "entity.name.type.ag"
+    },
+    "punctuation": {
+      "match": "[{}()\\[\\]:;,.|<>@*]",
+      "name": "punctuation.ag"
+    }
+  }
+}

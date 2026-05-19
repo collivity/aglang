@@ -1,0 +1,110 @@
+{
+  "name": "vscode-aglang",
+  "displayName": "aglang",
+  "description": "Language support for aglang (.ag) — architecture guardrails enforced via Z3 SMT solving",
+  "version": "0.1.0",
+  "publisher": "collivity",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/collivity/aglang"
+  },
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": ["Programming Languages", "Linters"],
+  "keywords": ["aglang", "architecture", "smt", "z3", "guardrails"],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "aglang",
+        "aliases": ["aglang", "ag"],
+        "extensions": [".ag"],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/file-icon-light.svg",
+          "dark": "./icons/file-icon-dark.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "aglang",
+        "scopeName": "source.ag",
+        "path": "./syntaxes/aglang.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "aglang",
+        "path": "./snippets/aglang.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "aglang.compile",
+        "title": "aglang: Compile architecture spec",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "aglang.check",
+        "title": "aglang: Check current file",
+        "icon": "$(check)"
+      },
+      {
+        "command": "aglang.generate",
+        "title": "aglang: Generate spec from project (aglc add)",
+        "icon": "$(wand)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "when": "resourceLangId == aglang",
+          "command": "aglang.compile",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "aglang",
+      "properties": {
+        "aglang.executablePath": {
+          "type": "string",
+          "default": "aglc",
+          "description": "Path to the aglc executable (default: 'aglc' on PATH)"
+        },
+        "aglang.validateOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Validate .ag files on save"
+        },
+        "aglang.validateOnType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Validate .ag files as you type (requires language server)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node && esbuild src/server.ts --bundle --outfile=dist/server.js --format=cjs --platform=node --resolve-extensions=.ts,.js",
+    "watch": "concurrently \"esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch\" \"esbuild src/server.ts --bundle --outfile=dist/server.js --format=cjs --platform=node --resolve-extensions=.ts,.js --watch\"",
+    "package": "vsce package --no-dependencies",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.11"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.82.0",
+    "@vscode/vsce": "^2.24.0",
+    "concurrently": "^8.2.0",
+    "esbuild": "^0.21.5"
+  }
+}

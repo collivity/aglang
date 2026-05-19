@@ -1,0 +1,90 @@
+{
+  "component": {
+    "prefix": "component",
+    "description": "Declare an architecture component",
+    "body": [
+      "component ${1:ComponentName} {",
+      "\tdirectory: \"${2:src/path/**}\"",
+      "}"
+    ]
+  },
+  "node": {
+    "prefix": "node",
+    "description": "Declare an infrastructure node",
+    "body": [
+      "node ${1:NodeName}(${2:database}) {",
+      "\tdirectory: \"${3:src/path/**}\"",
+      "}"
+    ]
+  },
+  "invariant-deny-flow": {
+    "prefix": "invariant",
+    "description": "Declare an architectural invariant with a deny-flow rule",
+    "body": [
+      "invariant ${1:RuleName} {",
+      "\tdeny flow ${2:Source} -> ${3:Target};",
+      "}"
+    ]
+  },
+  "invariant-require-encryption": {
+    "prefix": "invariant-encryption",
+    "description": "Require encryption on a flow",
+    "body": [
+      "invariant ${1:RuleName} {",
+      "\trequire encryption on flow ${2:Source} -> ${3:Target};",
+      "}"
+    ]
+  },
+  "flow": {
+    "prefix": "flow",
+    "description": "Declare an explicit allowed flow",
+    "body": [
+      "flow ${1:Source} -> ${2:Target}"
+    ]
+  },
+  "contract": {
+    "prefix": "contract",
+    "description": "Define an API contract block",
+    "body": [
+      "contract ${1:ServiceName} {",
+      "\tGET  /${2:resource}",
+      "\tPOST /${2:resource}",
+      "}"
+    ]
+  },
+  "machine": {
+    "prefix": "machine",
+    "description": "Define a state machine",
+    "body": [
+      "machine ${1:MachineName} {",
+      "\ttransition ${2:StateA} -> ${3:StateB} when ${4:event};",
+      "}"
+    ]
+  },
+  "permission": {
+    "prefix": "permission",
+    "description": "Define permission rules",
+    "body": [
+      "permission ${1:RoleName} {",
+      "\tallow ${2:Action} on ${3:Resource};",
+      "}"
+    ]
+  },
+  "plugin": {
+    "prefix": "plugin",
+    "description": "Declare an external extractor plugin",
+    "body": [
+      "plugin \"${1:package-name}\""
+    ]
+  },
+  "service": {
+    "prefix": "service",
+    "description": "Declare a service node",
+    "body": [
+      "service ${1:ServiceName} {",
+      "\tprotocol: \"${2:http}\"",
+      "\tlatency: ${3:200ms}",
+      "}"
+    ]
+  }
+}
