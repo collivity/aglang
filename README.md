@@ -376,7 +376,7 @@ Any npm package that exports `{ info(), extract(input) }` and responds to `--inf
 ## Development
 
 ```bash
-git clone https://github.com/your-org/aglang
+git clone https://github.com/collivity/aglang
 cd aglang
 npm install
 npm run build    # tsup → dist/index.js (~160KB, bundles z3-solver WASM)

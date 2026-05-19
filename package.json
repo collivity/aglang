@@ -33,11 +33,11 @@
   "license": "ISC",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-org/aglang"
+    "url": "https://github.com/collivity/aglang"
   },
-  "homepage": "https://github.com/your-org/aglang#readme",
+  "homepage": "https://github.com/collivity/aglang#readme",
   "bugs": {
-    "url": "https://github.com/your-org/aglang/issues"
+    "url": "https://github.com/collivity/aglang/issues"
   },
   "files": [
     "dist",
