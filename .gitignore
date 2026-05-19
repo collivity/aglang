@@ -7,3 +7,4 @@ examples/architecture.o
 examples/AGENTS.md
 examples/skill.json
 examples/debug.smt2
+.aglang-cache/

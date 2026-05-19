@@ -15,16 +15,16 @@ function compileSpec(source: string) {
 
 // ── Contract gate ─────────────────────────────────────────────
 describe('runContractGate', () => {
-  it('returns no violations when no contracts are declared', () => {
+  it('returns no violations when no contracts are declared', async () => {
     const artifact = compileSpec(`
       node n : server { trust: trusted }
       component Api { runs_on: n  paths: "src/**/*.cs" }
     `);
-    const result = runContractGate(artifact, []);
+    const result = await runContractGate(artifact, []);
     expect(result.violations).toHaveLength(0);
   });
 
-  it('passes when server implements exactly the contract routes', () => {
+  it('passes when server implements exactly the contract routes', async () => {
     // Write a temp C# controller file that matches the contract
     const tmpDir = join(tmpdir(), 'aglang-test-' + Date.now());
     mkdirSync(tmpDir, { recursive: true });
@@ -47,7 +47,7 @@ describe('runContractGate', () => {
       }
     `);
 
-    const result = runContractGate(artifact, [csFile]);
+    const result = await runContractGate(artifact, [csFile]);
     // No blocking violations — the route is implemented
     const blocking = result.violations.filter(v => v.severity === 'error');
     expect(blocking).toHaveLength(0);
@@ -55,7 +55,7 @@ describe('runContractGate', () => {
     rmSync(tmpDir, { recursive: true });
   });
 
-  it('detects undeclared routes (server implements unlisted route)', () => {
+  it('detects undeclared routes (server implements unlisted route)', async () => {
     const tmpDir = join(tmpdir(), 'aglang-test-' + Date.now());
     mkdirSync(tmpDir, { recursive: true });
     const csFile = join(tmpDir, 'Ctrl.cs');
@@ -77,7 +77,7 @@ describe('runContractGate', () => {
       }
     `);
 
-    const result = runContractGate(artifact, [csFile]);
+    const result = await runContractGate(artifact, [csFile]);
     // A DELETE /api/secret/{} route is not in the contract — expect a warning or violation
     // (spec says undeclared server routes are warnings, not blocking errors)
     const undeclared = result.violations.concat(result.warnings).filter(

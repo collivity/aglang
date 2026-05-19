@@ -215,7 +215,7 @@ async function checkDiff(archPath: string, projectRoot: string) {
 
   // Run contract gate for all changed files (with completeness check since we have projectRoot)
   const allChangedFiles = changed.flatMap(c => c.files);
-  const contractResult = runContractGate(artifact, allChangedFiles, {
+  const contractResult = await runContractGate(artifact, allChangedFiles, {
     projectRoot: absProject,
     checkCompleteness: true,
   });
@@ -318,7 +318,7 @@ async function checkFile(archPath: string, filePath: string) {
   );
 
   // Run contract gate (if any contracts are declared)
-  const contractResult = runContractGate(artifact, [absFile]);
+  const contractResult = await runContractGate(artifact, [absFile]);
   if (contractResult.violations.length > 0 || contractResult.warnings.length > 0) {
     log(`[aglc] Contract check: ${contractResult.violations.length} violation(s), ${contractResult.warnings.length} warning(s)`);
   }
