@@ -25,6 +25,12 @@ const CATEGORY_TYPE_MAP: Record<string, string[]> = {
   cassandra:      ['cassandra'],
   neo4j:          ['neo4j', 'neptune', 'graph_db'],
   vector_db:      ['vector_db', 'pinecone', 'weaviate'],
+  // Swift / iOS specific
+  firebase:       ['firebase', 'firestore', 'firebase_rtdb', 'firebase_auth', 'firebase_storage'],
+  cloudkit:       ['cloudkit', 'icloud'],
+  local_store:    ['local_store', 'coredata', 'realm', 'sqlite', 'shared_preferences'],
+  graphql_api:    ['graphql_api', 'graphql_server', 'hasura', 'appsync'],
+  grpc_api:       ['grpc_service', 'grpc_api'],
 };
 
 /**

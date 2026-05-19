@@ -12,6 +12,7 @@ import { extractRoutesFromGo } from '../analyzers/golang.ts';
 import { extractRoutesFromRust } from '../analyzers/rust.ts';
 import { extractRoutesFromJava, extractRoutesFromScala } from '../analyzers/java.ts';
 import { extractServerRoutesFromTypeScript } from '../analyzers/typescript-server.ts';
+import { extractRoutesFromSwift } from '../analyzers/swift.ts';
 
 export interface ContractViolation {
   type: 'implements_undeclared' | 'consumes_undeclared' | 'consumes_method_mismatch';
@@ -74,6 +75,8 @@ function extractServerRoutes(filePaths: string[]): RouteFact[] {
       routes.push(...extractRoutesFromScala(content, filePath));
     } else if (filePath.match(/\.[mc]?[tj]sx?$/)) {
       routes.push(...extractServerRoutesFromTypeScript(content, filePath));
+    } else if (filePath.endsWith('.swift')) {
+      routes.push(...extractRoutesFromSwift(content, filePath));
     }
   }
   return routes;

@@ -15,6 +15,7 @@ import { goPlugin } from '../analyzers/golang.ts';
 import { rustPlugin } from '../analyzers/rust.ts';
 import { javaPlugin, scalaPlugin } from '../analyzers/java.ts';
 import { typescriptServerPlugin } from '../analyzers/typescript-server.ts';
+import { swiftPlugin } from '../analyzers/swift.ts';
 
 export type { FlowFact };
 
@@ -28,6 +29,7 @@ const BUILT_IN_PLUGINS: ExtractorPlugin[] = [
   javaPlugin,
   scalaPlugin,
   typescriptServerPlugin,
+  swiftPlugin,
 ];
 
 function buildExtensionMap(plugins: ExtractorPlugin[]): Map<string, ExtractorPlugin> {
