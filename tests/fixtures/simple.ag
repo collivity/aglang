@@ -1,0 +1,33 @@
+// Simple spec used for lexer/parser/checker tests
+node web : edge_desktop {
+  trust: untrusted
+}
+
+node backend : server {
+  trust: trusted
+  protocol: https
+}
+
+node db : postgres {
+  trust: trusted
+}
+
+component Frontend {
+  runs_on: web
+  paths: "src/frontend/**/*.ts"
+}
+
+component Api {
+  runs_on: backend
+  paths: "src/api/**/*.ts"
+}
+
+component Data {
+  runs_on: backend
+  paths: "src/data/**/*.ts"
+}
+
+invariant Layered {
+  deny flow Frontend -> db
+  deny flow Api -> db
+}

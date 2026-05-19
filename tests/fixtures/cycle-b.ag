@@ -1,0 +1,5 @@
+import "./cycle-a.ag"
+
+node cycle_other : server {
+  trust: trusted
+}

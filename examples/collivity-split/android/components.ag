@@ -1,0 +1,16 @@
+// android/components.ag — Kotlin/Android layer components and invariants
+
+component AndroidFeatures {
+  runs_on: android_client
+  paths:   "android/feature/**/*.kt"
+}
+
+component AndroidNetworkLayer {
+  runs_on: android_client
+  paths:   "android/core/network/**/*.kt"
+}
+
+invariant LayeredAndroid {
+  // Feature modules must go through core/network, not call backend directly
+  deny flow AndroidFeatures -> api_backend
+}

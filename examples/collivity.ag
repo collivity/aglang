@@ -1,0 +1,61 @@
+// collivity.ag — Architecture specification for the Collivity platform
+// Run: aglc compile collivity.ag → architecture.o
+
+// ── Topology ──────────────────────────────────────────────────────────────
+node android_client : edge_mobile(android) {
+  trust:        untrusted
+  connectivity: intermittent
+}
+
+node api_backend : cluster(k8s) {
+  trust:        trusted
+  connectivity: always_on
+}
+
+node postgres_db : relational_db {
+  trust: trusted
+}
+
+node object_store_s3 : object_store {
+  trust: trusted
+}
+
+// ── Components (path-mapped to real Collivity source files) ───────────────
+component AndroidFeatures {
+  runs_on: android_client
+  paths:   "android/feature/**/*.kt"
+}
+
+component AndroidNetworkLayer {
+  runs_on: android_client
+  paths:   "android/core/network/**/*.kt"
+}
+
+component ApiControllers {
+  runs_on: api_backend
+  paths:   "web/api/Controllers/**/*.cs"
+}
+
+component ApiServices {
+  runs_on: api_backend
+  paths:   "web/api/Services/**/*.cs"
+}
+
+component DataLayer {
+  runs_on: api_backend
+  paths:   "web/api/Data/**/*.cs"
+}
+
+// ── Invariants ──────────────────────────────────────────────────────────
+invariant LayeredBackend {
+  // Controllers must not directly inject ApplicationDbContext — must go through Services
+  deny flow ApiControllers -> postgres_db
+  // Controllers must not directly inject storage clients
+  deny flow ApiControllers -> object_store_s3
+}
+
+invariant LayeredAndroid {
+  // Feature modules must not call the backend via HttpClient directly
+  // They must go through core/network ApiService classes
+  deny flow AndroidFeatures -> api_backend
+}

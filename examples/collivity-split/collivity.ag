@@ -1,0 +1,6 @@
+// collivity.ag — root spec, imports all sub-specs
+// This is the only file you pass to: aglc compile collivity.ag
+
+import "./base/topology.ag"
+import "./backend/components.ag"
+import "./android/components.ag"

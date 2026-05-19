@@ -1,0 +1,33 @@
+{
+  "name": "aglang",
+  "version": "0.1.0",
+  "description": "Architecture Ground Language — Dual-Compiler System",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "aglc": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "start": "tsx src/index.ts",
+    "test": "vitest run",
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "keywords": ["architecture", "compiler", "z3", "smt", "devtools", "agents"],
+  "author": "aglang contributors",
+  "license": "ISC",
+  "files": ["dist", "stdlib", "README.md", "LICENSE"],
+  "devDependencies": {
+    "@types/node": "^25.9.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.22.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  },
+  "dependencies": {
+    "@types/micromatch": "^4.0.10",
+    "micromatch": "^4.0.8",
+    "z3-solver": "^4.16.0"
+  }
+}

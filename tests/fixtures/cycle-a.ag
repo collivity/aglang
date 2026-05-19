@@ -1,0 +1,6 @@
+// Actual circular import (A → cycle-b → cycle-a → cycle-b) — must throw
+import "./cycle-b.ag"
+
+node cycle_root : server {
+  trust: trusted
+}

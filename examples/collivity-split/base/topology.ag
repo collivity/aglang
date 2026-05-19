@@ -1,0 +1,31 @@
+// base/topology.ag — shared infrastructure nodes for Collivity
+// Imported by backend and android specs
+
+node android_client : edge_mobile(android) {
+  trust:        untrusted
+  connectivity: intermittent
+}
+
+node web_client : edge_desktop {
+  trust:        untrusted
+  connectivity: always_on
+}
+
+node api_backend : server {
+  trust:        trusted
+  connectivity: always_on
+  protocol:     https
+  auth:         jwt
+}
+
+node postgres_db : postgres {
+  trust: trusted
+}
+
+node cache : redis {
+  trust: trusted
+}
+
+node object_store : s3_bucket {
+  trust: trusted
+}

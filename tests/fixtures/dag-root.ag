@@ -1,0 +1,4 @@
+// Root spec that imports two sub-files — tests shared DAG (A→B→D, A→C→D pattern)
+import "./shared.ag"
+import "./child-a.ag"
+import "./child-b.ag"

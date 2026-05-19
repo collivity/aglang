@@ -1,0 +1,6 @@
+// Child A imports shared — tests that shared is resolved once without false cycle error
+import "./shared.ag"
+
+node node_a : edge_desktop {
+  trust: untrusted
+}

@@ -1,0 +1,4 @@
+// Shared declarations imported by both child-a.ag and child-b.ag
+node shared_node : server {
+  trust: trusted
+}

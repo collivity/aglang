@@ -1,0 +1,184 @@
+// examples/collivity-full.ag — full spec showcasing enums, data blocks, and imports
+
+import "./collivity-split/base/topology.ag"
+import "./collivity-split/backend/components.ag"
+import "./collivity-split/android/components.ag"
+
+// ─── Domain Enums ────────────────────────────────────────────
+enum VpsStatus {
+  Pending | Provisioning | Running | Stopped | Failed | Terminated
+}
+
+enum VpsRole {
+  Owner | Collaborator
+}
+
+enum VpsSubscriptionStatus {
+  Active | Suspended | Revoked
+}
+
+enum OrderStatus {
+  Created | Pending | Processing | Fulfilled | Cancelled | Refunded
+}
+
+enum UserRole {
+  Guest | Member | Admin | SuperAdmin
+}
+
+enum PaymentStatus {
+  Initiated | Authorized | Captured | Failed | Refunded | Disputed
+}
+
+// ─── Data Contracts ──────────────────────────────────────────
+data VpsInstance {
+  id:         UUID
+  owner_id:   UUID
+  status:     VpsStatus
+  region:     String
+  plan_name:  String
+  cpu_count:  Int
+  ram_mb:     Int
+  disk_gb:    Int
+  created_at: Timestamp
+  deleted_at: Optional<Timestamp>
+}
+
+// VpsSubscription — records that a user has purchased product access to a shared VPS instance.
+// Access to a VpsInstance MUST be validated against an Active VpsSubscription.
+data VpsSubscription {
+  id:         UUID
+  vps_id:     UUID
+  user_id:    UUID
+  role:       VpsRole
+  status:     VpsSubscriptionStatus
+  granted_at: Timestamp
+  revoked_at: Optional<Timestamp>
+}
+
+data Order {
+  id:         UUID
+  customer_id: UUID
+  status:     OrderStatus
+  total:      Money
+  line_items: List<OrderLineItem>
+  created_at: Timestamp
+}
+
+data OrderLineItem {
+  product_id: UUID
+  quantity:   Int
+  unit_price: Money
+}
+
+data User {
+  id:       UUID
+  email:    String
+  role:     UserRole
+  name:     String
+  joined_at: Timestamp
+}
+
+data Payment {
+  id:         UUID
+  order_id:   UUID
+  status:     PaymentStatus
+  amount:     Money
+  provider:   String
+  created_at: Timestamp
+}
+
+// ─── State Machines ──────────────────────────────────────────
+// Define valid state transitions for each status field.
+// Agents: do NOT write code that performs unlisted transitions.
+
+machine OrderLifecycle on Order.status {
+  allow transition Created -> Pending
+  allow transition Pending -> Processing
+  allow transition Processing -> Fulfilled
+  allow transition Processing -> Cancelled
+  allow transition Fulfilled -> Refunded
+  deny transition Created -> Fulfilled      // must go through Processing
+  deny transition Pending -> Fulfilled      // must go through Processing
+  deny transition Cancelled -> *            // terminal state
+  deny transition Refunded -> *             // terminal state
+}
+
+machine VpsLifecycle on VpsInstance.status {
+  allow transition Pending -> Provisioning
+  allow transition Provisioning -> Running
+  allow transition Provisioning -> Failed
+  allow transition Running -> Stopped
+  allow transition Stopped -> Running
+  allow transition Running -> Terminated
+  allow transition Stopped -> Terminated
+  deny transition Terminated -> *           // terminal state
+  deny transition Failed -> Running         // must reprovision
+}
+
+machine VpsSubscriptionLifecycle on VpsSubscription.status {
+  allow transition Active -> Suspended      // product suspended (e.g. payment failed)
+  allow transition Suspended -> Active      // payment recovered
+  allow transition Active -> Revoked        // explicitly revoked by admin or user
+  allow transition Suspended -> Revoked     // revoke while suspended
+  deny transition Revoked -> *              // terminal — must create a new subscription
+}
+
+machine PaymentLifecycle on Payment.status {
+  allow transition Initiated -> Authorized
+  allow transition Authorized -> Captured
+  allow transition Authorized -> Failed
+  allow transition Captured -> Refunded
+  allow transition Captured -> Disputed
+  deny transition Failed -> *               // terminal state
+  deny transition Initiated -> Captured     // must authorize first
+}
+
+// ─── Permission Rules ────────────────────────────────────────
+// Role-based access control rules for domain objects.
+// Agents: implement all auth checks to match these rules exactly.
+
+permission VpsAccess on VpsInstance {
+  allow UserRole.Admin    -> read | write | delete
+  allow UserRole.Member   -> read | write when owner_id    // owner has full access
+  allow UserRole.Member   -> read | write when id          // collaborator access — MUST verify Active VpsSubscription for this user+vps_id
+  deny  UserRole.Guest    -> *
+}
+
+// VpsSubscriptionAccess — controls who can manage subscriptions (product-access grants).
+// Only Admins can grant/revoke. Members can only view their own subscriptions.
+permission VpsSubscriptionAccess on VpsSubscription {
+  allow UserRole.Admin    -> read | write | delete
+  allow UserRole.Member   -> read when user_id             // can see own subscriptions
+  deny  UserRole.Member   -> write                         // cannot self-grant access
+  deny  UserRole.Guest    -> *
+}
+
+permission OrderAccess on Order {
+  allow UserRole.Admin    -> read | write | delete
+  allow UserRole.Member   -> read | write when customer_id
+  deny  UserRole.Guest    -> *
+}
+
+permission PaymentAccess on Payment {
+  allow UserRole.Admin    -> read | write
+  allow UserRole.Member   -> read when order_id
+  deny  UserRole.Guest    -> *
+}
+
+// ─── API Contracts ───────────────────────────────────────────
+// Contracts define the expected HTTP endpoints between components.
+// The `implements` side (controllers) must expose exactly these routes.
+// The `consumes` side (frontend) must call only these declared routes.
+
+contract CaptureSessionsApi {
+  GET  "/api/products/{productId}/capture-sessions"    -> CaptureSessionDto[]
+  POST "/api/products/{productId}/capture-sessions"    -> CaptureSessionDto
+}
+
+// CreatorUi — the React/TypeScript frontend served to web browsers.
+// It consumes the CaptureSessionsApi contract (validated at commit time).
+component CreatorUi {
+  runs_on: web_client
+  paths:   "creator-ui/src/**/*.ts"
+  consumes: CaptureSessionsApi
+}

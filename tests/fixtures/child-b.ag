@@ -1,0 +1,6 @@
+// Child B also imports shared — tests the DAG (not a cycle)
+import "./shared.ag"
+
+node node_b : edge_mobile {
+  trust: untrusted
+}

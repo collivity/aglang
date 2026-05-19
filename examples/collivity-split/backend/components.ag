@@ -1,0 +1,36 @@
+// backend/components.ag — .NET API layer components and invariants
+
+component ApiControllers {
+  runs_on: api_backend
+  paths:   "web/api/Controllers/**/*.cs"
+  implements: CaptureSessionsApi
+}
+
+component ApiServices {
+  runs_on: api_backend
+  paths:   "web/api/Services/**/*.cs"
+}
+
+component DataLayer {
+  runs_on: api_backend
+  paths:   "web/api/Data/**/*.cs"
+}
+
+component VpsSessionService {
+  runs_on: api_backend
+  paths:   "web/api/Services/Vps/**/*.cs"
+}
+
+invariant LayeredBackend {
+  // Controllers must go through Services, never directly to data stores
+  deny flow ApiControllers -> postgres_db
+  deny flow ApiControllers -> cache
+  deny flow ApiControllers -> object_store
+}
+
+invariant VpsSessionAccess {
+  // VPS session data must ONLY be accessed via VpsSessionService (in ApiServices).
+  // DataLayer must never be invoked from a VPS controller directly.
+  // The subscription/product-access check lives in VpsSessionService.
+  deny flow VpsSessionService -> postgres_db
+}

@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "sourcePath": "C:\\Users\\pante\\Codespaces\\aglang\\examples\\collivity-split\\collivity.ag",
+  "constraints": [
+    "; === aglang base sorts ===",
+    "(declare-sort Entity 0)",
+    "(declare-fun Flow      (Entity Entity) Bool)",
+    "(declare-fun Encrypted (Entity Entity) Bool)",
+    "(declare-fun Trusted   (Entity) Bool)",
+    "(declare-fun IsNode    (Entity) Bool)",
+    "(declare-fun IsComp    (Entity) Bool)",
+    "",
+    "; === node declarations ===",
+    "(declare-const android_client Entity)",
+    "(assert (IsNode android_client))",
+    "(assert (= (Trusted android_client) false))",
+    "(declare-const web_client Entity)",
+    "(assert (IsNode web_client))",
+    "(assert (= (Trusted web_client) false))",
+    "(declare-const api_backend Entity)",
+    "(assert (IsNode api_backend))",
+    "(assert (= (Trusted api_backend) true))",
+    "(declare-const postgres_db Entity)",
+    "(assert (IsNode postgres_db))",
+    "(assert (= (Trusted postgres_db) true))",
+    "(declare-const cache Entity)",
+    "(assert (IsNode cache))",
+    "(assert (= (Trusted cache) true))",
+    "(declare-const object_store Entity)",
+    "(assert (IsNode object_store))",
+    "(assert (= (Trusted object_store) true))",
+    "",
+    "; === component declarations ===",
+    "(declare-const ApiControllers Entity)",
+    "(assert (IsComp ApiControllers))",
+    "(declare-const ApiServices Entity)",
+    "(assert (IsComp ApiServices))",
+    "(declare-const DataLayer Entity)",
+    "(assert (IsComp DataLayer))",
+    "(declare-const AndroidFeatures Entity)",
+    "(assert (IsComp AndroidFeatures))",
+    "(declare-const AndroidNetworkLayer Entity)",
+    "(assert (IsComp AndroidNetworkLayer))",
+    "",
+    "; === invariant rules ===",
+    "; --- LayeredBackend ---",
+    "(assert (=> (Flow ApiControllers postgres_db) false))",
+    "(assert (=> (Flow ApiControllers cache) false))",
+    "(assert (=> (Flow ApiControllers object_store) false))",
+    "; --- LayeredAndroid ---",
+    "(assert (=> (Flow AndroidFeatures api_backend) false))",
+    ""
+  ],
+  "mappings": {
+    "ApiControllers": "web/api/Controllers/**/*.cs",
+    "ApiServices": "web/api/Services/**/*.cs",
+    "DataLayer": "web/api/Data/**/*.cs",
+    "AndroidFeatures": "android/feature/**/*.kt",
+    "AndroidNetworkLayer": "android/core/network/**/*.kt"
+  },
+  "invariants": [
+    {
+      "name": "LayeredBackend",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "ApiControllers",
+          "to": "postgres_db"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "ApiControllers",
+          "to": "cache"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "ApiControllers",
+          "to": "object_store"
+        }
+      ]
+    },
+    {
+      "name": "LayeredAndroid",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "AndroidFeatures",
+          "to": "api_backend"
+        }
+      ]
+    }
+  ]
+}
