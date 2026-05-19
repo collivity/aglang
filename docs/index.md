@@ -13,6 +13,9 @@ hero:
       text: Get Started →
       link: /guide/getting-started
     - theme: alt
+      text: How it works
+      link: /how-it-works
+    - theme: alt
       text: View on GitHub
       link: https://github.com/collivity/aglang
 
@@ -55,3 +58,26 @@ aglc add /path/to/your/project
 ```
 
 Architecture spec, compiled artifact, git hook, and AI agent manifest — all set up automatically. [Full getting-started guide →](./guide/getting-started)
+
+---
+
+## How it works — at a glance
+
+aglang is a **Dual-Compiler System**. Your `.ag` spec compiles to SMT-LIB math formulas; every `git commit` triggers a second compiler that extracts what your changed code actually does and feeds it to Z3:
+
+```
+Your .ag spec                    Your codebase (git diff)
+      │                                    │
+      ▼                                    ▼
+[aglc compile]              [AST extractors — 8 languages]
+      │                                    │
+      ▼                                    ▼
+ architecture.o              FlowFact[]  (what code talks to what)
+(SMT constraints)                         │
+      │                                   │
+      └─────────────── Z3 Solver ─────────┘
+                             │
+                    UNSAT → pass ✓  │  SAT → reject with proof ✗
+```
+
+Z3 is deterministic math — there are no heuristics, no LLM guesses, and no false negatives. [Full pipeline walkthrough →](./how-it-works)

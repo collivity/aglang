@@ -11,6 +11,7 @@ export default defineConfig({
 
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
+      { text: 'How it works', link: '/how-it-works' },
       { text: 'CLI Reference', link: '/cli/reference' },
       { text: 'Extractors', link: '/extractors' },
       { text: 'Agents', link: '/agents' },
@@ -23,6 +24,7 @@ export default defineConfig({
         items: [
           { text: 'What is aglang?', link: '/guide/getting-started' },
           { text: 'Quick Setup (aglc add)', link: '/guide/generate' },
+          { text: 'How it works →', link: '/how-it-works' },
         ]
       },
       {
