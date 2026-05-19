@@ -38,6 +38,7 @@ export interface ComponentDecl {
   name: string;
   runsOn: string;   // references a NodeDecl name
   paths: string;    // glob pattern pointing at implementation files
+  repo?: string;    // optional: references a RepoDecl name
   implements?: string[];  // contract names this component implements
   consumes?: string[];    // contract names this component consumes
 }
@@ -124,6 +125,13 @@ export interface ContractDecl {
   endpoints: ContractEndpoint[];
 }
 
+export interface RepoDecl {
+  kind: 'RepoDecl';
+  name: string;      // friendly alias, e.g. BackendAPI
+  url: string;       // git remote URL, e.g. github.com/my-org/backend-api
+  branch?: string;   // default branch, e.g. main
+}
+
 export interface PluginDecl {
   kind: 'PluginDecl';
   packageName: string;  // npm package or executable name, e.g. "aglc-roslyn"
@@ -140,6 +148,7 @@ export type Declaration =
   | PermissionDecl
   | ContractDecl
   | PluginDecl
+  | RepoDecl
   | TestDecl;
 
 export interface Program {

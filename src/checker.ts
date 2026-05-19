@@ -100,8 +100,16 @@ export function check(program: Program): CheckError[] {
       case 'PluginDecl':
         // Plugin package names are free-form strings — no duplication check needed (same plugin can be re-declared in merged imports)
         break;
+      case 'RepoDecl':
+        // Collect declared repos for cross-reference validation below
+        break;
     }
   }
+
+  // Collect declared repo names for component reference validation
+  const declaredRepos = new Set<string>(
+    program.declarations.filter(d => d.kind === 'RepoDecl').map(d => (d as import('./ast.ts').RepoDecl).name)
+  );
 
   // All user-defined type names (enums + data structs)
   const userTypes = new Set<string>([...declaredEnums.keys(), ...declaredData.keys()]);
@@ -154,6 +162,9 @@ export function check(program: Program): CheckError[] {
     if (decl.kind === 'ComponentDecl') {
       if (!declaredNodes.has(decl.runsOn)) {
         errors.push({ message: `Component '${decl.name}' references unknown node '${decl.runsOn}'` });
+      }
+      if (decl.repo && !declaredRepos.has(decl.repo)) {
+        errors.push({ message: `Component '${decl.name}' references undeclared repo '${decl.repo}'. Declare it with: repo ${decl.repo} "github.com/your-org/your-repo"` });
       }
       for (const contractName of (decl.implements ?? [])) {
         if (!declaredContracts.has(contractName)) {

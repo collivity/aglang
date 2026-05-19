@@ -1,0 +1,54 @@
+// Multi-repo architecture example
+// One central architecture repo enforces rules across multiple codebases.
+
+// Declare external repositories
+repo BackendAPI   "github.com/my-org/backend-api"   branch="main"
+repo AndroidApp   "github.com/my-org/android-app"   branch="main"
+repo WebFrontend  "github.com/my-org/web-frontend"  branch="main"
+
+// Infrastructure nodes (shared)
+node AppServer   : server      { trust: trusted }
+node MobileDevice: edge_mobile { trust: untrusted }
+node Browser     : edge_desktop{ trust: untrusted }
+node Database    : postgres    { trust: trusted }
+
+// Components mapped to external repos
+component PaymentService {
+  repo: BackendAPI
+  runs_on: AppServer
+  paths: "src/payment/**"
+}
+
+component UserService {
+  repo: BackendAPI
+  runs_on: AppServer
+  paths: "src/users/**"
+}
+
+component MobileCheckout {
+  repo: AndroidApp
+  runs_on: MobileDevice
+  paths: "app/checkout/**"
+}
+
+component WebDashboard {
+  repo: WebFrontend
+  runs_on: Browser
+  paths: "src/dashboard/**"
+}
+
+component LedgerDatabase {
+  repo: BackendAPI
+  runs_on: Database
+  paths: "src/db/ledger/**"
+}
+
+// Architecture invariants — enforced in ALL repos
+invariant SecureLedger {
+  deny flow MobileCheckout -> LedgerDatabase;
+  deny flow WebDashboard   -> LedgerDatabase;
+}
+
+invariant PaymentIsolation {
+  deny flow UserService -> LedgerDatabase;
+}

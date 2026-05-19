@@ -94,7 +94,16 @@ async function compile(agPath: string) {
   log(`  State machines: ${artifact.stateMachines.length}`);
   log(`  Permissions: ${artifact.permissions.length}`);
   log(`  Contracts: ${(artifact.contracts ?? []).length}`);
+  log(`  Repos: ${(artifact.repos ?? []).length}`);
   log(`  SMT-LIB constraints: ${artifact.constraints.filter(s => s.startsWith('(')).length}`);
+  if ((artifact.repos ?? []).length > 0) {
+    log(`\n  Multi-repo components:`);
+    for (const [comp, repoName] of Object.entries(artifact.componentRepos ?? {})) {
+      const repoInfo = (artifact.repos ?? []).find(r => r.name === repoName);
+      log(`    ${comp} → ${repoName} (${repoInfo?.url ?? 'unknown'})`);
+    }
+    log(`\n  To enforce in each repo's CI, see: https://collivity.github.io/aglang/guide/multi-repo`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────

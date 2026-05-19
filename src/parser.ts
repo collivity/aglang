@@ -6,7 +6,7 @@ import type {
   InvariantDecl, InvariantRule, TestDecl, AssertStmt,
   QueryChain, Selector, Quantifier,
   StateMachineDecl, TransitionRule, PermissionDecl, PermissionRule,
-  ContractDecl, ContractEndpoint, PluginDecl,
+  ContractDecl, ContractEndpoint, PluginDecl, RepoDecl,
 } from './ast.ts';
 
 export class ParseError extends Error {
@@ -148,22 +148,25 @@ export function parse(tokens: Token[]): Program {
     return { kind: 'DataDecl', name, fields };
   }
 
-  // component NAME { runs_on: X  paths: "glob"  implements: ContractA  consumes: ContractB }
+  // component NAME { runs_on: X  paths: "glob"  repo: RepoName  implements: ContractA  consumes: ContractB }
   function parseComponentDecl(): ComponentDecl {
     expect('KEYWORD', 'component');
     const name = expect('IDENT').value;
     let runsOn = '';
     let paths = '';
+    let repoRef: string | undefined;
     const implementsList: string[] = [];
     const consumesList: string[] = [];
     expect('LBRACE');
     while (!match('RBRACE') && !eof()) {
-      const key = advance().value; // runs_on, paths, implements, consumes, or unknown
+      const key = advance().value; // runs_on, paths, repo, implements, consumes, or unknown
       expect('COLON');
       if (key === 'runs_on') {
         runsOn = expect('IDENT').value;
       } else if (key === 'paths') {
         paths = expect('STRING').value;
+      } else if (key === 'repo') {
+        repoRef = expect('IDENT').value;
       } else if (key === 'implements') {
         implementsList.push(expect('IDENT').value);
         while (consume('COMMA')) {
@@ -187,6 +190,7 @@ export function parse(tokens: Token[]): Program {
     if (!paths) throw new Error(`component '${name}' missing paths`);
     return {
       kind: 'ComponentDecl', name, runsOn, paths,
+      ...(repoRef ? { repo: repoRef } : {}),
       ...(implementsList.length > 0 ? { implements: implementsList } : {}),
       ...(consumesList.length > 0 ? { consumes: consumesList } : {}),
     };
@@ -432,6 +436,23 @@ export function parse(tokens: Token[]): Program {
     return { kind: 'ContractDecl', name, endpoints };
   }
 
+  // repo NAME "url" [branch="main"]
+  // e.g.: repo BackendAPI "github.com/my-org/backend-api" branch="main"
+  function parseRepoDecl(): RepoDecl {
+    expect('KEYWORD', 'repo');
+    const name = expect('IDENT').value;
+    const url = expect('STRING').value;
+    let branch: string | undefined;
+    // Optional: branch="main"
+    if (matchIdent() && peek().value === 'branch') {
+      advance();
+      if (consume('EQ')) {
+        branch = expect('STRING').value;
+      }
+    }
+    return { kind: 'RepoDecl', name, url, ...(branch ? { branch } : {}) };
+  }
+
   // plugin "package-name"
   function parsePluginDecl(): PluginDecl {
     expect('KEYWORD', 'plugin');
@@ -469,6 +490,7 @@ export function parse(tokens: Token[]): Program {
         case 'permission': declarations.push(parsePermissionDecl()); break;
         case 'contract':   declarations.push(parseContractDecl()); break;
         case 'plugin':     declarations.push(parsePluginDecl()); break;
+        case 'repo':       declarations.push(parseRepoDecl()); break;
         case 'test':       declarations.push(parseTestDecl()); break;
         default:
           throw new ParseError(`unexpected keyword '${t.value}'`, t);

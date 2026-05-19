@@ -57,6 +57,10 @@ export interface ArchitectureArtifact {
   }>;
   // External extractor plugin package names declared in the spec
   plugins: string[];
+  // Multi-repo: declared external repositories
+  repos: Array<{ name: string; url: string; branch?: string }>;
+  // Multi-repo: maps component name → repo alias (for CI reference)
+  componentRepos: Record<string, string>;
 }
 
 export function emitArtifact(program: Program, sourcePath: string): ArchitectureArtifact {
@@ -72,10 +76,15 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   const contracts: ArchitectureArtifact['contracts'] = [];
   const componentContracts: ArchitectureArtifact['componentContracts'] = [];
   const plugins: string[] = [];
+  const repos: ArchitectureArtifact['repos'] = [];
+  const componentRepos: Record<string, string> = {};
 
   for (const decl of program.declarations) {
     if (decl.kind === 'ComponentDecl') {
       mappings[decl.name] = decl.paths;
+      if (decl.repo) {
+        componentRepos[decl.name] = decl.repo;
+      }
       if ((decl.implements?.length ?? 0) > 0 || (decl.consumes?.length ?? 0) > 0) {
         componentContracts.push({
           component: decl.name,
@@ -154,10 +163,13 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
         plugins.push(decl.packageName);
       }
     }
+    if (decl.kind === 'RepoDecl') {
+      repos.push({ name: decl.name, url: decl.url, ...(decl.branch ? { branch: decl.branch } : {}) });
+    }
   }
 
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     sourcePath,
     constraints,
     mappings,
@@ -170,6 +182,8 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
     contracts,
     componentContracts,
     plugins,
+    repos,
+    componentRepos,
   };
 }
 

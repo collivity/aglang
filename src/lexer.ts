@@ -29,6 +29,8 @@ const KEYWORDS = new Set([
   'contract', 'query', 'mutation', 'subscription', 'rpc', 'publishes', 'subscribes',
   // External extractor plugin declaration
   'plugin',
+  // Multi-repo support
+  'repo',
 ]);
 
 // Matches numbers optionally followed by a time/rate unit: 100ms, 5s, 1000rps
@@ -80,10 +82,16 @@ export function tokenize(src: string): Token[] {
       i++; continue;
     }
 
-    // == (two chars)
-    if (src[i] === '=' && src[i + 1] === '=') {
-      tokens.push({ kind: 'EQ', value: '==', line, col: col() });
-      i += 2; continue;
+    // == (two chars) or = (single)
+    if (src[i] === '=') {
+      if (src[i + 1] === '=') {
+        tokens.push({ kind: 'EQ', value: '==', line, col: col() });
+        i += 2;
+      } else {
+        tokens.push({ kind: 'EQ', value: '=', line, col: col() });
+        i += 1;
+      }
+      continue;
     }
 
     // String literal

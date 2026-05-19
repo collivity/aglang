@@ -32,6 +32,7 @@ export default defineConfig({
         items: [
           { text: 'Language Reference', link: '/guide/language-reference' },
           { text: 'Contracts', link: '/guide/contracts' },
+          { text: 'Multi-Repo Setup', link: '/guide/multi-repo' },
         ]
       },
       {

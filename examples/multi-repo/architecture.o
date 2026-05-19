@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 5,
+  "sourcePath": "C:\\Users\\pante\\Codespaces\\aglang\\examples\\multi-repo\\system.ag",
+  "constraints": [
+    "; === aglang base sorts ===",
+    "(declare-sort Entity 0)",
+    "(declare-fun Flow      (Entity Entity) Bool)",
+    "(declare-fun Encrypted (Entity Entity) Bool)",
+    "(declare-fun Trusted   (Entity) Bool)",
+    "(declare-fun IsNode    (Entity) Bool)",
+    "(declare-fun IsComp    (Entity) Bool)",
+    "",
+    "; === node declarations ===",
+    "(declare-const AppServer Entity)",
+    "(assert (IsNode AppServer))",
+    "(assert (= (Trusted AppServer) true))",
+    "(declare-const MobileDevice Entity)",
+    "(assert (IsNode MobileDevice))",
+    "(assert (= (Trusted MobileDevice) false))",
+    "(declare-const Browser Entity)",
+    "(assert (IsNode Browser))",
+    "(assert (= (Trusted Browser) false))",
+    "(declare-const Database Entity)",
+    "(assert (IsNode Database))",
+    "(assert (= (Trusted Database) true))",
+    "",
+    "; === component declarations ===",
+    "(declare-const PaymentService Entity)",
+    "(assert (IsComp PaymentService))",
+    "(declare-const UserService Entity)",
+    "(assert (IsComp UserService))",
+    "(declare-const MobileCheckout Entity)",
+    "(assert (IsComp MobileCheckout))",
+    "(declare-const WebDashboard Entity)",
+    "(assert (IsComp WebDashboard))",
+    "(declare-const LedgerDatabase Entity)",
+    "(assert (IsComp LedgerDatabase))",
+    "",
+    "; === invariant rules ===",
+    "; --- SecureLedger ---",
+    "(assert (=> (Flow MobileCheckout LedgerDatabase) false))",
+    "(assert (=> (Flow WebDashboard LedgerDatabase) false))",
+    "; --- PaymentIsolation ---",
+    "(assert (=> (Flow UserService LedgerDatabase) false))",
+    ""
+  ],
+  "mappings": {
+    "PaymentService": "src/payment/**",
+    "UserService": "src/users/**",
+    "MobileCheckout": "app/checkout/**",
+    "WebDashboard": "src/dashboard/**",
+    "LedgerDatabase": "src/db/ledger/**"
+  },
+  "invariants": [
+    {
+      "name": "SecureLedger",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "MobileCheckout",
+          "to": "LedgerDatabase"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "WebDashboard",
+          "to": "LedgerDatabase"
+        }
+      ]
+    },
+    {
+      "name": "PaymentIsolation",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "UserService",
+          "to": "LedgerDatabase"
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "AppServer",
+      "type": "server",
+      "trust": "trusted"
+    },
+    {
+      "name": "MobileDevice",
+      "type": "edge_mobile",
+      "trust": "untrusted"
+    },
+    {
+      "name": "Browser",
+      "type": "edge_desktop",
+      "trust": "untrusted"
+    },
+    {
+      "name": "Database",
+      "type": "postgres",
+      "trust": "trusted"
+    }
+  ],
+  "enums": [],
+  "dataTypes": [],
+  "stateMachines": [],
+  "permissions": [],
+  "contracts": [],
+  "componentContracts": [],
+  "plugins": [],
+  "repos": [
+    {
+      "name": "BackendAPI",
+      "url": "github.com/my-org/backend-api",
+      "branch": "main"
+    },
+    {
+      "name": "AndroidApp",
+      "url": "github.com/my-org/android-app",
+      "branch": "main"
+    },
+    {
+      "name": "WebFrontend",
+      "url": "github.com/my-org/web-frontend",
+      "branch": "main"
+    }
+  ],
+  "componentRepos": {
+    "PaymentService": "BackendAPI",
+    "UserService": "BackendAPI",
+    "MobileCheckout": "AndroidApp",
+    "WebDashboard": "WebFrontend",
+    "LedgerDatabase": "BackendAPI"
+  }
+}

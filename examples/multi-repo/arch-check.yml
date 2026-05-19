@@ -1,0 +1,43 @@
+# .github/workflows/arch-check.yml
+# Place this file in EACH of your code repositories.
+# It pulls the central architecture spec and checks every commit against it.
+#
+# Setup:
+#   1. Add this file to your code repo at .github/workflows/arch-check.yml
+#   2. Replace ARCHITECTURE_REPO with your architecture repo (e.g. my-org/architecture)
+#   3. Replace SPEC_FILE with the path to your .ag spec inside that repo
+#   4. Push — every PR will now be checked against your architecture invariants
+
+name: Architecture Check
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  arch-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code repo
+        uses: actions/checkout@v4
+
+      # Pull the central architecture spec from a separate repo
+      - name: Checkout architecture spec
+        uses: actions/checkout@v4
+        with:
+          repository: my-org/architecture       # ← change this
+          path: .arch-rules
+          # If the architecture repo is private, add a token:
+          # token: ${{ secrets.ARCH_REPO_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Compile architecture spec
+        run: npx --yes @collivity/aglang compile .arch-rules/system.ag  # ← change path if needed
+
+      - name: Run architecture check
+        run: npx @collivity/aglang check --arch .arch-rules/architecture.o --project . --json
