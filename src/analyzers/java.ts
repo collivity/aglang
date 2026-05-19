@@ -1,10 +1,14 @@
 // JVM static analyzer — detects infrastructure flows and server-side routes.
 // Handles: Java/Spring Boot, Scala/Play, Kotlin (supplement to kotlin.ts for Spring).
 // File extensions: .java, .scala (kotlin.ts handles .kt)
+// Uses tree-sitter AST for Java when available, falls back to regex silently.
 
 import { readFileSync } from 'fs';
 import type { ExtractorPlugin, ExtractorInput, FlowFact } from './plugin.ts';
 import { normalizeRoute } from './typescript.ts';
+import { makeParser, getTreeSitter } from './ast/loader.ts';
+import { parseAndQuery } from './ast/walker.ts';
+import { IMPORT_QUERY, ANNOTATION_QUERY, NEW_OBJECT_QUERY, METHOD_INVOCATION_QUERY } from './ast/queries/java.ts';
 
 export interface RouteFact {
   method: string;
@@ -18,24 +22,139 @@ function lineOf(content: string, index: number): number {
   return content.slice(0, index).split('\n').length;
 }
 
-// ── Server-side route extraction ─────────────────────────────────────────────
+// ── Import → infra mapping ─────────────────────────────────────────────────────
 
-// Spring Boot: @GetMapping("/path"), @PostMapping, @RequestMapping(value="/path", method=RequestMethod.GET)
-// Also detects class-level @RequestMapping prefix and combines with method-level.
+const IMPORT_TO_INFRA: Array<[string, string]> = [
+  ['org.postgresql', 'postgres'],
+  ['com.mysql', 'relational_db'],
+  ['org.mariadb', 'relational_db'],
+  ['org.springframework.data.jpa', 'relational_db'],
+  ['javax.persistence', 'relational_db'],
+  ['jakarta.persistence', 'relational_db'],
+  ['org.hibernate', 'relational_db'],
+  ['org.jooq', 'relational_db'],
+  ['org.springframework.data.mongodb', 'mongodb'],
+  ['com.mongodb', 'mongodb'],
+  ['org.springframework.data.redis', 'redis'],
+  ['io.lettuce', 'redis'],
+  ['io.jedis', 'redis'],
+  ['org.redisson', 'redis'],
+  ['org.springframework.kafka', 'message_queue'],
+  ['org.apache.kafka', 'message_queue'],
+  ['org.springframework.amqp', 'message_queue'],
+  ['com.rabbitmq', 'message_queue'],
+  ['com.amazonaws.services.s3', 'object_store'],
+  ['software.amazon.awssdk.services.s3', 'object_store'],
+  ['io.minio', 'object_store'],
+];
+
+// Annotation names that indicate a class is a Spring controller
+const CONTROLLER_ANNOTATIONS = new Set(['RestController', 'Controller']);
+
+// ── AST-based route extraction ─────────────────────────────────────────────────
+
+function extractRoutesAst(content: string, filePath: string): RouteFact[] {
+  const parser = makeParser('java');
+  if (!parser) return [];
+  const ts = getTreeSitter()!;
+  const language = ts['java'];
+  const routes: RouteFact[] = [];
+
+  const captures = parseAndQuery(parser, language, content, ANNOTATION_QUERY);
+  // Two-pass: first collect class base path, then method routes
+  let classBase = '';
+  const METHOD_MAPPINGS = new Set(['GetMapping', 'PostMapping', 'PutMapping', 'DeleteMapping', 'PatchMapping', 'RequestMapping']);
+
+  for (let i = 0; i < captures.length; i++) {
+    const nameCap = captures[i];
+    const argCap = captures[i + 1];
+    if (nameCap?.name !== 'annotation_name') continue;
+
+    const annName = nameCap.text;
+    const argText = argCap?.name === 'annotation_arg' ? argCap.text.replace(/^["']|["']$/g, '') : '';
+    if (i + 1 < captures.length && argCap?.name === 'annotation_arg') i++;
+
+    if (annName === 'RequestMapping' && !classBase && argText) {
+      classBase = argText;
+      continue;
+    }
+    if (METHOD_MAPPINGS.has(annName)) {
+      const httpMethod = annName === 'RequestMapping' ? '*' : annName.replace('Mapping', '').toUpperCase();
+      const fullPath = ('/' + classBase + '/' + argText).replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+      routes.push({ method: httpMethod, path: fullPath, normalized: normalizeRoute(fullPath), file: filePath, line: nameCap.startRow + 1 });
+    }
+  }
+
+  return routes;
+}
+
+// ── AST-based infrastructure detection ───────────────────────────────────────
+
+function analyzeJavaFileAst(content: string, filePath: string, componentName: string): FlowFact[] {
+  const parser = makeParser('java');
+  if (!parser) return [];
+  const ts = getTreeSitter()!;
+  const language = ts['java'];
+
+  const importCaptures = parseAndQuery(parser, language, content, IMPORT_QUERY);
+  const imports = importCaptures.filter(c => c.name === 'import_path').map(c => c.text);
+
+  const newObjCaptures = parseAndQuery(parser, language, content, NEW_OBJECT_QUERY);
+  const newClasses = new Set(newObjCaptures.filter(c => c.name === 'class_name').map(c => c.text));
+
+  const methodCaptures = parseAndQuery(parser, language, content, METHOD_INVOCATION_QUERY);
+  const methodCalls = new Set<string>();
+  for (let i = 0; i < methodCaptures.length; i++) {
+    const recv = methodCaptures[i];
+    const fn = methodCaptures[i + 1];
+    if (recv?.name === 'receiver' && fn?.name === 'method_name') {
+      methodCalls.add(`${recv.text}.${fn.text}`);
+      i++;
+    }
+  }
+
+  const facts: FlowFact[] = [];
+  const emitted = new Set<string>();
+
+  for (const imp of imports) {
+    for (const [prefix, infraNode] of IMPORT_TO_INFRA) {
+      if (imp.startsWith(prefix) && !emitted.has(infraNode)) {
+        const hasDefiniteUsage =
+          [...newClasses].some(cls => /JdbcTemplate|MongoTemplate|RedisTemplate|KafkaTemplate/.test(cls)) ||
+          [...methodCalls].some(mc => /getConnection|connect|newClient|createClient/.test(mc));
+        facts.push({
+          from: componentName,
+          to: infraNode,
+          confidence: hasDefiniteUsage ? 'definite' : 'probable',
+          evidence: `Imports '${prefix}' package`,
+          file: filePath,
+        });
+        emitted.add(infraNode);
+        break;
+      }
+    }
+  }
+
+  return facts;
+}
+
+// ── Server-side route extraction (regex fallback) ─────────────────────────────
 
 export function extractRoutesFromJava(content: string, filePath: string): RouteFact[] {
+  const astRoutes = extractRoutesAst(content, filePath);
+  if (astRoutes.length > 0) return astRoutes;
+  return extractRoutesFromJavaRegex(content, filePath);
+}
+
+function extractRoutesFromJavaRegex(content: string, filePath: string): RouteFact[] {
   const routes: RouteFact[] = [];
   let m: RegExpExecArray | null;
 
-  // Class-level @RequestMapping prefix
   const classBaseRe = /@RequestMapping\s*\(\s*(?:value\s*=\s*)?["']([^"']+)["']/g;
   let classBase = '';
   const classBaseMatch = classBaseRe.exec(content);
-  if (classBaseMatch) {
-    classBase = classBaseMatch[1]!;
-  }
+  if (classBaseMatch) classBase = classBaseMatch[1]!;
 
-  // Method-level mappings
   const methodMappingRe = /@(Get|Post|Put|Delete|Patch)Mapping\s*\(\s*(?:value\s*=\s*)?(?:["']([^"']*)["']|)\s*\)/g;
   while ((m = methodMappingRe.exec(content)) !== null) {
     const method = m[1]!.toUpperCase();
@@ -44,7 +163,6 @@ export function extractRoutesFromJava(content: string, filePath: string): RouteF
     routes.push({ method, path, normalized: normalizeRoute(path), file: filePath, line: lineOf(content, m.index) });
   }
 
-  // @RequestMapping(value="/path", method=RequestMethod.GET)
   const requestMappingRe = /@RequestMapping\s*\(([^)]+)\)/g;
   while ((m = requestMappingRe.exec(content)) !== null) {
     const args = m[1]!;
@@ -54,7 +172,6 @@ export function extractRoutesFromJava(content: string, filePath: string): RouteF
       const subPath = valueMat[1]!;
       const method = methodMat ? methodMat[1]!.toUpperCase() : '*';
       const path = ('/' + classBase + '/' + subPath).replace(/\/+/g, '/').replace(/\/$/, '') || '/';
-      // Skip class-level annotation (already captured above)
       if (methodMat || !classBaseMatch || m.index !== classBaseMatch.index) {
         routes.push({ method, path, normalized: normalizeRoute(path), file: filePath, line: lineOf(content, m.index) });
       }
@@ -84,9 +201,15 @@ export function extractRoutesFromScala(content: string, filePath: string): Route
   return routes;
 }
 
-// ── Infrastructure flow detection ────────────────────────────────────────────
+// ── Regex fallback: Java infrastructure detection ─────────────────────────────
 
 function analyzeJavaFile(content: string, filePath: string, componentName: string): FlowFact[] {
+  const astFacts = analyzeJavaFileAst(content, filePath, componentName);
+  if (astFacts.length > 0) return astFacts;
+  return analyzeJavaFileRegex(content, filePath, componentName);
+}
+
+function analyzeJavaFileRegex(content: string, filePath: string, componentName: string): FlowFact[] {
   const facts: FlowFact[] = [];
 
   // ── PostgreSQL / Relational ──────────────────────────────────────────────
@@ -246,7 +369,7 @@ function analyzeScalaFile(content: string, filePath: string, componentName: stri
 }
 
 export const javaPlugin: ExtractorPlugin = {
-  name: 'Java/Spring regex analyzer',
+  name: 'Java/Spring AST/regex analyzer',
   extensions: ['.java'],
   extract(input: ExtractorInput): FlowFact[] {
     const facts: FlowFact[] = [];
