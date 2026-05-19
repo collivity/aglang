@@ -8,3 +8,7 @@ examples/AGENTS.md
 examples/skill.json
 examples/debug.smt2
 .aglang-cache/
+.playwright-mcp/
+*.png
+docs/.vitepress/dist/
+docs/.vitepress/cache/
