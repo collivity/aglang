@@ -69,7 +69,7 @@ export default defineConfig({
   },
 
   head: [
-    ['link', { rel: 'icon', href: '/aglang/favicon.ico' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/aglang/logo.svg' }],
     ['meta', { name: 'og:type', content: 'website' }],
     ['meta', { name: 'og:title', content: 'aglang — Architectural Guardrails for AI Agents' }],
     ['meta', { name: 'og:description', content: 'Enforce architectural rules at git-commit time using SMT solving. Works with C#, Python, TypeScript, Go, Rust, JVM, Swift.' }],

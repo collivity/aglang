@@ -6,8 +6,8 @@ hero:
   text: Architectural Guardrails for AI Agents
   tagline: Define your system architecture once. Enforce it automatically at every git commit — for humans and AI agents alike.
   image:
-    src: /hero.svg
-    alt: aglang
+    src: /aglang/hero.svg
+    alt: aglang architecture pipeline diagram
   actions:
     - theme: brand
       text: Get Started

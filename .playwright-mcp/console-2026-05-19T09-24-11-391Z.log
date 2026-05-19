@@ -1,0 +1,3 @@
+[     666ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://collivity.github.io/aglang/logo.svg:0
+[     670ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://collivity.github.io/aglang/hero.svg:0
+[    1078ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://collivity.github.io/aglang/favicon.ico:0

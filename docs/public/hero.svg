@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e3a5f;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#0f172a;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="400" height="300" rx="16" fill="url(#bg)"/>
+
+  <!-- Arch file box -->
+  <rect x="20" y="40" width="110" height="70" rx="8" fill="#1d4ed8" opacity="0.9"/>
+  <text x="75" y="70" font-family="monospace" font-size="11" font-weight="bold" text-anchor="middle" fill="#93c5fd">architecture</text>
+  <text x="75" y="86" font-family="monospace" font-size="11" font-weight="bold" text-anchor="middle" fill="#93c5fd">.ag</text>
+  <text x="75" y="102" font-family="monospace" font-size="9" text-anchor="middle" fill="#60a5fa">invariant rules</text>
+
+  <!-- Git diff box -->
+  <rect x="20" y="140" width="110" height="70" rx="8" fill="#065f46" opacity="0.9"/>
+  <text x="75" y="168" font-family="monospace" font-size="11" font-weight="bold" text-anchor="middle" fill="#6ee7b7">git diff</text>
+  <text x="75" y="184" font-family="monospace" font-size="11" font-weight="bold" text-anchor="middle" fill="#6ee7b7">staged</text>
+  <text x="75" y="200" font-family="monospace" font-size="9" text-anchor="middle" fill="#34d399">code changes</text>
+
+  <!-- Arrows to Z3 -->
+  <line x1="130" y1="75" x2="180" y2="115" stroke="#60a5fa" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="130" y1="175" x2="180" y2="135" stroke="#34d399" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Z3 solver box -->
+  <rect x="180" y="100" width="100" height="60" rx="8" fill="#4c1d95" opacity="0.95"/>
+  <text x="230" y="126" font-family="monospace" font-size="12" font-weight="bold" text-anchor="middle" fill="#c4b5fd">Z3</text>
+  <text x="230" y="144" font-family="monospace" font-size="9" text-anchor="middle" fill="#a78bfa">SMT Solver</text>
+
+  <!-- Arrow from Z3 to results -->
+  <line x1="280" y1="130" x2="330" y2="90" stroke="#a78bfa" stroke-width="2" marker-end="url(#arr2)"/>
+  <line x1="280" y1="130" x2="330" y2="170" stroke="#a78bfa" stroke-width="2" marker-end="url(#arr2)"/>
+
+  <!-- Pass box -->
+  <rect x="330" y="60" width="55" height="40" rx="6" fill="#065f46"/>
+  <text x="357" y="78" font-family="monospace" font-size="9" font-weight="bold" text-anchor="middle" fill="#6ee7b7">UNSAT</text>
+  <text x="357" y="91" font-family="monospace" font-size="8" text-anchor="middle" fill="#34d399">✓ pass</text>
+
+  <!-- Fail box -->
+  <rect x="330" y="150" width="55" height="40" rx="6" fill="#7f1d1d"/>
+  <text x="357" y="168" font-family="monospace" font-size="9" font-weight="bold" text-anchor="middle" fill="#fca5a5">SAT</text>
+  <text x="357" y="181" font-family="monospace" font-size="8" text-anchor="middle" fill="#f87171">✗ block</text>
+
+  <!-- Arrow markers -->
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#60a5fa"/>
+    </marker>
+    <marker id="arr2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#a78bfa"/>
+    </marker>
+  </defs>
+
+  <!-- Label -->
+  <text x="200" y="270" font-family="monospace" font-size="10" text-anchor="middle" fill="#64748b">Architectural enforcement via formal verification</text>
+</svg>
