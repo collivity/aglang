@@ -6,7 +6,8 @@
 #   1. Add this file to your code repo at .github/workflows/arch-check.yml
 #   2. Replace ARCHITECTURE_REPO with your architecture repo (e.g. my-org/architecture)
 #   3. Replace SPEC_FILE with the path to your .ag spec inside that repo
-#   4. Push — every PR will now be checked against your architecture invariants
+#   4. Replace REPO_FILTER with the name declared in your repo block (e.g. BackendAPI)
+#   5. Push — every PR will now be checked against your architecture invariants
 
 name: Architecture Check
 
@@ -40,4 +41,6 @@ jobs:
         run: npx --yes @collivity/aglang compile .arch-rules/system.ag  # ← change path if needed
 
       - name: Run architecture check
-        run: npx @collivity/aglang check --arch .arch-rules/architecture.o --project . --json
+        # --repo-filter scopes violations to only components declared in this repo.
+        # Replace BackendAPI with the repo name declared in your .ag file.
+        run: npx @collivity/aglang check --arch .arch-rules/architecture.o --project . --repo-filter BackendAPI --json

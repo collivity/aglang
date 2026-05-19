@@ -37,7 +37,7 @@ Commands:
   aglc emit-context --arch <arch.o> [--out <path>]          Emit AGENTS.md for AI agents
   aglc emit-skill   --arch <arch.o> [--out <path>]          Emit skill.json manifest for AI agents
   aglc install [--project <dir>] [--arch <arch.o>]          Install pre-commit git hook
-  aglc check --arch <arch.o> --project <dir> [--json]       Check staged git diff vs architecture
+  aglc check --arch <arch.o> --project <dir> [--repo-filter <Name>] [--json]  Check staged git diff vs architecture
   aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt]  Analyze a specific file
   aglc import-openapi <swagger.json> [--out <file.ag>]       Import OpenAPI 3.x spec → .ag contracts
   aglc import-tf <main.tf> [--out <file.ag>]                Import Terraform → .ag node declarations
@@ -200,7 +200,7 @@ function emitSkill(archPath: string, outPath: string) {
 // ─────────────────────────────────────────────────────────────
 // CHECK (git diff mode)
 // ─────────────────────────────────────────────────────────────
-async function checkDiff(archPath: string, projectRoot: string) {
+async function checkDiff(archPath: string, projectRoot: string, repoFilter?: string) {
   if (!existsSync(archPath)) {
     logErr(`Error: architecture.o not found: ${archPath}`);
     process.exit(1);
@@ -209,8 +209,31 @@ async function checkDiff(archPath: string, projectRoot: string) {
   const artifact: ArchitectureArtifact = loadArtifact(readFileSync(archPath, 'utf8'));
   const absProject = resolve(projectRoot);
 
+  // When --repo-filter is given, only examine components mapped to that repo
+  const repoComponents = repoFilter
+    ? new Set(
+        Object.entries(artifact.componentRepos ?? {})
+          .filter(([, repo]) => repo === repoFilter)
+          .map(([comp]) => comp)
+      )
+    : null;
+
+  if (repoFilter && repoComponents!.size === 0) {
+    const declared = (artifact.repos ?? []).map(r => r.name).join(', ') || '(none)';
+    logErr(`[aglc] Error: --repo-filter "${repoFilter}" does not match any declared repo. Declared: ${declared}`);
+    process.exit(1);
+  }
+
+  if (repoFilter) {
+    log(`[aglc] Repo filter: ${repoFilter} (components: ${[...repoComponents!].join(', ')})`);
+  }
+
   log(`[aglc] Parsing git diff in ${absProject}...`);
-  const changed = parseDiff(absProject, artifact);
+  let changed = parseDiff(absProject, artifact);
+
+  if (repoComponents) {
+    changed = changed.filter(c => repoComponents.has(c.componentName));
+  }
 
   if (changed.length === 0) {
     if (jsonMode) {
@@ -548,7 +571,8 @@ function getArg(flag: string): string | undefined {
   } else if (command === 'check') {
     const archPath = getArg('--arch') ?? 'architecture.o';
     const projectRoot = getArg('--project') ?? '.';
-    await checkDiff(archPath, projectRoot);
+    const repoFilter = getArg('--repo-filter');
+    await checkDiff(archPath, projectRoot, repoFilter);
 
   } else if (command === 'check-file') {
     const archPath = getArg('--arch') ?? 'architecture.o';

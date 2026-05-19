@@ -89,8 +89,14 @@ jobs:
         run: npx --yes @collivity/aglang compile .arch-rules/system.ag
 
       - name: Run architecture check
-        run: npx @collivity/aglang check --arch .arch-rules/architecture.o --project . --json
+        # --repo-filter scopes violations to only components declared for this repo.
+        # Replace BackendAPI with the repo name declared in your .ag file.
+        run: npx @collivity/aglang check --arch .arch-rules/architecture.o --project . --repo-filter BackendAPI --json
 ```
+
+::: tip Use --repo-filter
+The `--repo-filter BackendAPI` flag scopes the check to only the components declared as belonging to `BackendAPI` in the spec. Without it, the checker would flag violations from all repos — even changes not in this repository's scope.
+:::
 
 ::: tip Copy the template
 A ready-to-use template is in the aglang repo at [`examples/multi-repo/arch-check.yml`](https://github.com/collivity/aglang/tree/master/examples/multi-repo).
@@ -145,8 +151,8 @@ git clone https://github.com/my-org/architecture .arch-rules
 # Compile the spec
 npx @collivity/aglang compile .arch-rules/system.ag
 
-# Check your local changes (in your code repo)
-npx @collivity/aglang check --arch .arch-rules/architecture.o --project .
+# Check your local changes — scope to your repo's components
+npx @collivity/aglang check --arch .arch-rules/architecture.o --project . --repo-filter BackendAPI
 ```
 
 ## Monorepo vs Multi-Repo
