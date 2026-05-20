@@ -2,8 +2,10 @@
 // Complements typescript.ts (which handles client-side fetch calls).
 // Uses tree-sitter AST when available, falls back to regex silently.
 
-import { readFileSync } from 'fs';
-import type { ExtractorPlugin, ExtractorInput, FlowFact } from './plugin.ts';
+import { existsSync, readFileSync } from 'fs';
+import { dirname, resolve } from 'path';
+import micromatch from 'micromatch';
+import type { ExtractorPlugin, ExtractorInput, FlowFact, ExtractionStrategy } from './plugin.ts';
 import { normalizeRoute } from './typescript.ts';
 import { makeParser, getTreeSitter } from './ast/loader.ts';
 import { parseAndQuery } from './ast/walker.ts';
@@ -22,6 +24,122 @@ export interface RouteFact {
 
 function lineOf(content: string, index: number): number {
   return content.slice(0, index).split('\n').length;
+}
+
+function withStrategy(facts: FlowFact[], strategy: ExtractionStrategy): FlowFact[] {
+  return facts.map(f => ({ ...f, strategy: f.strategy ?? strategy }));
+}
+
+function componentForPath(mappings: Record<string, string>, absPath: string): string | undefined {
+  const normalized = absPath.replace(/\\/g, '/');
+  for (const [componentName, glob] of Object.entries(mappings)) {
+    if (micromatch.isMatch(normalized, `**/${glob}`) || micromatch.isMatch(normalized, glob)) {
+      return componentName;
+    }
+  }
+  return undefined;
+}
+
+function resolveRelativeImport(filePath: string, specifier: string): string | undefined {
+  if (!specifier.startsWith('.')) return undefined;
+  const base = resolve(dirname(filePath), specifier);
+  const candidates = [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    `${base}.mts`,
+    `${base}.js`,
+    `${base}.mjs`,
+    `${base}.cjs`,
+    resolve(base, 'index.ts'),
+    resolve(base, 'index.tsx'),
+    resolve(base, 'index.js'),
+  ];
+  return candidates.find(p => existsSync(p));
+}
+
+function analyzeInternalImportsAst(
+  content: string,
+  filePath: string,
+  componentName: string,
+  mappings: Record<string, string>,
+): FlowFact[] {
+  const lang: 'typescript' | 'javascript' = filePath.endsWith('.js') || filePath.endsWith('.mjs') || filePath.endsWith('.cjs')
+    ? 'javascript' : 'typescript';
+  const parser = makeParser(lang);
+  if (!parser) return [];
+  const ts = getTreeSitter()!;
+  const language = ts[lang];
+  if (!language) return [];
+
+  const facts: FlowFact[] = [];
+  const emitted = new Set<string>();
+  const captures = [
+    ...parseAndQuery(parser, language, content, IMPORT_QUERY),
+    ...parseAndQuery(parser, language, content, IMPORT_NAMED_QUERY),
+    ...parseAndQuery(parser, language, content, REQUIRE_QUERY),
+  ];
+
+  for (const c of captures) {
+    if (c.name !== 'module_specifier') continue;
+    const sourceLine = content.split('\n')[c.startRow] ?? '';
+    if (/^\s*(?:import|export)\s+type\b/.test(sourceLine)) continue;
+    const resolved = resolveRelativeImport(filePath, c.text);
+    if (!resolved) continue;
+    const targetComponent = componentForPath(mappings, resolved);
+    if (!targetComponent || targetComponent === componentName) continue;
+    const key = `${targetComponent}:${c.startRow}`;
+    if (emitted.has(key)) continue;
+    emitted.add(key);
+    facts.push({
+      from: componentName,
+      to: targetComponent,
+      confidence: 'definite',
+      evidence: `Imports internal module '${c.text}' from component '${targetComponent}'`,
+      file: filePath,
+      line: c.startRow + 1,
+      strategy: 'ast',
+    });
+  }
+
+  return facts;
+}
+
+function analyzeInternalImportsRegex(
+  content: string,
+  filePath: string,
+  componentName: string,
+  mappings: Record<string, string>,
+): FlowFact[] {
+  const facts: FlowFact[] = [];
+  const emitted = new Set<string>();
+  const importRe = /(?:import(?:\s+type)?(?:[\s\S]*?\s+from\s+)?|export[\s\S]*?\s+from\s+|require\s*\()\s*['"`]([^'"`]+)['"`]/g;
+  let m: RegExpExecArray | null;
+  while ((m = importRe.exec(content)) !== null) {
+    const lineStart = content.lastIndexOf('\n', m.index) + 1;
+    const lineEnd = content.indexOf('\n', m.index);
+    const sourceLine = content.slice(lineStart, lineEnd === -1 ? content.length : lineEnd);
+    if (/^\s*(?:import|export)\s+type\b/.test(sourceLine)) continue;
+    const specifier = m[1]!;
+    const resolved = resolveRelativeImport(filePath, specifier);
+    if (!resolved) continue;
+    const targetComponent = componentForPath(mappings, resolved);
+    if (!targetComponent || targetComponent === componentName) continue;
+    const line = lineOf(content, m.index);
+    const key = `${targetComponent}:${line}`;
+    if (emitted.has(key)) continue;
+    emitted.add(key);
+    facts.push({
+      from: componentName,
+      to: targetComponent,
+      confidence: 'definite',
+      evidence: `Imports internal module '${specifier}' from component '${targetComponent}'`,
+      file: filePath,
+      line,
+      strategy: 'regex',
+    });
+  }
+  return facts;
 }
 
 // ── Package → infra node mapping ─────────────────────────────────────────────
@@ -67,6 +185,7 @@ function extractRoutesAst(content: string, filePath: string, lang: 'typescript' 
   if (!parser) return [];
   const ts = getTreeSitter()!;
   const language = ts[lang];
+  if (!language) return [];
 
   const routes: RouteFact[] = [];
 
@@ -148,6 +267,7 @@ function analyzeFileAst(content: string, filePath: string, componentName: string
   if (!parser) return [];
   const ts = getTreeSitter()!;
   const language = ts[lang];
+  if (!language) return [];
 
   // Build symbol map: importedName → pkg  (handles aliased imports)
   const symbolMap = new Map<string, string>(); // className → pkg
@@ -219,47 +339,51 @@ function analyzeFileAst(content: string, filePath: string, componentName: string
 
 function analyzeFileRegex(content: string, filePath: string, componentName: string): FlowFact[] {
   const facts: FlowFact[] = [];
+  const searchable = content
+    .split('\n')
+    .filter(line => !line.trimStart().startsWith('//'))
+    .join('\n');
 
-  const hasPg = /require\s*\(\s*['"]pg['"]\)|from\s+['"]pg['"]|from\s+['"]@prisma\/client['"]/i.test(content) ||
-    /new\s+Pool\s*\(|pg\.Pool\s*\(|pgPool/.test(content);
-  const hasPrisma = /PrismaClient|from\s+['"]@prisma\/client['"]/.test(content);
-  const hasPostgresUrl = /postgres(?:ql)?:\/\//.test(content);
+  const hasPg = /require\s*\(\s*['"]pg['"]\)|from\s+['"]pg['"]|from\s+['"]@prisma\/client['"]/i.test(searchable) ||
+    /new\s+Pool\s*\(|pg\.Pool\s*\(|pgPool/.test(searchable);
+  const hasPrisma = /PrismaClient|from\s+['"]@prisma\/client['"]/.test(searchable);
+  const hasPostgresUrl = /postgres(?:ql)?:\/\//.test(searchable);
 
   if (hasPg || hasPostgresUrl) {
-    const isExplicit = /new\s+Pool\s*\(|createPool\s*\(|postgres(?:ql)?:\/\//.test(content);
+    const isExplicit = /new\s+Pool\s*\(|createPool\s*\(|postgres(?:ql)?:\/\//.test(searchable);
     facts.push({ from: componentName, to: 'postgres', confidence: isExplicit ? 'definite' : 'probable', evidence: isExplicit ? 'Creates PostgreSQL connection pool' : 'Imports pg driver', file: filePath });
   } else if (hasPrisma) {
     facts.push({ from: componentName, to: 'relational_db', confidence: 'probable', evidence: 'Uses Prisma ORM (DB type from schema, not inferred here)', file: filePath });
   }
 
-  const hasDrizzle = /from\s+['"]drizzle-orm/.test(content);
+  const hasDrizzle = /from\s+['"]drizzle-orm/.test(searchable);
   if (hasDrizzle) facts.push({ from: componentName, to: 'relational_db', confidence: 'probable', evidence: 'Uses Drizzle ORM — relational DB dependency', file: filePath });
 
-  const hasMongo = /require\s*\(\s*['"]mongoose['"]\)|from\s+['"]mongoose['"]/.test(content) || /require\s*\(\s*['"]mongodb['"]\)|from\s+['"]mongodb['"]/.test(content);
-  const mongoUsage = /mongoose\.connect\s*\(|MongoClient\.connect\s*\(|new\s+MongoClient\s*\(/.test(content);
+  const hasMongo = /require\s*\(\s*['"]mongoose['"]\)|from\s+['"]mongoose['"]/.test(searchable) || /require\s*\(\s*['"]mongodb['"]\)|from\s+['"]mongodb['"]/.test(searchable);
+  const mongoUsage = /mongoose\.connect\s*\(|MongoClient\.connect\s*\(|new\s+MongoClient\s*\(/.test(searchable);
   if (hasMongo && mongoUsage) facts.push({ from: componentName, to: 'mongodb', confidence: 'definite', evidence: 'Imports mongoose/mongodb and connects to MongoDB', file: filePath });
   else if (hasMongo) facts.push({ from: componentName, to: 'mongodb', confidence: 'probable', evidence: 'Imports mongoose/mongodb driver', file: filePath });
 
-  const hasRedis = /require\s*\(\s*['"]redis['"]\)|from\s+['"]redis['"]/.test(content) || /require\s*\(\s*['"]ioredis['"]\)|from\s+['"]ioredis['"]/.test(content);
-  const redisUsage = /redis\.createClient\s*\(|new\s+Redis\s*\(|createClient\s*\(/.test(content);
+  const hasRedis = /require\s*\(\s*['"]redis['"]\)|from\s+['"]redis['"]/.test(searchable) || /require\s*\(\s*['"]ioredis['"]\)|from\s+['"]ioredis['"]/.test(searchable);
+  const redisUsage = /redis\.createClient\s*\(|new\s+Redis\s*\(|createClient\s*\(/.test(searchable);
   if (hasRedis && redisUsage) facts.push({ from: componentName, to: 'redis', confidence: 'definite', evidence: 'Creates Redis client connection', file: filePath });
   else if (hasRedis) facts.push({ from: componentName, to: 'redis', confidence: 'probable', evidence: 'Imports Redis client library', file: filePath });
 
-  const hasKafkaJs = /require\s*\(\s*['"]kafkajs['"]\)|from\s+['"]kafkajs['"]/.test(content);
-  const hasAmqp = /require\s*\(\s*['"]amqplib['"]\)|from\s+['"]amqplib['"]/.test(content);
+  const hasKafkaJs = /require\s*\(\s*['"]kafkajs['"]\)|from\s+['"]kafkajs['"]/.test(searchable);
+  const hasAmqp = /require\s*\(\s*['"]amqplib['"]\)|from\s+['"]amqplib['"]/.test(searchable);
   if (hasKafkaJs) {
-    const kafkaUsage = /new\s+Kafka\s*\(|kafka\.producer\s*\(|kafka\.consumer\s*\(/.test(content);
+    const kafkaUsage = /new\s+Kafka\s*\(|kafka\.producer\s*\(|kafka\.consumer\s*\(/.test(searchable);
     facts.push({ from: componentName, to: 'message_queue', confidence: kafkaUsage ? 'definite' : 'probable', evidence: kafkaUsage ? 'Creates Kafka producer/consumer' : 'Imports kafkajs', file: filePath });
   }
   if (hasAmqp) facts.push({ from: componentName, to: 'message_queue', confidence: 'probable', evidence: 'Imports amqplib (RabbitMQ)', file: filePath });
 
-  const hasS3 = /from\s+['"]@aws-sdk\/client-s3['"]|require\s*\(\s*['"]aws-sdk['"]\)/.test(content);
-  const s3Usage = /new\s+S3Client\s*\(|new\s+S3\s*\(|s3\.upload\s*\(/.test(content);
+  const hasS3 = /from\s+['"]@aws-sdk\/client-s3['"]|require\s*\(\s*['"]aws-sdk['"]\)/.test(searchable);
+  const s3Usage = /new\s+S3Client\s*\(|new\s+S3\s*\(|s3\.upload\s*\(/.test(searchable);
   if (hasS3 && s3Usage) facts.push({ from: componentName, to: 'object_store', confidence: 'definite', evidence: 'Creates AWS S3 client', file: filePath });
   else if (hasS3) facts.push({ from: componentName, to: 'object_store', confidence: 'probable', evidence: 'Imports AWS SDK (S3 client)', file: filePath });
 
-  const hasAxios = /from\s+['"]axios['"]|require\s*\(\s*['"]axios['"]\)/.test(content);
-  const hasGot = /from\s+['"]got['"]|from\s+['"]node-fetch['"]|from\s+['"]undici['"]/.test(content);
+  const hasAxios = /from\s+['"]axios['"]|require\s*\(\s*['"]axios['"]\)/.test(searchable);
+  const hasGot = /from\s+['"]got['"]|from\s+['"]node-fetch['"]|from\s+['"]undici['"]/.test(searchable);
   if (hasAxios || hasGot) facts.push({ from: componentName, to: 'external_api', confidence: 'possible', evidence: 'Uses axios/got/node-fetch — outgoing HTTP calls (target unknown)', file: filePath });
 
   return facts;
@@ -269,8 +393,8 @@ function analyzeFileRegex(content: string, filePath: string, componentName: stri
 
 function analyzeFile(content: string, filePath: string, componentName: string): FlowFact[] {
   const astFacts = analyzeFileAst(content, filePath, componentName);
-  if (astFacts.length > 0) return astFacts;
-  return analyzeFileRegex(content, filePath, componentName);
+  if (astFacts.length > 0) return withStrategy(astFacts, 'ast');
+  return withStrategy(analyzeFileRegex(content, filePath, componentName), 'regex');
 }
 
 export const typescriptServerPlugin: ExtractorPlugin = {
@@ -282,6 +406,10 @@ export const typescriptServerPlugin: ExtractorPlugin = {
       let content: string;
       try { content = readFileSync(filePath, 'utf8'); } catch { continue; }
       facts.push(...analyzeFile(content, filePath, input.componentName));
+      const astImports = analyzeInternalImportsAst(content, filePath, input.componentName, input.mappings);
+      facts.push(...(astImports.length > 0
+        ? astImports
+        : analyzeInternalImportsRegex(content, filePath, input.componentName, input.mappings)));
     }
     return facts;
   },

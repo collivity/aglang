@@ -16,7 +16,7 @@ import { describe, it, expect } from 'vitest';
 import { writeFileSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { getTreeSitter } from '../src/analyzers/ast/loader.ts';
+import { isTreeSitterLanguageAvailable } from '../src/analyzers/ast/loader.ts';
 
 // Infrastructure plugins (use real files on disk)
 import { csharpPlugin } from '../src/analyzers/csharp.ts';
@@ -36,7 +36,9 @@ import { extractServerRoutesFromTypeScript } from '../src/analyzers/typescript-s
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const treeitterAvailable = getTreeSitter() !== null;
+const typescriptAstAvailable = isTreeSitterLanguageAvailable('typescript');
+const pythonAstAvailable = isTreeSitterLanguageAvailable('python');
+const csharpAstAvailable = isTreeSitterLanguageAvailable('csharp');
 
 /** Write a temp file, run a callback, then delete the file. */
 function withTempFile(ext: string, content: string, fn: (path: string) => void): void {
@@ -419,7 +421,7 @@ describe('Java: infra detection — regex-compatible', () => {
 
 // ── AST-only: cases regex gets wrong (skipped when tree-sitter unavailable) ───
 
-describe.skipIf(!treeitterAvailable)('AST-only: TypeScript aliased import tracking', () => {
+describe.skipIf(!typescriptAstAvailable)('AST-only: TypeScript aliased import tracking', () => {
   it('detects mongodb via aliased named import: import { MongoClient as MC } from "mongodb"', () => {
     const content = `import { MongoClient as MC } from 'mongodb';\nconst client = new MC("mongodb://localhost");`;
     const facts = extractFacts(typescriptServerPlugin, '.ts', content);
@@ -433,7 +435,7 @@ describe.skipIf(!treeitterAvailable)('AST-only: TypeScript aliased import tracki
   });
 });
 
-describe.skipIf(!treeitterAvailable)('AST-only: Python aliased import tracking', () => {
+describe.skipIf(!pythonAstAvailable)('AST-only: Python aliased import tracking', () => {
   it('detects postgres via aliased import: import psycopg2 as db', () => {
     const content = `import psycopg2 as db\nconn = db.connect("postgresql://localhost/mydb")`;
     const facts = extractFacts(pythonPlugin, '.py', content);
@@ -447,7 +449,7 @@ describe.skipIf(!treeitterAvailable)('AST-only: Python aliased import tracking',
   });
 });
 
-describe.skipIf(!treeitterAvailable)('AST-only: C# generic type parameter and using-directive detection', () => {
+describe.skipIf(!csharpAstAvailable)('AST-only: C# generic type parameter and using-directive detection', () => {
   it('detects mongodb via IMongoCollection<BsonDocument> constructor injection', () => {
     const content = `
       using MongoDB.Driver;
@@ -483,7 +485,7 @@ describe.skipIf(!treeitterAvailable)('AST-only: C# generic type parameter and us
   });
 });
 
-describe.skipIf(!treeitterAvailable)('AST-only: NestJS route prefix from @Controller + method', () => {
+describe.skipIf(!typescriptAstAvailable)('AST-only: NestJS route prefix from @Controller + method', () => {
   it('combines @Controller prefix and @Get sub-path correctly via AST', () => {
     const content = `
       @Controller('api/users')

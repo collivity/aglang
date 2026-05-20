@@ -6,7 +6,7 @@ import { cpus } from 'os';
 import { extname } from 'path';
 import type { ChangedComponent } from './diff-parser.ts';
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
-import type { ExtractorPlugin, FlowFact, GraphFact } from '../analyzers/plugin.ts';
+import type { ExtractionStrategy, ExtractorPlugin, FlowFact, GraphFact } from '../analyzers/plugin.ts';
 import { discoverPlugins } from '../analyzers/plugin.ts';
 import { csharpPlugin } from '../analyzers/csharp.ts';
 import { kotlinPlugin } from '../analyzers/kotlin.ts';
@@ -64,6 +64,10 @@ export interface DeltaResult {
   cacheHits: number;
 }
 
+function defaultStrategyForPlugin(plugin: ExtractorPlugin): ExtractionStrategy {
+  return /regex/i.test(plugin.name) ? 'regex' : 'legacy-flow';
+}
+
 // Simple concurrency limiter — runs up to `limit` async tasks at a time.
 async function runConcurrent<T>(
   items: T[],
@@ -119,13 +123,24 @@ export async function generateDeltaAssertions(
         const plugin = extensionMap.get(ext)!;
         if (plugin.extractGraph) {
           const facts = await plugin.extractGraph({ componentName, files: batch, mappings: artifact.mappings });
-          allGraphFacts.push(...facts);
+          allGraphFacts.push(...facts.map(f => ({
+            ...f,
+            evidence: {
+              ...f.evidence,
+              extractor: f.evidence.extractor ?? plugin.name,
+              strategy: f.evidence.strategy ?? 'graph',
+            },
+          })));
         } else {
           const facts = await extractWithCache(cache, batch, (uncached) =>
             plugin.extract({ componentName, files: uncached, mappings: artifact.mappings }),
           );
           allGraphFacts.push(...facts.map(f =>
-            flowFactToGraphFact(f, graphFactSequence++, plugin.name)
+            flowFactToGraphFact(
+              f.strategy ? f : { ...f, strategy: defaultStrategyForPlugin(plugin) },
+              graphFactSequence++,
+              plugin.name,
+            )
           ));
         }
         // Track cache hits: files not run through plugin = batch.length - uncached files

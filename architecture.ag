@@ -1,0 +1,94 @@
+// aglang self-spec — keeps this repository aligned with its own architecture rules.
+
+node node_runtime : agent_runtime {
+  trust: trusted
+}
+
+component CliCompiler {
+  runs_on: node_runtime
+  paths: "src/index.ts"
+}
+
+component LanguageFrontend {
+  runs_on: node_runtime
+  paths: "src/{ast,checker,importer,import-openapi,import-tf,lexer,parser}.ts"
+}
+
+component SmtBackend {
+  runs_on: node_runtime
+  paths: "src/smt/**/*.ts"
+}
+
+component RuntimeGate {
+  runs_on: node_runtime
+  paths: "src/runtime/{contract-gate,delta-assert,diff-parser,diagnostic,extraction-cache,gate}.ts"
+}
+
+component ExtractorAnalyzers {
+  runs_on: node_runtime
+  paths: "src/analyzers/**/*.ts"
+}
+
+component GraphProjection {
+  runs_on: node_runtime
+  paths: "src/runtime/graph-projection.ts"
+}
+
+component Emitters {
+  runs_on: node_runtime
+  paths: "src/emitters/**/*.ts"
+}
+
+component SpecGenerator {
+  runs_on: node_runtime
+  paths: "src/generate.ts"
+}
+
+component DocsSite {
+  runs_on: node_runtime
+  paths: "{docs,site,scripts}/**/*.{md,ts,js,mjs}"
+}
+
+component VscodeExtension {
+  runs_on: node_runtime
+  paths: "editors/vscode-aglang/src/**/*.ts"
+}
+
+component Tests {
+  runs_on: node_runtime
+  paths: "tests/**/*.ts"
+}
+
+invariant CompilerEntrypointBoundary {
+  deny flow LanguageFrontend -> CliCompiler
+  deny flow SmtBackend -> CliCompiler
+  deny flow RuntimeGate -> CliCompiler
+  deny flow ExtractorAnalyzers -> CliCompiler
+  deny flow GraphProjection -> CliCompiler
+  deny flow Emitters -> CliCompiler
+  deny flow SpecGenerator -> CliCompiler
+}
+
+invariant SmtBackendIsolation {
+  deny flow SmtBackend -> RuntimeGate
+  deny flow SmtBackend -> ExtractorAnalyzers
+  deny flow SmtBackend -> GraphProjection
+}
+
+invariant LanguageFrontendPurity {
+  deny flow LanguageFrontend -> RuntimeGate
+  deny flow LanguageFrontend -> GraphProjection
+  deny flow LanguageFrontend -> Emitters
+}
+
+invariant ExtractorAnalyzerBoundary {
+  deny flow ExtractorAnalyzers -> CliCompiler
+  deny flow ExtractorAnalyzers -> Emitters
+}
+
+invariant VscodeApiBoundary {
+  deny flow VscodeExtension -> RuntimeGate
+  deny flow VscodeExtension -> ExtractorAnalyzers
+  deny flow VscodeExtension -> SmtBackend
+  deny flow VscodeExtension -> GraphProjection
+}

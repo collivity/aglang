@@ -5,6 +5,7 @@
 import { spawnSync } from 'child_process';
 
 export type Confidence = 'definite' | 'probable' | 'possible';
+export type ExtractionStrategy = 'ast' | 'regex' | 'graph' | 'legacy-flow';
 
 export interface FlowFact {
   from: string;       // component name (aglang identifier)
@@ -13,10 +14,12 @@ export interface FlowFact {
   evidence: string;   // human-readable description of what was detected
   file: string;       // absolute path to the file containing the evidence
   line?: number;      // line number (if known)
+  strategy?: ExtractionStrategy;
   graphEvidence?: {
     graphFactId: string;
     kind: string;
     extractor?: string;
+    strategy?: ExtractionStrategy;
     file?: string;
     line?: number;
     evidence: string;
@@ -25,6 +28,7 @@ export interface FlowFact {
 
 export interface GraphFactEvidence {
   extractor?: string;
+  strategy?: ExtractionStrategy;
   file?: string;
   line?: number;
   message?: string;

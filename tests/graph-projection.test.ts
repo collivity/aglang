@@ -173,9 +173,38 @@ describe('graph-backed extractor path', () => {
     );
 
     expect(delta.graphReport.facts).toHaveLength(1);
-    expect(delta.graphReport.projections.flow).toHaveLength(1);
+    expect(delta.graphReport.projections.flow).toHaveLength(0);
     expect(delta.graphReport.smt.assertions).toEqual(delta.smtAssertions);
     expect(delta.graphReport.unresolvedTargets).toContain('postgres');
     expect(delta.graphReport.warnings[0]!.message).toContain('Could not resolve');
+  });
+
+  it('graph report preserves legacy extractor strategy metadata', async () => {
+    const artifact = compileSpec(`
+      node postgres_db : postgres { trust: trusted }
+      node api_backend : server { trust: trusted }
+      component ApiControllers { runs_on: api_backend paths: "**/*.mock" }
+    `);
+    const plugin: ExtractorPlugin = {
+      name: 'mock regex analyzer',
+      extensions: ['.mock'],
+      extract: () => [{
+        from: 'ApiControllers',
+        to: 'postgres',
+        confidence: 'definite',
+        evidence: 'postgres client',
+        file: 'x.mock',
+        strategy: 'regex',
+      }],
+    };
+
+    const delta = await generateDeltaAssertions(
+      [{ componentName: 'ApiControllers', files: ['x.mock'] }],
+      artifact,
+      { plugins: [plugin] },
+    );
+
+    expect(delta.graphReport.facts[0]!.evidence.strategy).toBe('regex');
+    expect(delta.graphReport.projections.flow[0]!.graphEvidence?.strategy).toBe('regex');
   });
 });

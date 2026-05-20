@@ -28,6 +28,7 @@ export interface GateViolation {
     graphFactId: string;
     kind: string;
     extractor?: string;
+    strategy?: string;
     file?: string;
     line?: number;
     evidence: string;

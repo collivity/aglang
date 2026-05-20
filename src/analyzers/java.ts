@@ -4,7 +4,7 @@
 // Uses tree-sitter AST for Java when available, falls back to regex silently.
 
 import { readFileSync } from 'fs';
-import type { ExtractorPlugin, ExtractorInput, FlowFact } from './plugin.ts';
+import type { ExtractorPlugin, ExtractorInput, FlowFact, ExtractionStrategy } from './plugin.ts';
 import { normalizeRoute } from './typescript.ts';
 import { makeParser, getTreeSitter } from './ast/loader.ts';
 import { parseAndQuery } from './ast/walker.ts';
@@ -20,6 +20,10 @@ export interface RouteFact {
 
 function lineOf(content: string, index: number): number {
   return content.slice(0, index).split('\n').length;
+}
+
+function withStrategy(facts: FlowFact[], strategy: ExtractionStrategy): FlowFact[] {
+  return facts.map(f => ({ ...f, strategy: f.strategy ?? strategy }));
 }
 
 // ── Import → infra mapping ─────────────────────────────────────────────────────
@@ -58,6 +62,7 @@ function extractRoutesAst(content: string, filePath: string): RouteFact[] {
   if (!parser) return [];
   const ts = getTreeSitter()!;
   const language = ts['java'];
+  if (!language) return [];
   const routes: RouteFact[] = [];
 
   const captures = parseAndQuery(parser, language, content, ANNOTATION_QUERY);
@@ -95,6 +100,7 @@ function analyzeJavaFileAst(content: string, filePath: string, componentName: st
   if (!parser) return [];
   const ts = getTreeSitter()!;
   const language = ts['java'];
+  if (!language) return [];
 
   const importCaptures = parseAndQuery(parser, language, content, IMPORT_QUERY);
   const imports = importCaptures.filter(c => c.name === 'import_path').map(c => c.text);
@@ -205,8 +211,8 @@ export function extractRoutesFromScala(content: string, filePath: string): Route
 
 function analyzeJavaFile(content: string, filePath: string, componentName: string): FlowFact[] {
   const astFacts = analyzeJavaFileAst(content, filePath, componentName);
-  if (astFacts.length > 0) return astFacts;
-  return analyzeJavaFileRegex(content, filePath, componentName);
+  if (astFacts.length > 0) return withStrategy(astFacts, 'ast');
+  return withStrategy(analyzeJavaFileRegex(content, filePath, componentName), 'regex');
 }
 
 function analyzeJavaFileRegex(content: string, filePath: string, componentName: string): FlowFact[] {
@@ -390,7 +396,7 @@ export const scalaPlugin: ExtractorPlugin = {
     for (const filePath of input.files) {
       let content: string;
       try { content = readFileSync(filePath, 'utf8'); } catch { continue; }
-      facts.push(...analyzeScalaFile(content, filePath, input.componentName));
+      facts.push(...withStrategy(analyzeScalaFile(content, filePath, input.componentName), 'regex'));
     }
     return facts;
   },

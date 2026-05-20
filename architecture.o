@@ -1,0 +1,220 @@
+{
+  "schemaVersion": 5,
+  "sourcePath": "C:\\Users\\pante\\Codespaces\\aglang\\architecture.ag",
+  "constraints": [
+    "; === aglang base sorts ===",
+    "(declare-sort Entity 0)",
+    "(declare-fun Flow      (Entity Entity) Bool)",
+    "(declare-fun Encrypted (Entity Entity) Bool)",
+    "(declare-fun Trusted   (Entity) Bool)",
+    "(declare-fun IsNode    (Entity) Bool)",
+    "(declare-fun IsComp    (Entity) Bool)",
+    "",
+    "; === node declarations ===",
+    "(declare-const node_runtime Entity)",
+    "(assert (IsNode node_runtime))",
+    "(assert (= (Trusted node_runtime) true))",
+    "",
+    "; === component declarations ===",
+    "(declare-const CliCompiler Entity)",
+    "(assert (IsComp CliCompiler))",
+    "(declare-const LanguageFrontend Entity)",
+    "(assert (IsComp LanguageFrontend))",
+    "(declare-const SmtBackend Entity)",
+    "(assert (IsComp SmtBackend))",
+    "(declare-const RuntimeGate Entity)",
+    "(assert (IsComp RuntimeGate))",
+    "(declare-const ExtractorAnalyzers Entity)",
+    "(assert (IsComp ExtractorAnalyzers))",
+    "(declare-const GraphProjection Entity)",
+    "(assert (IsComp GraphProjection))",
+    "(declare-const Emitters Entity)",
+    "(assert (IsComp Emitters))",
+    "(declare-const SpecGenerator Entity)",
+    "(assert (IsComp SpecGenerator))",
+    "(declare-const DocsSite Entity)",
+    "(assert (IsComp DocsSite))",
+    "(declare-const VscodeExtension Entity)",
+    "(assert (IsComp VscodeExtension))",
+    "(declare-const Tests Entity)",
+    "(assert (IsComp Tests))",
+    "",
+    "; === invariant rules ===",
+    "; --- CompilerEntrypointBoundary ---",
+    "(assert (=> (Flow LanguageFrontend CliCompiler) false))",
+    "(assert (=> (Flow SmtBackend CliCompiler) false))",
+    "(assert (=> (Flow RuntimeGate CliCompiler) false))",
+    "(assert (=> (Flow ExtractorAnalyzers CliCompiler) false))",
+    "(assert (=> (Flow GraphProjection CliCompiler) false))",
+    "(assert (=> (Flow Emitters CliCompiler) false))",
+    "(assert (=> (Flow SpecGenerator CliCompiler) false))",
+    "; --- SmtBackendIsolation ---",
+    "(assert (=> (Flow SmtBackend RuntimeGate) false))",
+    "(assert (=> (Flow SmtBackend ExtractorAnalyzers) false))",
+    "(assert (=> (Flow SmtBackend GraphProjection) false))",
+    "; --- LanguageFrontendPurity ---",
+    "(assert (=> (Flow LanguageFrontend RuntimeGate) false))",
+    "(assert (=> (Flow LanguageFrontend GraphProjection) false))",
+    "(assert (=> (Flow LanguageFrontend Emitters) false))",
+    "; --- ExtractorAnalyzerBoundary ---",
+    "(assert (=> (Flow ExtractorAnalyzers CliCompiler) false))",
+    "(assert (=> (Flow ExtractorAnalyzers Emitters) false))",
+    "; --- VscodeApiBoundary ---",
+    "(assert (=> (Flow VscodeExtension RuntimeGate) false))",
+    "(assert (=> (Flow VscodeExtension ExtractorAnalyzers) false))",
+    "(assert (=> (Flow VscodeExtension SmtBackend) false))",
+    "(assert (=> (Flow VscodeExtension GraphProjection) false))",
+    ""
+  ],
+  "mappings": {
+    "CliCompiler": "src/index.ts",
+    "LanguageFrontend": "src/{ast,checker,importer,import-openapi,import-tf,lexer,parser}.ts",
+    "SmtBackend": "src/smt/**/*.ts",
+    "RuntimeGate": "src/runtime/{contract-gate,delta-assert,diff-parser,diagnostic,extraction-cache,gate}.ts",
+    "ExtractorAnalyzers": "src/analyzers/**/*.ts",
+    "GraphProjection": "src/runtime/graph-projection.ts",
+    "Emitters": "src/emitters/**/*.ts",
+    "SpecGenerator": "src/generate.ts",
+    "DocsSite": "{docs,site,scripts}/**/*.{md,ts,js,mjs}",
+    "VscodeExtension": "editors/vscode-aglang/src/**/*.ts",
+    "Tests": "tests/**/*.ts"
+  },
+  "invariants": [
+    {
+      "name": "CompilerEntrypointBoundary",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "LanguageFrontend",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "RuntimeGate",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "ExtractorAnalyzers",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "GraphProjection",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "Emitters",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SpecGenerator",
+          "to": "CliCompiler"
+        }
+      ]
+    },
+    {
+      "name": "SmtBackendIsolation",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "RuntimeGate"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "ExtractorAnalyzers"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "GraphProjection"
+        }
+      ]
+    },
+    {
+      "name": "LanguageFrontendPurity",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "LanguageFrontend",
+          "to": "RuntimeGate"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "LanguageFrontend",
+          "to": "GraphProjection"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "LanguageFrontend",
+          "to": "Emitters"
+        }
+      ]
+    },
+    {
+      "name": "ExtractorAnalyzerBoundary",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "ExtractorAnalyzers",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "ExtractorAnalyzers",
+          "to": "Emitters"
+        }
+      ]
+    },
+    {
+      "name": "VscodeApiBoundary",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "VscodeExtension",
+          "to": "RuntimeGate"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "VscodeExtension",
+          "to": "ExtractorAnalyzers"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "VscodeExtension",
+          "to": "SmtBackend"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "VscodeExtension",
+          "to": "GraphProjection"
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "node_runtime",
+      "type": "agent_runtime",
+      "trust": "trusted"
+    }
+  ],
+  "enums": [],
+  "dataTypes": [],
+  "stateMachines": [],
+  "permissions": [],
+  "contracts": [],
+  "componentContracts": [],
+  "plugins": [],
+  "repos": [],
+  "componentRepos": {}
+}

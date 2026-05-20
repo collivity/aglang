@@ -8,7 +8,7 @@ import { emitArtifact, writeArtifact, loadArtifact } from './emitters/artifact.t
 import { emitAgentsMarkdown } from './emitters/agents.ts';
 import { emitSkillManifest, writeSkillManifest } from './emitters/skill.ts';
 import { loadAndMerge, ImportError } from './importer.ts';
-import { parseDiff } from './runtime/diff-parser.ts';
+import { parseDiff, parseProjectFiles } from './runtime/diff-parser.ts';
 import { generateDeltaAssertions } from './runtime/delta-assert.ts';
 import { runGate } from './runtime/gate.ts';
 import { runContractGate } from './runtime/contract-gate.ts';
@@ -37,7 +37,7 @@ Commands:
   aglc emit-context --arch <arch.o> [--out <path>]          Emit AGENTS.md for AI agents
   aglc emit-skill   --arch <arch.o> [--out <path>]          Emit skill.json manifest for AI agents
   aglc install [--project <dir>] [--arch <arch.o>]          Install pre-commit git hook
-  aglc check --arch <arch.o> --project <dir> [--repo-filter <Name>] [--json]  Check staged git diff vs architecture
+  aglc check --arch <arch.o> --project <dir> [--repo-filter <Name>] [--all] [--json]  Check staged git diff or whole project vs architecture
   aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt]  Analyze a specific file
   aglc graph --arch <arch.o> [--file <f> | --project <dir>] [--json]  Emit graph facts and Z3 flow projections
   aglc import-openapi <swagger.json> [--out <file.ag>]       Import OpenAPI 3.x spec → .ag contracts
@@ -225,7 +225,7 @@ function emitSkill(archPath: string, outPath: string) {
 // ─────────────────────────────────────────────────────────────
 // CHECK (git diff mode)
 // ─────────────────────────────────────────────────────────────
-async function checkDiff(archPath: string, projectRoot: string, repoFilter?: string) {
+async function checkDiff(archPath: string, projectRoot: string, repoFilter?: string, all = false) {
   if (!existsSync(archPath)) {
     logErr(`Error: architecture.o not found: ${archPath}`);
     process.exit(1);
@@ -253,18 +253,21 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
     log(`[aglc] Repo filter: ${repoFilter} (components: ${[...repoComponents!].join(', ')})`);
   }
 
-  log(`[aglc] Parsing git diff in ${absProject}...`);
-  let changed = parseDiff(absProject, artifact);
+  log(all ? `[aglc] Scanning all tracked component files in ${absProject}...` : `[aglc] Parsing git diff in ${absProject}...`);
+  let changed = all ? parseProjectFiles(absProject, artifact) : parseDiff(absProject, artifact);
 
   if (repoComponents) {
     changed = changed.filter(c => repoComponents.has(c.componentName));
   }
 
   if (changed.length === 0) {
+    const msg = all
+      ? 'No files matched tracked components. Check allowed.'
+      : 'No staged changes in tracked components. Commit allowed.';
     if (jsonMode) {
-      process.stdout.write(JSON.stringify({ schema_version: 2, passed: true, violations: [], contract_violations: [], warnings: [], contract_warnings: [], timestamp: new Date().toISOString(), artifact: archPath, agent_context: 'No staged changes in tracked components. Commit allowed.' }, null, 2) + '\n');
+      process.stdout.write(JSON.stringify({ schema_version: 2, passed: true, violations: [], contract_violations: [], warnings: [], contract_warnings: [], timestamp: new Date().toISOString(), artifact: archPath, agent_context: msg }, null, 2) + '\n');
     } else {
-      log(`[aglc] No staged changes in tracked components. Commit allowed.`);
+      log(`[aglc] ${msg}`);
     }
     process.exit(0);
   }
@@ -452,7 +455,9 @@ async function graphCommand(archPath: string, filePath: string | undefined, proj
     changed = [{ componentName, files: [absFile] }];
   } else {
     const absProject = resolve(projectRoot ?? '.');
-    changed = parseDiff(absProject, artifact);
+    changed = args.includes('--all')
+      ? parseProjectFiles(absProject, artifact)
+      : parseDiff(absProject, artifact);
   }
 
   const delta = await generateDeltaAssertions(changed, artifact);
@@ -627,7 +632,7 @@ function getArg(flag: string): string | undefined {
     const archPath = getArg('--arch') ?? 'architecture.o';
     const projectRoot = getArg('--project') ?? '.';
     const repoFilter = getArg('--repo-filter');
-    await checkDiff(archPath, projectRoot, repoFilter);
+    await checkDiff(archPath, projectRoot, repoFilter, args.includes('--all'));
 
   } else if (command === 'check-file') {
     const archPath = getArg('--arch') ?? 'architecture.o';

@@ -1,6 +1,6 @@
 // Git diff parser — maps changed files to architecture components
 import { execSync } from 'child_process';
-import { existsSync } from 'fs';
+import { readdirSync } from 'fs';
 import { join, relative } from 'path';
 import micromatch from 'micromatch';
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
@@ -8,6 +8,55 @@ import type { ArchitectureArtifact } from '../emitters/artifact.ts';
 export interface ChangedComponent {
   componentName: string;
   files: string[]; // absolute paths
+}
+
+const DEFAULT_IGNORES = new Set([
+  '.git',
+  'node_modules',
+  'build',
+  'dist',
+  'docs-build',
+  '.vitepress-out',
+  '.npm-cache',
+  '.playwright-mcp',
+]);
+
+function collectProjectFiles(projectRoot: string): string[] {
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (!DEFAULT_IGNORES.has(entry.name)) {
+          walk(join(dir, entry.name));
+        }
+      } else if (entry.isFile()) {
+        files.push(join(dir, entry.name));
+      }
+    }
+  };
+  walk(projectRoot);
+  return files;
+}
+
+function addFileToComponents(
+  byComponent: Map<string, string[]>,
+  projectRoot: string,
+  artifact: ArchitectureArtifact,
+  absFile: string,
+): void {
+  const relFile = relative(projectRoot, absFile).replace(/\\/g, '/');
+  for (const [componentName, glob] of Object.entries(artifact.mappings)) {
+    if (micromatch.isMatch(relFile, glob)) {
+      if (!byComponent.has(componentName)) byComponent.set(componentName, []);
+      byComponent.get(componentName)!.push(absFile);
+    }
+  }
 }
 
 /**
@@ -39,13 +88,24 @@ export function parseDiff(
 
   for (const relFile of stagedFiles) {
     const absFile = join(projectRoot, relFile);
-    for (const [componentName, glob] of Object.entries(artifact.mappings)) {
-      if (micromatch.isMatch(relFile, glob)) {
-        if (!byComponent.has(componentName)) byComponent.set(componentName, []);
-        byComponent.get(componentName)!.push(absFile);
-      }
-    }
+    addFileToComponents(byComponent, projectRoot, artifact, absFile);
   }
 
+  return [...byComponent.entries()].map(([componentName, files]) => ({ componentName, files }));
+}
+
+/**
+ * Match every project file against declared component globs. Used by
+ * `aglc check --all` to validate the complete working tree instead of only the
+ * staged git diff.
+ */
+export function parseProjectFiles(
+  projectRoot: string,
+  artifact: ArchitectureArtifact,
+): ChangedComponent[] {
+  const byComponent = new Map<string, string[]>();
+  for (const absFile of collectProjectFiles(projectRoot)) {
+    addFileToComponents(byComponent, projectRoot, artifact, absFile);
+  }
   return [...byComponent.entries()].map(([componentName, files]) => ({ componentName, files }));
 }

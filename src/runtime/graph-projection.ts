@@ -58,6 +58,7 @@ function flowEvidence(fact: GraphFact): FlowFact['graphEvidence'] {
     graphFactId: fact.id,
     kind: fact.kind,
     extractor: fact.evidence.extractor,
+    strategy: fact.evidence.strategy,
     file: fact.evidence.file,
     line: fact.evidence.line,
     evidence: evidenceText(fact),
@@ -68,7 +69,15 @@ function targetsForGraphFact(
   fact: GraphFact,
   artifact: ArchitectureArtifact,
 ): { targets: string[]; unresolved?: string } {
-  const declaredNodes = new Set((artifact.nodes ?? []).map(n => n.name));
+  const declaredEntities = new Set(
+    (artifact.constraints ?? [])
+      .map(s => s.match(/^\(declare-const\s+([^\s]+)\s+Entity\)/)?.[1])
+      .filter((name): name is string => Boolean(name))
+  );
+  const declaredNodes = new Set([
+    ...(artifact.nodes ?? []).map(n => n.name),
+    ...[...declaredEntities].filter(name => !(name in (artifact.mappings ?? {}))),
+  ]);
   const declaredComponents = new Set(Object.keys(artifact.mappings ?? {}));
 
   if (fact.kind === 'accesses_technology') {
@@ -83,6 +92,9 @@ function targetsForGraphFact(
     const unresolved = resolved.length === 1 && resolved[0] === technology && !declaredNodes.has(technology)
       ? technology
       : undefined;
+    if (unresolved) {
+      return { targets: [], unresolved };
+    }
     return { targets: resolved, unresolved };
   }
 
@@ -98,6 +110,9 @@ function targetsForGraphFact(
   const unresolved = resolved.length === 1 && resolved[0] === target && !declaredNodes.has(target)
     ? target
     : undefined;
+  if (unresolved) {
+    return { targets: [], unresolved };
+  }
   return { targets: resolved, unresolved };
 }
 
@@ -114,6 +129,7 @@ export function flowFactToGraphFact(
     confidence: fact.confidence,
     evidence: {
       extractor,
+      strategy: fact.strategy ?? 'legacy-flow',
       file: fact.file,
       line: fact.line,
       message: fact.evidence,

@@ -3,7 +3,7 @@
 // Uses tree-sitter AST when available, falls back to regex silently.
 
 import { readFileSync } from 'fs';
-import type { ExtractorPlugin, ExtractorInput, FlowFact } from './plugin.ts';
+import type { ExtractorPlugin, ExtractorInput, FlowFact, ExtractionStrategy } from './plugin.ts';
 import { normalizeRoute } from './typescript.ts';
 import { makeParser, getTreeSitter } from './ast/loader.ts';
 import { parseAndQuery } from './ast/walker.ts';
@@ -19,6 +19,10 @@ export interface RouteFact {
 
 function lineOf(content: string, index: number): number {
   return content.slice(0, index).split('\n').length;
+}
+
+function withStrategy(facts: FlowFact[], strategy: ExtractionStrategy): FlowFact[] {
+  return facts.map(f => ({ ...f, strategy: f.strategy ?? strategy }));
 }
 
 // ── Crate → infra node mapping ────────────────────────────────────────────────
@@ -58,6 +62,7 @@ function extractRoutesAst(content: string, filePath: string): RouteFact[] {
   if (!parser) return [];
   const ts = getTreeSitter()!;
   const language = ts['rust'];
+  if (!language) return [];
   const routes: RouteFact[] = [];
 
   const captures = parseAndQuery(parser, language, content, ROUTE_ATTR_QUERY);
@@ -115,6 +120,7 @@ function analyzeFileAst(content: string, filePath: string, componentName: string
   if (!parser) return [];
   const ts = getTreeSitter()!;
   const language = ts['rust'];
+  if (!language) return [];
 
   // Collect use paths
   const useCaptures = parseAndQuery(parser, language, content, USE_QUERY);
@@ -212,7 +218,9 @@ export const rustPlugin: ExtractorPlugin = {
       let content: string;
       try { content = readFileSync(filePath, 'utf8'); } catch { continue; }
       const astFacts = analyzeFileAst(content, filePath, input.componentName);
-      facts.push(...(astFacts.length > 0 ? astFacts : analyzeFileRegex(content, filePath, input.componentName)));
+      facts.push(...(astFacts.length > 0
+        ? withStrategy(astFacts, 'ast')
+        : withStrategy(analyzeFileRegex(content, filePath, input.componentName), 'regex')));
     }
     return facts;
   },

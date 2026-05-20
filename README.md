@@ -30,6 +30,23 @@ Designed as an **agent-first guardrail**: `aglc generate` scans your codebase an
 2. **Commit time** — the pre-commit hook runs `aglc check`, extracts flow facts from staged files (8 languages supported), feeds them with the compiled constraints to Z3, and blocks the commit if any invariant is violated.
 3. **Agent bootstrap** — `aglc generate` scans any codebase, detects manifests (`package.json`, `*.csproj`, `go.mod`, `Cargo.toml`, …), extracts routes, and emits a compilable starter `.ag` file an agent can immediately extend with invariant rules.
 
+
+
+ The flow is:
+
+  1. aglc compile architecture.ag parses/typechecks the .ag file and emits architecture.o.
+  2. aglc check --arch architecture.o --project . --all loads architecture.o.
+  3. It expands the component paths globs from the artifact.
+  4. It groups matched files by component.
+  5. It chooses extractors by file extension, for example .ts, .cs, .py, .go, .rs, .java, .kt.
+  6. Extractors emit flow facts, using AST where available and regex fallback where needed.
+  7. Those facts are normalized through graph projection.
+  8. Z3 checks the projected flows against the invariant constraints from architecture.o.
+
+  If you edit architecture.ag, run npm run arch:compile before npm run arch:check.
+
+
+
 ---
 
 ## Requirements

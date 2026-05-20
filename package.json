@@ -17,10 +17,13 @@
     "start": "tsx src/index.ts",
     "test": "vitest run",
     "dev": "tsx src/index.ts",
+    "arch:compile": "node build/aglc.js compile architecture.ag --out architecture.o",
+    "arch:check": "node build/aglc.js check --arch architecture.o --project . --all",
+    "arch:graph": "node build/aglc.js graph --arch architecture.o --project . --all --json",
     "docs:dev": "vitepress dev docs",
     "docs:build": "node scripts/build-docs.mjs",
     "docs:preview": "vitepress preview docs",
-    "prepublishOnly": "npm run typecheck && npm run build && npm test"
+    "prepublishOnly": "npm run typecheck && npm run build && npm test && npm run arch:check"
   },
   "keywords": [
     "architecture",
