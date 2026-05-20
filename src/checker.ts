@@ -1,5 +1,5 @@
 // Type checker — validates the AST against the stdlib ontology (multi-pass)
-import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, StateMachineDecl, PermissionDecl, ContractDecl } from './ast.ts';
+import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, StateMachineDecl, PermissionDecl, ContractDecl, WorkflowPolicyDecl } from './ast.ts';
 import { VALID_NODE_TYPES, VALID_TRUST_VALUES, VALID_CONNECTIVITY_VALUES, VALID_PROTOCOL_VALUES, VALID_AUTH_VALUES } from './stdlib/topology.ts';
 
 export interface CheckError {
@@ -62,6 +62,7 @@ export function check(program: Program): CheckError[] {
   const declaredMachines = new Map<string, StateMachineDecl>();   // key = "Type.field"
   const declaredPermissions = new Map<string, PermissionDecl>();
   const declaredContracts = new Map<string, ContractDecl>();
+  const declaredWorkflowPolicies = new Map<string, WorkflowPolicyDecl>();
 
   for (const decl of program.declarations) {
     switch (decl.kind) {
@@ -99,6 +100,10 @@ export function check(program: Program): CheckError[] {
         break;
       case 'PluginDecl':
         // Plugin package names are free-form strings — no duplication check needed (same plugin can be re-declared in merged imports)
+        break;
+      case 'WorkflowPolicyDecl':
+        if (declaredWorkflowPolicies.has(decl.name)) errors.push({ message: `Duplicate workflow policy name '${decl.name}'` });
+        else declaredWorkflowPolicies.set(decl.name, decl);
         break;
       case 'RepoDecl':
         // Collect declared repos for cross-reference validation below
@@ -250,6 +255,34 @@ export function check(program: Program): CheckError[] {
           if (dataDecl && !dataDecl.fields.find(f => f.key === rule.whenField)) {
             errors.push({ message: `permission '${decl.name}': 'when ${rule.whenField}' — field '${rule.whenField}' does not exist on '${decl.onType}'` });
           }
+        }
+      }
+    }
+
+    if (decl.kind === 'WorkflowPolicyDecl') {
+      const allowedActions = new Set(['publish', 'deploy', 'release']);
+      for (const rule of decl.rules) {
+        if (rule.kind === 'ActionRule') {
+          if (!allowedActions.has(rule.action)) {
+            errors.push({ message: `workflow_policy '${decl.name}': unknown action '${rule.action}'` });
+          }
+          if (rule.workflow !== '*' && !declaredComponents.has(rule.workflow)) {
+            errors.push({ message: `workflow_policy '${decl.name}': unknown workflow component '${rule.workflow}'` });
+          }
+          if (!declaredNodes.has(rule.target)) {
+            errors.push({ message: `workflow_policy '${decl.name}': unknown CI/CD target node '${rule.target}'` });
+          }
+        }
+        if (rule.kind === 'PermissionRule') {
+          if (rule.workflow !== '*' && !declaredComponents.has(rule.workflow)) {
+            errors.push({ message: `workflow_policy '${decl.name}': unknown workflow component '${rule.workflow}'` });
+          }
+          if (!['read', 'write', 'none'].includes(rule.access)) {
+            errors.push({ message: `workflow_policy '${decl.name}': invalid permission access '${rule.access}' (expected read, write, or none)` });
+          }
+        }
+        if (rule.kind === 'BeforeRule' && !declaredComponents.has(rule.workflow)) {
+          errors.push({ message: `workflow_policy '${decl.name}': unknown workflow component '${rule.workflow}'` });
         }
       }
     }

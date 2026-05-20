@@ -113,6 +113,32 @@ contract <Name> {
 
 See [Contracts](./contracts) for details.
 
+## Workflow Policy
+
+`workflow_policy` blocks enforce GitHub Actions release and deployment safety. Workflow YAML files are modeled as regular components, and publish/deploy/release targets are modeled as CI/CD nodes.
+
+```ag
+node github_actions : ci_runner { trust: trusted }
+node npm_registry : package_registry { trust: trusted auth: api_key }
+node github_pages : static_host { trust: trusted auth: oauth2 }
+
+component ReleaseWorkflow {
+  runs_on: github_actions
+  paths: ".github/workflows/release.yml"
+}
+
+workflow_policy ReleaseSafety {
+  allow publish ReleaseWorkflow -> npm_registry when tag "v*.*.*"
+  deny publish * -> npm_registry when pull_request
+  require before ReleaseWorkflow "npm test" -> "npm publish"
+  deny permission * contents: write when pull_request
+}
+```
+
+Supported actions in v1 are `publish`, `deploy`, `release`, `permission`, and `before`. Conditions support `when tag "<glob>"`, `when branch "<glob>"`, and `when pull_request`.
+
+CI/CD node types are `ci_runner`, `package_registry`, `container_registry`, `static_host`, and `release_host`.
+
 ## Import
 
 Import another `.ag` file to compose large specs:

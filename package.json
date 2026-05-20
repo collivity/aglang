@@ -72,6 +72,7 @@
     "tree-sitter-python": "^0.25.0",
     "tree-sitter-rust": "^0.24.0",
     "tree-sitter-typescript": "^0.23.2",
+    "yaml": "^2.9.0",
     "z3-solver": "^4.16.0"
   }
 }

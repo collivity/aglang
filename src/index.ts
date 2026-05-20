@@ -12,6 +12,7 @@ import { parseDiff, parseProjectFiles } from './runtime/diff-parser.ts';
 import { generateDeltaAssertions } from './runtime/delta-assert.ts';
 import { runGate } from './runtime/gate.ts';
 import { runContractGate } from './runtime/contract-gate.ts';
+import { runWorkflowGate, workflowDebugPathForArch } from './runtime/workflow-gate.ts';
 import { formatVerdict, formatVerdictJson } from './runtime/diagnostic.ts';
 import type { ArchitectureArtifact } from './emitters/artifact.ts';
 import { generateSpec } from './generate.ts';
@@ -38,14 +39,16 @@ Commands:
   aglc emit-skill   --arch <arch.o> [--out <path>]          Emit skill.json manifest for AI agents
   aglc install [--project <dir>] [--arch <arch.o>]          Install pre-commit git hook
   aglc check --arch <arch.o> --project <dir> [--repo-filter <Name>] [--all] [--json]  Check staged git diff or whole project vs architecture
-  aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt]  Analyze a specific file
+  aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt] [--workflow-z3] [--dump-workflow-smt]  Analyze a specific file
   aglc graph --arch <arch.o> [--file <f> | --project <dir>] [--json]  Emit graph facts and Z3 flow projections
   aglc import-openapi <swagger.json> [--out <file.ag>]       Import OpenAPI 3.x spec → .ag contracts
   aglc import-tf <main.tf> [--out <file.ag>]                Import Terraform → .ag node declarations
 
 Flags:
   --json      Output machine-readable JSON to stdout; progress logs go to stderr
-  --dump-smt  Write the full SMT-LIB script fed to Z3 → examples/debug.smt2
+  --dump-smt           Write the full SMT-LIB script fed to Z3 → examples/debug.smt2
+  --workflow-z3        Include workflow policy SMT debug snippets in verdicts
+  --dump-workflow-smt  Write workflow policy SMT debug snippets → workflow-debug.smt2
 `);
   process.exit(1);
 }
@@ -282,8 +285,18 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
     projectRoot: absProject,
     checkCompleteness: true,
   });
+  const workflowResult = runWorkflowGate(artifact, allChangedFiles, {
+    projectRoot: absProject,
+    workflowZ3: args.includes('--workflow-z3'),
+    dumpWorkflowSmt: args.includes('--dump-workflow-smt') ? workflowDebugPathForArch(archPath) : undefined,
+  });
 
-  if (delta.blockingFacts.length === 0 && delta.warningFacts.length === 0 && contractResult.violations.length === 0) {
+  if (
+    delta.blockingFacts.length === 0 &&
+    delta.warningFacts.length === 0 &&
+    contractResult.violations.length === 0 &&
+    workflowResult.violations.length === 0
+  ) {
     const msg = 'No architectural violations detected. Commit allowed.';
     if (jsonMode) {
       process.stdout.write(JSON.stringify({
@@ -291,8 +304,10 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
         passed: true,
         violations: [],
         contract_violations: [],
+        workflow_violations: [],
         warnings: [],
         contract_warnings: contractResult.warnings,
+        workflow_warnings: workflowResult.warnings,
         timestamp: new Date().toISOString(),
         artifact: archPath,
         agent_context: msg,
@@ -315,7 +330,9 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
 
   verdict.contract_violations = contractResult.violations;
   verdict.contract_warnings = contractResult.warnings;
-  verdict.passed = verdict.passed && contractResult.violations.length === 0;
+  verdict.workflow_violations = workflowResult.violations;
+  verdict.workflow_warnings = workflowResult.warnings;
+  verdict.passed = verdict.passed && contractResult.violations.length === 0 && workflowResult.violations.length === 0;
 
   if (jsonMode) {
     process.stdout.write(formatVerdictJson(verdict, archPath) + '\n');
@@ -342,6 +359,40 @@ async function checkFile(archPath: string, filePath: string) {
   const artifact: ArchitectureArtifact = loadArtifact(readFileSync(archPath, 'utf8'));
   const absFile = resolve(filePath);
 
+  if ((artifact.workflowPolicies ?? []).length > 0 && /\.github[\\/]+workflows[\\/]+[^\\/]+\.ya?ml$/i.test(absFile)) {
+    const workflowResult = runWorkflowGate(artifact, [absFile], {
+      workflowZ3: args.includes('--workflow-z3'),
+      dumpWorkflowSmt: args.includes('--dump-workflow-smt') ? workflowDebugPathForArch(archPath) : undefined,
+    });
+    const passed = workflowResult.violations.length === 0;
+    if (jsonMode) {
+      process.stdout.write(JSON.stringify({
+        schema_version: 2,
+        passed,
+        violations: [],
+        contract_violations: [],
+        workflow_violations: workflowResult.violations,
+        warnings: [],
+        contract_warnings: [],
+        workflow_warnings: workflowResult.warnings,
+        timestamp: new Date().toISOString(),
+        artifact: archPath,
+        agent_context: passed ? 'Workflow policy check passed.' : `${workflowResult.violations.length} workflow violation(s) detected.`,
+      }, null, 2) + '\n');
+    } else {
+      console.log(formatVerdict({
+        passed,
+        violations: [],
+        warnings: [],
+        contract_violations: [],
+        contract_warnings: [],
+        workflow_violations: workflowResult.violations,
+        workflow_warnings: workflowResult.warnings,
+      }));
+    }
+    process.exit(passed ? 0 : 1);
+  }
+
   const componentName = await componentForFile(artifact, absFile);
 
   if (!componentName) {
@@ -363,11 +414,15 @@ async function checkFile(archPath: string, filePath: string) {
 
   // Run contract gate (if any contracts are declared)
   const contractResult = await runContractGate(artifact, [absFile]);
+  const workflowResult = runWorkflowGate(artifact, [absFile], {
+    workflowZ3: args.includes('--workflow-z3'),
+    dumpWorkflowSmt: args.includes('--dump-workflow-smt') ? workflowDebugPathForArch(archPath) : undefined,
+  });
   if (contractResult.violations.length > 0 || contractResult.warnings.length > 0) {
     log(`[aglc] Contract check: ${contractResult.violations.length} violation(s), ${contractResult.warnings.length} warning(s)`);
   }
 
-  if (delta.facts.length === 0 && contractResult.violations.length === 0) {
+  if (delta.facts.length === 0 && contractResult.violations.length === 0 && workflowResult.violations.length === 0) {
     if (contractResult.warnings.length > 0) {
       // Pass but show warnings
     } else {
@@ -412,7 +467,9 @@ async function checkFile(archPath: string, filePath: string) {
   // Merge contract gate results into verdict
   verdict.contract_violations = contractResult.violations;
   verdict.contract_warnings = contractResult.warnings;
-  verdict.passed = verdict.passed && contractResult.violations.length === 0;
+  verdict.workflow_violations = workflowResult.violations;
+  verdict.workflow_warnings = workflowResult.warnings;
+  verdict.passed = verdict.passed && contractResult.violations.length === 0 && workflowResult.violations.length === 0;
 
   if (jsonMode) {
     process.stdout.write(formatVerdictJson(verdict, archPath) + '\n');

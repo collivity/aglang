@@ -7,6 +7,7 @@ import type {
   QueryChain, Selector, Quantifier,
   StateMachineDecl, TransitionRule, PermissionDecl, PermissionRule,
   ContractDecl, ContractEndpoint, PluginDecl, RepoDecl,
+  WorkflowPolicyDecl, WorkflowPolicyRule, WorkflowCondition, WorkflowPolicyAction,
 } from './ast.ts';
 
 export class ParseError extends Error {
@@ -460,6 +461,96 @@ export function parse(tokens: Token[]): Program {
     return { kind: 'PluginDecl', packageName };
   }
 
+  function parseWorkflowCondition(): WorkflowCondition | undefined {
+    if (!consume('KEYWORD', 'when')) return undefined;
+    const t = advance();
+    if (t.value === 'pull_request') {
+      return { kind: 'pull_request' };
+    }
+    if (t.value === 'branch' || t.value === 'tag') {
+      const value = expect('STRING').value;
+      return { kind: t.value as 'branch' | 'tag', value };
+    }
+    throw new ParseError(`expected workflow condition 'branch', 'tag', or 'pull_request'`, t);
+  }
+
+  function parseWorkflowRef(): string {
+    if (match('STAR')) {
+      advance();
+      return '*';
+    }
+    return expect('IDENT').value;
+  }
+
+  function parseWorkflowAction(): WorkflowPolicyAction {
+    const t = advance();
+    if (t.value === 'publish' || t.value === 'deploy' || t.value === 'release') {
+      return t.value;
+    }
+    throw new ParseError(`expected workflow action 'publish', 'deploy', or 'release'`, t);
+  }
+
+  function parseWorkflowPolicyDecl(): WorkflowPolicyDecl {
+    expect('KEYWORD', 'workflow_policy');
+    const name = expect('IDENT').value;
+    const rules: WorkflowPolicyRule[] = [];
+    expect('LBRACE');
+    while (!match('RBRACE') && !eof()) {
+      const first = advance();
+      if (first.value === 'require') {
+        expect('KEYWORD', 'before');
+        const workflow = expect('IDENT').value;
+        const before = expect('STRING').value;
+        expect('ARROW');
+        const after = expect('STRING').value;
+        consume('SEMICOLON');
+        rules.push({ kind: 'BeforeRule', workflow, before, after });
+        continue;
+      }
+
+      if (first.value !== 'allow' && first.value !== 'deny') {
+        throw new ParseError(`expected 'allow', 'deny', or 'require' in workflow_policy block`, first);
+      }
+      const effect = first.value as 'allow' | 'deny';
+
+      if (peek().value === 'permission') {
+        advance();
+        const workflow = parseWorkflowRef();
+        const permission = expectIdent().value;
+        expect('COLON');
+        const access = expectIdent().value;
+        const when = parseWorkflowCondition();
+        consume('SEMICOLON');
+        rules.push({
+          kind: 'PermissionRule',
+          effect,
+          workflow,
+          permission,
+          access,
+          ...(when ? { when } : {}),
+        });
+        continue;
+      }
+
+      const action = parseWorkflowAction();
+      const workflow = parseWorkflowRef();
+      expect('ARROW');
+      const target = expect('IDENT').value;
+      const when = parseWorkflowCondition();
+      consume('SEMICOLON');
+      rules.push({
+        kind: 'ActionRule',
+        effect,
+        action,
+        workflow,
+        target,
+        ...(when ? { when } : {}),
+      });
+    }
+    expect('RBRACE');
+    return { kind: 'WorkflowPolicyDecl', name, rules };
+  }
+
   // test NAME { assert ... }
   function parseTestDecl(): TestDecl {
     expect('KEYWORD', 'test');
@@ -490,6 +581,7 @@ export function parse(tokens: Token[]): Program {
         case 'permission': declarations.push(parsePermissionDecl()); break;
         case 'contract':   declarations.push(parseContractDecl()); break;
         case 'plugin':     declarations.push(parsePluginDecl()); break;
+        case 'workflow_policy': declarations.push(parseWorkflowPolicyDecl()); break;
         case 'repo':       declarations.push(parseRepoDecl()); break;
         case 'test':       declarations.push(parseTestDecl()); break;
         default:

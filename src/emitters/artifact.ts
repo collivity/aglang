@@ -61,6 +61,34 @@ export interface ArchitectureArtifact {
   repos: Array<{ name: string; url: string; branch?: string }>;
   // Multi-repo: maps component name → repo alias (for CI reference)
   componentRepos: Record<string, string>;
+  // GitHub Actions workflow policies (directly evaluated by workflow gate)
+  workflowPolicies: Array<{
+    name: string;
+    rules: Array<
+      | {
+          kind: 'ActionRule';
+          effect: 'allow' | 'deny';
+          action: 'publish' | 'deploy' | 'release';
+          workflow: string;
+          target: string;
+          when?: { kind: 'branch' | 'tag'; value: string } | { kind: 'pull_request' };
+        }
+      | {
+          kind: 'PermissionRule';
+          effect: 'allow' | 'deny';
+          workflow: string;
+          permission: string;
+          access: string;
+          when?: { kind: 'branch' | 'tag'; value: string } | { kind: 'pull_request' };
+        }
+      | {
+          kind: 'BeforeRule';
+          workflow: string;
+          before: string;
+          after: string;
+        }
+    >;
+  }>;
 }
 
 export function emitArtifact(program: Program, sourcePath: string): ArchitectureArtifact {
@@ -78,6 +106,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   const plugins: string[] = [];
   const repos: ArchitectureArtifact['repos'] = [];
   const componentRepos: Record<string, string> = {};
+  const workflowPolicies: ArchitectureArtifact['workflowPolicies'] = [];
 
   for (const decl of program.declarations) {
     if (decl.kind === 'ComponentDecl') {
@@ -166,10 +195,16 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
     if (decl.kind === 'RepoDecl') {
       repos.push({ name: decl.name, url: decl.url, ...(decl.branch ? { branch: decl.branch } : {}) });
     }
+    if (decl.kind === 'WorkflowPolicyDecl') {
+      workflowPolicies.push({
+        name: decl.name,
+        rules: decl.rules.map(rule => ({ ...rule })),
+      });
+    }
   }
 
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     sourcePath,
     constraints,
     mappings,
@@ -184,6 +219,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
     plugins,
     repos,
     componentRepos,
+    workflowPolicies,
   };
 }
 

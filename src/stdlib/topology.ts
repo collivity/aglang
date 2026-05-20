@@ -84,6 +84,13 @@ export const VALID_NODE_TYPES = new Set([
   'model_registry',       // model versioning (MLflow, HuggingFace Hub)
   'guardrail',            // AI output guardrail / safety filter
 
+  // ── CI/CD infrastructure ───────────────────────────────────────────────
+  'ci_runner',            // GitHub Actions / GitLab CI runner
+  'package_registry',     // npm, PyPI, NuGet, Maven Central
+  'container_registry',   // GHCR, Docker Hub, ECR, GCR
+  'static_host',          // GitHub Pages, Netlify, Vercel static deploy
+  'release_host',         // GitHub Releases or equivalent artifact host
+
   // ── Legacy / generic (kept for backward compat) ────────────────────────
   'relational_db',    // generic relational DB (prefer specific types)
   'document_db',      // generic document DB

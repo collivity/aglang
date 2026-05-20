@@ -3,6 +3,7 @@ import { checkConstraints } from '../smt/solver.ts';
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
 import type { DeltaResult } from './delta-assert.ts';
 import type { ContractViolation } from './contract-gate.ts';
+import type { WorkflowViolation } from './workflow-gate.ts';
 
 export interface Z3Proof {
   // The permanent constraint assertion from the compiled .arch spec
@@ -44,6 +45,8 @@ export interface GateVerdict {
   warnings: Array<{ from: string; to: string; evidence: string; file: string }>;
   contract_violations?: ContractViolation[];
   contract_warnings?: ContractViolation[];
+  workflow_violations?: WorkflowViolation[];
+  workflow_warnings?: Array<{ workflow: string; file: string; message: string }>;
   model?: string;
 }
 

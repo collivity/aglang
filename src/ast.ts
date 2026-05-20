@@ -137,6 +137,43 @@ export interface PluginDecl {
   packageName: string;  // npm package or executable name, e.g. "aglc-roslyn"
 }
 
+export type WorkflowPolicyAction = 'publish' | 'deploy' | 'release';
+export type WorkflowPolicyEffect = 'allow' | 'deny';
+export type WorkflowCondition =
+  | { kind: 'branch'; value: string }
+  | { kind: 'tag'; value: string }
+  | { kind: 'pull_request' };
+
+export type WorkflowPolicyRule =
+  | {
+      kind: 'ActionRule';
+      effect: WorkflowPolicyEffect;
+      action: WorkflowPolicyAction;
+      workflow: string;
+      target: string;
+      when?: WorkflowCondition;
+    }
+  | {
+      kind: 'PermissionRule';
+      effect: WorkflowPolicyEffect;
+      workflow: string;
+      permission: string;
+      access: string;
+      when?: WorkflowCondition;
+    }
+  | {
+      kind: 'BeforeRule';
+      workflow: string;
+      before: string;
+      after: string;
+    };
+
+export interface WorkflowPolicyDecl {
+  kind: 'WorkflowPolicyDecl';
+  name: string;
+  rules: WorkflowPolicyRule[];
+}
+
 export type Declaration =
   | NodeDecl
   | DataDecl
@@ -148,6 +185,7 @@ export type Declaration =
   | PermissionDecl
   | ContractDecl
   | PluginDecl
+  | WorkflowPolicyDecl
   | RepoDecl
   | TestDecl;
 

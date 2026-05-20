@@ -48,7 +48,7 @@ Detects: `package.json`, `.csproj`, `go.mod`, `Cargo.toml`, `build.gradle`, `Pod
 Check the current staged git diff against a compiled architecture artifact.
 
 ```bash
-aglc check --arch <architecture.o> --project <dir> [--json]
+aglc check --arch <architecture.o> --project <dir> [--json] [--workflow-z3] [--dump-workflow-smt]
 ```
 
 | Flag | Description |
@@ -56,6 +56,8 @@ aglc check --arch <architecture.o> --project <dir> [--json]
 | `--arch` | Path to compiled `.o` artifact |
 | `--project` | Git project root to scan |
 | `--json` | Output machine-readable JSON verdict to stdout |
+| `--workflow-z3` | Include workflow policy SMT debug snippets in workflow violations |
+| `--dump-workflow-smt` | Write workflow policy SMT debug snippets to `workflow-debug.smt2` |
 
 **Exit codes:**
 - `0` — No violations (commit may proceed)
@@ -68,13 +70,15 @@ aglc check --arch <architecture.o> --project <dir> [--json]
 Analyze a specific file against the architecture (useful for CI or IDE integration).
 
 ```bash
-aglc check-file --arch <architecture.o> --file <path> [--json] [--dump-smt]
+aglc check-file --arch <architecture.o> --file <path> [--json] [--dump-smt] [--workflow-z3] [--dump-workflow-smt]
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--file` | File to analyze |
 | `--dump-smt` | Write the SMT-LIB script to `examples/debug.smt2` |
+| `--workflow-z3` | Include workflow policy SMT debug snippets in workflow violations |
+| `--dump-workflow-smt` | Write workflow policy SMT debug snippets to `workflow-debug.smt2` |
 
 ---
 
@@ -140,3 +144,5 @@ aglc import-tf <main.tf> [--out <file.ag>]
 |------|-------------|
 | `--json` | Machine-readable JSON output to stdout; progress to stderr |
 | `--dump-smt` | Write Z3 SMT-LIB input to `examples/debug.smt2` |
+| `--workflow-z3` | Include workflow policy SMT debug snippets |
+| `--dump-workflow-smt` | Write workflow policy SMT debug snippets |

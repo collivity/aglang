@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "sourcePath": "C:\\Users\\pante\\Codespaces\\aglang\\architecture.ag",
   "constraints": [
     "; === aglang base sorts ===",
@@ -216,5 +216,6 @@
   "componentContracts": [],
   "plugins": [],
   "repos": [],
-  "componentRepos": {}
+  "componentRepos": {},
+  "workflowPolicies": []
 }

@@ -100,6 +100,19 @@ export function formatVerdict(verdict: GateVerdict): string {
     parts.push(...formatContractViolationBlock(v));
   }
 
+  for (const v of (verdict.workflow_violations ?? [])) {
+    parts.push('');
+    parts.push(`${RED}${BOLD}╔══════════════════════════════════════════════════════════╗${RESET}`);
+    parts.push(`${RED}${BOLD}║        aglang Workflow Policy Violation                  ║${RESET}`);
+    parts.push(`${RED}${BOLD}╚══════════════════════════════════════════════════════════╝${RESET}`);
+    parts.push('');
+    parts.push(`${BOLD}Policy:${RESET}    ${YELLOW}${v.policy}${RESET}`);
+    parts.push(`${BOLD}Workflow:${RESET}  ${CYAN}${v.workflow}${RESET}`);
+    parts.push(`${BOLD}File:${RESET}      ${v.file}`);
+    parts.push(`${BOLD}Evidence:${RESET}  ${v.evidence}`);
+    parts.push(`${BOLD}Message:${RESET}   ${v.message}`);
+  }
+
   parts.push('');
   parts.push(`${RED}${BOLD}Commit Aborted.${RESET} Fix all layering violations before committing.`);
   parts.push(`Tip: run ${CYAN}aglc check-file --json${RESET} for machine-readable violation details.`);
@@ -112,8 +125,10 @@ export function formatVerdict(verdict: GateVerdict): string {
 export function formatVerdictJson(verdict: GateVerdict, artifactPath: string): string {
   const contractViolations = verdict.contract_violations ?? [];
   const contractWarnings = verdict.contract_warnings ?? [];
-  const totalViolations = verdict.violations.length + contractViolations.length;
-  const overallPassed = verdict.passed && contractViolations.length === 0;
+  const workflowViolations = verdict.workflow_violations ?? [];
+  const workflowWarnings = verdict.workflow_warnings ?? [];
+  const totalViolations = verdict.violations.length + contractViolations.length + workflowViolations.length;
+  const overallPassed = verdict.passed && contractViolations.length === 0 && workflowViolations.length === 0;
 
   return JSON.stringify({
     schema_version: 2,
@@ -122,8 +137,10 @@ export function formatVerdictJson(verdict: GateVerdict, artifactPath: string): s
     artifact: artifactPath,
     violations: verdict.violations,
     contract_violations: contractViolations,
+    workflow_violations: workflowViolations,
     warnings: verdict.warnings,
     contract_warnings: contractWarnings,
+    workflow_warnings: workflowWarnings,
     smt_model: verdict.model ?? null,
     agent_context: overallPassed
       ? 'Architecture check passed. No violations detected.'

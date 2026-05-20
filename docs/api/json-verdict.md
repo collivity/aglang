@@ -6,26 +6,21 @@ When running with `--json`, all check commands output a machine-readable JSON ve
 
 ```typescript
 interface Verdict {
-  /** "pass" | "violation" | "error" */
-  verdict: 'pass' | 'violation' | 'error'
+  schema_version: 2
+  passed: boolean
+  timestamp: string
+  artifact: string
 
-  /** Present when verdict is "violation" */
-  rule?: string
+  violations: FlowViolation[]
+  contract_violations: ContractViolation[]
+  workflow_violations: WorkflowViolation[]
 
-  /** Component name that triggered the violation */
-  component?: string
+  warnings: FlowWarning[]
+  contract_warnings: ContractViolation[]
+  workflow_warnings: WorkflowWarning[]
 
-  /** File that contains the offending code */
-  file?: string
-
-  /** Line number (1-based) if determinable */
-  line?: number
-
-  /** Human-readable explanation */
-  message: string
-
-  /** SMT model returned by Z3 (raw, for debugging) */
-  smtModel?: Record<string, unknown>
+  smt_model: string | null
+  agent_context: string
 }
 ```
 
@@ -35,8 +30,14 @@ interface Verdict {
 
 ```json
 {
-  "verdict": "pass",
-  "message": "No architectural violations detected."
+  "schema_version": 2,
+  "passed": true,
+  "violations": [],
+  "contract_violations": [],
+  "workflow_violations": [],
+  "warnings": [],
+  "contract_warnings": [],
+  "workflow_warnings": []
 }
 ```
 
@@ -44,12 +45,18 @@ interface Verdict {
 
 ```json
 {
-  "verdict": "violation",
-  "rule": "SecureLedger",
-  "component": "PublicGateway",
-  "file": "src/api/gateway/checkout.py",
-  "line": 44,
-  "message": "Direct flow PublicGateway -> LedgerDatabase is denied by invariant SecureLedger"
+  "schema_version": 2,
+  "passed": false,
+  "workflow_violations": [
+    {
+      "type": "workflow_violation",
+      "policy": "ReleaseSafety",
+      "workflow": "DocsWorkflow",
+      "file": ".github/workflows/docs.yml",
+      "message": "publish to npm_registry is not covered by any matching allow rule",
+      "evidence": "run: npm publish"
+    }
+  ]
 }
 ```
 
@@ -78,9 +85,9 @@ interface Verdict {
   run: |
     result=$(aglc check --arch architecture.o --project . --json)
     echo "$result"
-    verdict=$(echo "$result" | jq -r '.verdict')
-    if [ "$verdict" != "pass" ]; then
-      echo "::error::$(echo "$result" | jq -r '.message')"
+    passed=$(echo "$result" | jq -r '.passed')
+    if [ "$passed" != "true" ]; then
+      echo "::error::aglang policy violation"
       exit 1
     fi
 ```
@@ -97,8 +104,8 @@ const result = execSync('aglc check --arch architecture.o --project . --json', {
 
 const verdict = JSON.parse(result)
 
-if (verdict.verdict === 'violation') {
+if (!verdict.passed) {
   // Tell the agent exactly what to fix
-  console.log(`Fix: ${verdict.message} in ${verdict.file}:${verdict.line}`)
+  console.log(verdict.agent_context)
 }
 ```

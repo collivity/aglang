@@ -145,6 +145,7 @@ Commit aborted.
 | **Components** | ✅ | Map source-code globs to topology nodes |
 | **Flow invariants** | ✅ | Deny illegal data flows — checked by Z3 at every commit |
 | **Contracts** | ✅ | Declare REST/GraphQL API endpoint shapes; enforce implements + consumes at commit time |
+| **GitHub Actions policies** | ✅ | Model workflows as components and block unsafe publish/deploy/release permissions |
 | **State machines** | ✅ | Model entity lifecycle states and allowed transitions |
 | **Permissions** | ✅ | Declare role-based access rules per state |
 | **Data & enums** | ✅ | Define domain types for documentation |
@@ -189,6 +190,32 @@ component Frontend {
 The contract gate checks:
 - **implements** — every declared route must be exposed by the component (missing routes = error)
 - **consumes** — the client may only call declared routes (undeclared `fetch` calls = warning)
+
+---
+
+## GitHub Actions workflow policies
+
+Model CI/CD targets as nodes and workflows as components, then enforce release safety directly from `.github/workflows/*.yml`:
+
+```ag
+node github_actions : ci_runner { trust: trusted }
+node npm_registry : package_registry { trust: trusted auth: api_key }
+node github_pages : static_host { trust: trusted auth: oauth2 }
+
+component ReleaseWorkflow {
+  runs_on: github_actions
+  paths: ".github/workflows/release.yml"
+}
+
+workflow_policy ReleaseSafety {
+  allow publish ReleaseWorkflow -> npm_registry when tag "v*.*.*"
+  deny publish * -> npm_registry when pull_request
+  require before ReleaseWorkflow "npm test" -> "npm publish"
+  deny permission * contents: write when pull_request
+}
+```
+
+`aglc check` reports workflow violations in `workflow_violations[]`; `--workflow-z3` and `--dump-workflow-smt` add optional SMT debug output for proof-oriented CI runs.
 
 ---
 
