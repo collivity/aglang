@@ -192,6 +192,20 @@ Commit aborted.
 
 ---
 
+## Enforcement semantics
+
+Not every declaration is enforced the same way:
+
+| Level | Declarations | Behavior |
+|---|---|---|
+| `formal_z3` | `invariant deny flow`, `invariant deny dataflow`, `change_policy` | Facts are asserted into SMT and checked by Z3. |
+| `deterministic_policy` | `contract`, `workflow_policy` | Extracted route/workflow facts are checked by deterministic gates. |
+| `advisory` | `machine`, `permission`, `require encryption` | Emitted to docs and agent context; not blocking until an extractor/gate enforces them. |
+
+This taxonomy is emitted into `architecture.o`, `AGENTS.md`, and `skill.json` so agents know which rules are proof-backed, policy-backed, or guidance-only.
+
+---
+
 ## API contracts
 
 Enforce that your backend routes match your frontend expectations:
@@ -314,7 +328,8 @@ component <name> {
 // Invariant
 invariant <name> {
   deny flow <ComponentOrNode> -> <ComponentOrNode>
-  require encryption <Component>  // advisory — emits warning, does not block commit
+  deny dataflow <DataType> -> <ComponentOrNode>
+  require encryption on flow <ComponentOrNode> -> <ComponentOrNode>  // advisory
 }
 
 // Change policy

@@ -53,18 +53,16 @@ This is useful for reviewing the auto-generated spec before committing to it.
 The generated spec has components and flows — you add invariants to enforce boundaries:
 
 ```ag
-component PublicAPI {
-  path: "src/api/**"
-  tier: "public"
-}
+node app_runtime : server { trust: trusted }
+node database : postgres { trust: trusted }
 
-component Database {
-  path: "src/db/**"
-  tier: "internal"
+component PublicAPI {
+  runs_on: app_runtime
+  paths: "src/api/**"
 }
 
 invariant NoDirectDBAccess {
-  deny flow PublicAPI -> Database
+  deny flow PublicAPI -> database
 }
 ```
 

@@ -1,6 +1,7 @@
 // Z3 Gate — loads architecture.o + delta assertions → SAT/UNSAT verdict
 import { checkConstraints } from '../smt/solver.ts';
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
+import type { ArtifactInvariantRule } from '../emitters/artifact.ts';
 import type { DeltaResult } from './delta-assert.ts';
 import type { ContractViolation } from './contract-gate.ts';
 import type { WorkflowViolation } from './workflow-gate.ts';
@@ -16,12 +17,14 @@ export interface Z3Proof {
 }
 
 export interface GateViolation {
-  type: 'flow_violation';
+  type: 'flow_violation' | 'dataflow_violation';
   invariant: string;
-  rule: { kind: string; from: string; to: string };
+  rule: ArtifactInvariantRule;
   detected: {
     from: string;
     to: string;
+    data?: string;
+    via?: string;
     confidence: string;
     evidence: string;
     file: string;
@@ -67,6 +70,10 @@ function buildPermanentConstraint(rule: { kind: string; from: string; to: string
   return `(assert (=> (Flow ${from} ${to}) false))`;
 }
 
+function buildDataPermanentConstraint(rule: { kind: 'DenyDataFlow'; data: string; to: string }): string {
+  return `(assert (=> (DataFlow ${smtId(rule.data)} ${smtId(rule.to)}) false))`;
+}
+
 export async function runGate(
   artifact: ArchitectureArtifact,
   delta: DeltaResult,
@@ -75,7 +82,9 @@ export async function runGate(
     from: f.from, to: f.to, evidence: f.evidence, file: f.file,
   }));
 
-  if (delta.blockingFacts.length === 0) {
+  const blockingDataFlowFacts = delta.blockingDataFlowFacts ?? [];
+
+  if (delta.blockingFacts.length === 0 && blockingDataFlowFacts.length === 0) {
     return { passed: true, violations: [], warnings };
   }
 
@@ -103,7 +112,7 @@ export async function runGate(
     let matched = false;
     for (const invariant of artifact.invariants) {
       for (const rule of invariant.rules) {
-        if (rule.from === fact.from && rule.to === fact.to) {
+        if (rule.kind !== 'DenyDataFlow' && rule.from === fact.from && rule.to === fact.to) {
           // RequireEncryption: not enforced by Z3 (no extractor emits Encrypted facts).
           // Move to warnings so agents see them but commits aren't blocked.
           if (rule.kind === 'RequireEncryption') {
@@ -143,8 +152,8 @@ export async function runGate(
         }
       }
     }
-    // Generic violation if no invariant matched (shouldn't happen in well-formed artifacts)
-    if (!matched) {
+    // Generic violation only when no dataflow rule could explain UNSAT.
+    if (!matched && blockingDataFlowFacts.length === 0) {
       violations.push({
         type: 'flow_violation',
         invariant: 'unknown',
@@ -164,6 +173,63 @@ export async function runGate(
           explanation:
             `Z3 returned UNSAT: a deny-flow constraint for '${fact.from}→${fact.to}' contradicts ` +
             `the detected flow in ${fact.file}.`,
+        },
+      });
+    }
+  }
+
+  for (const fact of blockingDataFlowFacts) {
+    const deltaAssertion = `(assert (DataFlow ${smtId(fact.data)} ${smtId(fact.to)}))`;
+    let matched = false;
+    for (const invariant of artifact.invariants) {
+      for (const rule of invariant.rules) {
+        if (rule.kind === 'DenyDataFlow' && rule.data === fact.data && rule.to === fact.to) {
+          const permanentConstraint = buildDataPermanentConstraint(rule);
+          violations.push({
+            type: 'dataflow_violation',
+            invariant: invariant.name,
+            rule,
+            detected: {
+              from: fact.via,
+              to: fact.to,
+              data: fact.data,
+              via: fact.via,
+              confidence: fact.confidence,
+              evidence: fact.evidence,
+              file: fact.file,
+            },
+            message: `Data '${fact.data}' must NOT flow to '${fact.to}' (invariant: ${invariant.name})`,
+            z3_proof: {
+              permanent_constraint: permanentConstraint,
+              delta_assertion: deltaAssertion,
+              explanation:
+                `Z3 returned UNSAT because '${permanentConstraint}' (from invariant '${invariant.name}') ` +
+                `contradicts '${deltaAssertion}' (derived from code/config in ${fact.file}).`,
+            },
+          });
+          matched = true;
+        }
+      }
+    }
+    if (!matched) {
+      violations.push({
+        type: 'dataflow_violation',
+        invariant: 'unknown',
+        rule: { kind: 'DenyDataFlow', data: fact.data, to: fact.to },
+        detected: {
+          from: fact.via,
+          to: fact.to,
+          data: fact.data,
+          via: fact.via,
+          confidence: fact.confidence,
+          evidence: fact.evidence,
+          file: fact.file,
+        },
+        message: `Data '${fact.data}' flow to '${fact.to}' violates architectural constraints`,
+        z3_proof: {
+          permanent_constraint: `(assert (=> (DataFlow ${smtId(fact.data)} ${smtId(fact.to)}) false))`,
+          delta_assertion: deltaAssertion,
+          explanation: `Z3 returned UNSAT: a deny-dataflow constraint for '${fact.data}→${fact.to}' contradicts the detected dataflow in ${fact.file}.`,
         },
       });
     }

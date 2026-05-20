@@ -150,7 +150,15 @@ export function parse(tokens: Token[]): Program {
     return { kind: 'DataDecl', name, fields };
   }
 
-  // component NAME { runs_on: X  paths: "glob"  repo: RepoName  implements: ContractA  consumes: ContractB }
+  function parseIdentList(): string[] {
+    const values = [expect('IDENT').value];
+    while (consume('COMMA')) {
+      values.push(expect('IDENT').value);
+    }
+    return values;
+  }
+
+  // component NAME { runs_on: X  paths: "glob"  repo: RepoName  implements: ContractA  consumes: ContractB  handles: DataA }
   function parseComponentDecl(): ComponentDecl {
     expect('KEYWORD', 'component');
     const name = expect('IDENT').value;
@@ -159,6 +167,7 @@ export function parse(tokens: Token[]): Program {
     let repoRef: string | undefined;
     const implementsList: string[] = [];
     const consumesList: string[] = [];
+    const handlesList: string[] = [];
     expect('LBRACE');
     while (!match('RBRACE') && !eof()) {
       const key = advance().value; // runs_on, paths, repo, implements, consumes, or unknown
@@ -170,15 +179,11 @@ export function parse(tokens: Token[]): Program {
       } else if (key === 'repo') {
         repoRef = expect('IDENT').value;
       } else if (key === 'implements') {
-        implementsList.push(expect('IDENT').value);
-        while (consume('COMMA')) {
-          implementsList.push(expect('IDENT').value);
-        }
+        implementsList.push(...parseIdentList());
       } else if (key === 'consumes') {
-        consumesList.push(expect('IDENT').value);
-        while (consume('COMMA')) {
-          consumesList.push(expect('IDENT').value);
-        }
+        consumesList.push(...parseIdentList());
+      } else if (key === 'handles') {
+        handlesList.push(...parseIdentList());
       } else {
         // skip unknown props
         while (!match('RBRACE') && !eof() &&
@@ -195,6 +200,7 @@ export function parse(tokens: Token[]): Program {
       ...(repoRef ? { repo: repoRef } : {}),
       ...(implementsList.length > 0 ? { implements: implementsList } : {}),
       ...(consumesList.length > 0 ? { consumes: consumesList } : {}),
+      ...(handlesList.length > 0 ? { handles: handlesList } : {}),
     };
   }
 
@@ -215,12 +221,22 @@ export function parse(tokens: Token[]): Program {
     while (!match('RBRACE') && !eof()) {
       const action = advance().value; // 'deny' or 'require'
       if (action === 'deny') {
-        expect('KEYWORD', 'flow');
-        const from = expect('IDENT').value;
-        expect('ARROW');
-        const to = expect('IDENT').value;
-        consume('SEMICOLON');
-        rules.push({ kind: 'DenyFlow', from, to });
+        const denied = advance();
+        if (denied.value === 'flow') {
+          const from = expect('IDENT').value;
+          expect('ARROW');
+          const to = expect('IDENT').value;
+          consume('SEMICOLON');
+          rules.push({ kind: 'DenyFlow', from, to });
+        } else if (denied.value === 'dataflow') {
+          const data = expect('IDENT').value;
+          expect('ARROW');
+          const to = expect('IDENT').value;
+          consume('SEMICOLON');
+          rules.push({ kind: 'DenyDataFlow', data, to });
+        } else {
+          throw new ParseError(`expected 'flow' or 'dataflow' after deny`, denied);
+        }
       } else if (action === 'require') {
         expect('KEYWORD', 'encryption');
         expect('KEYWORD', 'on');

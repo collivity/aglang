@@ -1,15 +1,19 @@
 // AGENTS.md emitter — generates structured context for AI coding agents
 // Output: AGENTS.md committed to the repository root for agents to load
 import type { ArchitectureArtifact } from './artifact.ts';
+import type { ArtifactInvariantRule } from './artifact.ts';
 
-function ruleDescription(rule: { kind: string; from: string; to: string }): string {
+function ruleDescription(rule: ArtifactInvariantRule): string {
   if (rule.kind === 'DenyFlow') {
     return `**FORBIDDEN**: \`${rule.from}\` must NOT directly access \`${rule.to}\``;
+  }
+  if (rule.kind === 'DenyDataFlow') {
+    return `**FORBIDDEN**: data \`${rule.data}\` must NOT flow to \`${rule.to}\``;
   }
   if (rule.kind === 'RequireEncryption') {
     return `**REQUIRED**: All flows from \`${rule.from}\` to \`${rule.to}\` must be encrypted`;
   }
-  return `${rule.kind}: ${rule.from} → ${rule.to}`;
+  return `${(rule as { kind: string }).kind}: ${JSON.stringify(rule)}`;
 }
 
 export function emitAgentsMarkdown(artifact: ArchitectureArtifact): string {
@@ -23,6 +27,17 @@ export function emitAgentsMarkdown(artifact: ArchitectureArtifact): string {
   lines.push(`> (Z3-backed architecture checks plus direct policy evaluators). Violations block the commit with an exact explanation.`);
   lines.push(`> **When in doubt, consult this file before writing code.**`);
   lines.push('');
+
+  if ((artifact.enforcement ?? []).length > 0) {
+    lines.push(`## Enforcement Semantics`);
+    lines.push('');
+    lines.push(`| Declaration | Level | Mechanism |`);
+    lines.push(`|-------------|-------|-----------|`);
+    for (const item of artifact.enforcement) {
+      lines.push(`| \`${item.declaration}\` | \`${item.level}\` | ${item.mechanism} |`);
+    }
+    lines.push('');
+  }
 
   // Infrastructure nodes
   if ((artifact.nodes ?? []).length > 0) {
@@ -48,7 +63,7 @@ export function emitAgentsMarkdown(artifact: ArchitectureArtifact): string {
       lines.push(`- **File glob**: \`${artifact.mappings[comp]}\``);
       const relatedRules = artifact.invariants.flatMap(inv =>
         inv.rules
-          .filter(r => r.from === comp || r.to === comp)
+          .filter(r => r.kind === 'DenyDataFlow' ? r.to === comp : r.from === comp || r.to === comp)
           .map(r => ({ invName: inv.name, rule: r }))
       );
       if (relatedRules.length > 0) {

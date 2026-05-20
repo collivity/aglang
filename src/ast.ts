@@ -41,6 +41,7 @@ export interface ComponentDecl {
   repo?: string;    // optional: references a RepoDecl name
   implements?: string[];  // contract names this component implements
   consumes?: string[];    // contract names this component consumes
+  handles?: string[];     // data type names handled/carried by this component
 }
 
 export interface ServiceDecl {
@@ -51,7 +52,8 @@ export interface ServiceDecl {
 
 export type InvariantRule =
   | { kind: 'DenyFlow'; from: string; to: string }
-  | { kind: 'RequireEncryption'; from: string; to: string };
+  | { kind: 'RequireEncryption'; from: string; to: string }
+  | { kind: 'DenyDataFlow'; data: string; to: string };
 
 export interface InvariantDecl {
   kind: 'InvariantDecl';

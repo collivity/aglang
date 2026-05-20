@@ -62,6 +62,8 @@ interface Verdict {
 }
 ```
 
+Flow violations may also have `"type": "dataflow_violation"` when a `deny dataflow` invariant is violated. These include the denied data type in `detected.data` and the component that carried it in `detected.via`.
+
 ### Change policy violation
 
 ```json

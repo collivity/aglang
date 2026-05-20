@@ -10,6 +10,7 @@ module.exports = {
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'How it works', link: '/how-it-works' },
+      { text: 'Examples', link: '/examples' },
       { text: 'CLI Reference', link: '/cli/reference' },
       { text: 'Extractors', link: '/extractors' },
       { text: 'Agents', link: '/agents' },
@@ -22,6 +23,7 @@ module.exports = {
         items: [
           { text: 'What is aglang?', link: '/guide/getting-started' },
           { text: 'Quick Setup (aglc add)', link: '/guide/generate' },
+          { text: 'Examples', link: '/examples' },
           { text: 'How it works ->', link: '/how-it-works' },
         ]
       },

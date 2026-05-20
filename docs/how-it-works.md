@@ -1,6 +1,6 @@
 # How aglang Works
 
-aglang is a **Dual-Compiler System**. Unlike a traditional language compiler (like `gcc` or `tsc`) that turns source code into machine code or JavaScript, aglang compiles your high-level system rules into mathematical equations, while a secondary extraction tool compiles incoming Git diffs into the exact same mathematical format. Z3, an industry-grade SMT solver from Microsoft Research, checks whether the two sides are compatible.
+aglang is a **dual-compiler system with explicit enforcement semantics**. Unlike a traditional language compiler (like `gcc` or `tsc`) that turns source code into machine code or JavaScript, aglang compiles high-level system rules into a checked artifact, while runtime gates extract facts from code, workflows, and diffs. Some rules are proven with Z3; others are deterministic policy checks; advisory declarations are emitted to agent context without blocking by themselves.
 
 Here is the step-by-step breakdown of how an `.ag` file goes from a clean text specification to a live, real-time mathematical gate.
 
@@ -25,7 +25,7 @@ The compiler reads your `.ag` file and parses it into an **Architecture Abstract
 
 ### Step 2 — Translating to First-Order Logic (SMT-LIB Format)
 
-The compiler strips away the developer-friendly words and translates the invariants into standard **SMT-LIB** formulas — the universal language of math solvers like Z3.
+The compiler strips away the developer-friendly words and translates formal rules into standard **SMT-LIB** formulas — the universal language of math solvers like Z3.
 
 For example, this invariant rule:
 
@@ -43,11 +43,12 @@ Flow(PublicGateway, LedgerDatabase) ⟹ Violation
 
 ### Step 3 — Emitting `architecture.o`
 
-The compiler outputs a highly optimised, compiled JSON artifact (`architecture.o`). This file contains:
+The compiler outputs a compiled JSON artifact (`architecture.o`). This file contains:
 
 - **Mathematical constraints** — the SMT-LIB deny-flow formulas
 - **Static string mappings** — e.g. `component PublicGateway` maps to directory glob `src/api/gateway/*`
 - **Invariant metadata** — names, descriptions, confidence thresholds
+- **Enforcement taxonomy** — whether each declaration kind is `formal_z3`, `deterministic_policy`, or `advisory`
 
 ---
 
@@ -96,6 +97,16 @@ This is what happens the moment an agent or human types `git commit`. The Arch r
   Allow commit    Reject + proof
 ```
 
+## Enforcement Levels
+
+| Level | Used for | Meaning |
+|---|---|---|
+| `formal_z3` | `deny flow`, `deny dataflow`, `change_policy` | Facts are asserted into SMT and checked by Z3. |
+| `deterministic_policy` | `contract`, `workflow_policy` | Extracted facts are checked by deterministic code paths with exact diagnostics. |
+| `advisory` | `machine`, `permission`, `require encryption` | Rules are emitted to docs/agent context, but do not block yet. |
+
+This distinction is part of the product contract: aglang should not imply that advisory declarations are formally enforced.
+
 ### Step 1 — Parsing the Git Diff
 
 The runtime scans the staging area with `git diff --cached`. For each changed file (e.g. `src/api/gateway/checkout.py`), it consults the `architecture.o` mapping dictionary and tags the delta as belonging to the `PublicGateway` component.
@@ -143,10 +154,10 @@ Then it runs `solver.check()`:
 
 ### Step 5 — Human-Readable Diagnostics
 
-If Z3 returns SAT, it provides a raw model: `[src_tier = "public", tgt_tier = "internal", violation = true]`. The diagnostic layer maps those tokens back to your source file and the specific invariant name:
+If a gate finds a violation, the diagnostic layer maps the extracted fact back to your source file and the specific rule name:
 
 ```
-Arch Compilation Error (Rule: SecureLedger):
+aglang Architecture Compilation Error (Rule: SecureLedger):
 
 Your changes in src/api/gateway/checkout.py attempt to establish
 a direct connection to LedgerDatabase. This component is explicitly

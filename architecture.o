@@ -1,10 +1,54 @@
 {
-  "schemaVersion": 7,
+  "schemaVersion": 9,
   "sourcePath": "C:\\Users\\pante\\Codespaces\\aglang\\architecture.ag",
+  "enforcement": [
+    {
+      "declaration": "invariant deny flow",
+      "level": "formal_z3",
+      "mechanism": "Flow facts extracted from code are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant deny dataflow",
+      "level": "formal_z3",
+      "mechanism": "Dataflow facts inferred from handled data and extracted flows are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "change_policy",
+      "level": "formal_z3",
+      "mechanism": "Touched-component facts are asserted against SMT-LIB implication rules."
+    },
+    {
+      "declaration": "contract",
+      "level": "deterministic_policy",
+      "mechanism": "Route extractors compare implemented and consumed endpoints against declared contracts."
+    },
+    {
+      "declaration": "workflow_policy",
+      "level": "deterministic_policy",
+      "mechanism": "GitHub Actions facts are checked for publish/deploy/release, permissions, and step order."
+    },
+    {
+      "declaration": "invariant require encryption",
+      "level": "advisory",
+      "mechanism": "Reported as warnings because extractors do not yet prove encryption."
+    },
+    {
+      "declaration": "machine",
+      "level": "advisory",
+      "mechanism": "Emitted to AGENTS.md for agent guidance; transition extraction is not enforced yet."
+    },
+    {
+      "declaration": "permission",
+      "level": "advisory",
+      "mechanism": "Emitted to AGENTS.md for agent guidance; access-control extraction is not enforced yet."
+    }
+  ],
   "constraints": [
     "; === aglang base sorts ===",
     "(declare-sort Entity 0)",
+    "(declare-sort DataType 0)",
     "(declare-fun Flow      (Entity Entity) Bool)",
+    "(declare-fun DataFlow  (DataType Entity) Bool)",
     "(declare-fun Encrypted (Entity Entity) Bool)",
     "(declare-fun Trusted   (Entity) Bool)",
     "(declare-fun IsNode    (Entity) Bool)",
@@ -273,6 +317,7 @@
   "permissions": [],
   "contracts": [],
   "componentContracts": [],
+  "componentData": [],
   "plugins": [],
   "repos": [],
   "componentRepos": {},

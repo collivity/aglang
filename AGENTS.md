@@ -6,6 +6,19 @@
 > (Z3-backed architecture checks plus direct policy evaluators). Violations block the commit with an exact explanation.
 > **When in doubt, consult this file before writing code.**
 
+## Enforcement Semantics
+
+| Declaration | Level | Mechanism |
+|-------------|-------|-----------|
+| `invariant deny flow` | `formal_z3` | Flow facts extracted from code are asserted against SMT-LIB constraints. |
+| `invariant deny dataflow` | `formal_z3` | Dataflow facts inferred from handled data and extracted flows are asserted against SMT-LIB constraints. |
+| `change_policy` | `formal_z3` | Touched-component facts are asserted against SMT-LIB implication rules. |
+| `contract` | `deterministic_policy` | Route extractors compare implemented and consumed endpoints against declared contracts. |
+| `workflow_policy` | `deterministic_policy` | GitHub Actions facts are checked for publish/deploy/release, permissions, and step order. |
+| `invariant require encryption` | `advisory` | Reported as warnings because extractors do not yet prove encryption. |
+| `machine` | `advisory` | Emitted to AGENTS.md for agent guidance; transition extraction is not enforced yet. |
+| `permission` | `advisory` | Emitted to AGENTS.md for agent guidance; access-control extraction is not enforced yet. |
+
 ## Infrastructure Nodes
 
 | Name | Type | Trust | Protocol | Auth |

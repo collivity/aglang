@@ -1,121 +1,114 @@
 # Language Reference
 
-An `.ag` file is a sequence of top-level declarations. Order does not matter — the compiler resolves references.
+An `.ag` file is a sequence of top-level declarations. Order does not matter; the compiler resolves references during type checking.
 
-## Component
+## Enforcement Semantics
 
-Declares a logical unit of your system and maps it to a file-path footprint.
+aglang declarations have explicit enforcement levels:
 
-```ag
-component <Name> {
-  path: "<glob>"          # required — file paths this component owns
-  tier: "<string>"        # optional — logical tier (e.g. "public", "internal", "data")
-  language: "<string>"    # optional — hint for the extractor (e.g. "csharp", "python")
-}
-```
+| Declaration | Level | Meaning |
+|-------------|-------|---------|
+| `invariant deny flow` | `formal_z3` | Extracted flow facts are checked against SMT-LIB constraints in Z3. |
+| `invariant deny dataflow` | `formal_z3` | Dataflow facts inferred from handled data and extracted flows are checked in Z3. |
+| `change_policy` | `formal_z3` | Touched-component facts are checked against SMT-LIB implication rules in Z3. |
+| `contract` | `deterministic_policy` | Route facts are compared against declared implements/consumes contracts. |
+| `workflow_policy` | `deterministic_policy` | GitHub Actions facts are checked for release, deploy, publish, permission, and step-order rules. |
+| `invariant require encryption` | `advisory` | Reported as a warning because static extraction does not yet prove encryption. |
+| `machine` | `advisory` | Emitted to agent context; transition extraction is not enforced yet. |
+| `permission` | `advisory` | Emitted to agent context; access-control extraction is not enforced yet. |
 
-**Example:**
-
-```ag
-component PaymentService {
-  path: "src/services/payment/**"
-  tier: "internal"
-}
-```
+`formal_z3` and `deterministic_policy` violations block checks. `advisory` declarations guide agents and docs, but do not block by themselves unless a future extractor/gate promotes them.
 
 ## Infrastructure Node
 
-Declares an external system (database, queue, cache, etc.) that is not a component in your codebase.
+Declares an infrastructure or runtime entity that components run on or interact with.
 
 ```ag
-node <Name> {
-  kind: "database" | "queue" | "cache" | "external" | "storage"
-  host: "<string>"        # optional — connection host/URL hint
+node <name> : <node_type> {
+  trust: trusted | untrusted | semi_trusted
+  protocol: https | grpc | ws       // optional
+  auth: none | jwt | oauth2 | api_key // optional
 }
 ```
 
-**Example:**
+Example:
 
 ```ag
-node LedgerDatabase {
-  kind: "database"
+node api_runtime : server { trust: trusted protocol: https }
+node ledger_db : postgres { trust: trusted auth: mtls }
+```
+
+Node types come from the stdlib, including `server`, `ci_runner`, `package_registry`, `static_host`, `release_host`, `postgres`, `redis`, `s3_bucket`, and `agent_runtime`.
+
+## Component
+
+Declares a logical code component and maps it to source files.
+
+```ag
+component <Name> {
+  runs_on: <node_name>
+  paths: "<glob>"
+  implements: <ContractName> // optional, comma-separated
+  consumes: <ContractName>   // optional, comma-separated
+  handles: <DataType>        // optional, comma-separated
+  repo: <RepoName>           // optional
 }
 ```
 
-## Flow
-
-Declares a data-flow relationship between components or nodes.
+Example:
 
 ```ag
-flow <Name> {
-  from: <ComponentOrNode>
-  to:   <ComponentOrNode>
-}
-```
-
-Flows can also be inline inside invariants:
-
-```ag
-invariant X {
-  deny flow PublicGateway -> LedgerDatabase
+component PublicApi {
+  runs_on: api_runtime
+  paths: "src/api/**/*.ts"
+  implements: UsersApi
 }
 ```
 
 ## Invariant
 
-The core enforcement primitive. An invariant declares a rule that must never be violated.
+Flow invariants declare component or node relationships that must not be violated.
 
 ```ag
 invariant <Name> {
-  <rule>
+  deny flow <ComponentOrNode> -> <ComponentOrNode>
+  deny dataflow <DataType> -> <ComponentOrNode>
+  require encryption on flow <ComponentOrNode> -> <ComponentOrNode>
 }
 ```
 
-### Rule types
-
-| Rule | Description |
-|------|-------------|
-| `deny flow A -> B` | No code path may go from A to B |
-| `require flow A -> B` | A must have a path to B |
-| `deny tier <t1> -> <t2>` | No component in tier t1 may access tier t2 |
-| `require encryption A -> B` | All flows A→B must use encrypted channels |
-| `require auth A` | Component A must require authentication |
-
-**Examples:**
+Example:
 
 ```ag
-# Deny direct public-to-database access
-invariant SecureLedger {
-  deny flow PublicGateway -> LedgerDatabase
-}
-
-# Enforce tier boundaries
-invariant TierBoundary {
-  deny tier "public" -> "data"
-}
-
-# Require auth on the admin panel
-invariant AdminAuth {
-  require auth AdminPanel
+invariant Layering {
+  deny flow PublicApi -> ledger_db
 }
 ```
+
+`deny flow` is Z3-backed. `require encryption on flow` is currently advisory because extractors do not yet prove encrypted transport.
+
+`deny dataflow` is also Z3-backed. It blocks when a component that `handles` a data type has an extracted flow to the denied target.
 
 ## Contract
 
-Contracts define agreed-upon interface shapes between components, optionally imported from OpenAPI specs.
+Contracts define interface shapes between components.
 
 ```ag
-contract <Name> {
-  GET  "/users/{id}" -> User
-  POST "/orders"     -> Order
+contract UsersApi {
+  GET  "/api/users"      -> User[]
+  POST "/api/users"      -> User
+  query viewer()         -> User
+  rpc GetUser(UserId)    -> User
+  publishes: "user.created"
+  subscribes: "user.deleted"
 }
 ```
 
-See [Contracts](./contracts) for details.
+Components opt into contract enforcement with `implements:` or `consumes:`.
 
 ## Workflow Policy
 
-`workflow_policy` blocks enforce GitHub Actions release and deployment safety. Workflow YAML files are modeled as regular components, and publish/deploy/release targets are modeled as CI/CD nodes.
+`workflow_policy` blocks enforce GitHub Actions release and deployment safety. Workflow YAML files are modeled as components, and publish/deploy/release targets are modeled as CI/CD nodes.
 
 ```ag
 node github_actions : ci_runner { trust: trusted }
@@ -135,39 +128,64 @@ workflow_policy ReleaseSafety {
 }
 ```
 
-Supported actions in v1 are `publish`, `deploy`, `release`, `permission`, and `before`. Conditions support `when tag "<glob>"`, `when branch "<glob>"`, and `when pull_request`.
-
-CI/CD node types are `ci_runner`, `package_registry`, `container_registry`, `static_host`, and `release_host`.
+Supported actions are `publish`, `deploy`, and `release`. Conditions support `when tag "<glob>"`, `when branch "<glob>"`, and `when pull_request`.
 
 ## Change Policy
 
-`change_policy` blocks enforce that related components are updated together in the same checked diff. This is useful for docs freshness, package metadata reviews, generated agent context, and release-safety workflows.
+`change_policy` blocks enforce that related components are updated together in the same checked diff.
 
 ```ag
-component CliCompiler {
-  runs_on: node_runtime
-  paths: "src/index.ts"
-}
-
-component CliReferenceDocs {
-  runs_on: node_runtime
-  paths: "docs/cli/reference.md"
-}
-
-component ReadmeDocs {
-  runs_on: node_runtime
-  paths: "README.md"
-}
-
 change_policy DocsFreshness {
   require touched CliReferenceDocs when touched CliCompiler
   require touched ReadmeDocs when touched CliCompiler
 }
 ```
 
-Semantics: if any staged file maps to the trigger component, at least one staged file must map to the required component. The gate emits Z3-backed `change_violations[]` in JSON verdicts when the implication cannot be satisfied.
+Semantics: if any staged file maps to the trigger component, at least one staged file must map to the required component. The gate emits Z3-backed `change_violations[]` when the implication cannot be satisfied.
 
 Change policies prove that declared surfaces changed together; they do not prove that prose is semantically complete.
+
+## State Machine
+
+State machines describe allowed transitions for a data type field. They are advisory in the current runtime.
+
+```ag
+enum OrderStatus { Draft | Active | Archived }
+
+data Order {
+  status: OrderStatus
+}
+
+machine OrderLifecycle on Order.status {
+  allow transition Draft -> Active
+  deny transition Active -> Draft
+}
+```
+
+## Permission
+
+Permissions describe role/action rules. They are advisory in the current runtime.
+
+```ag
+enum Role { Admin | Member }
+
+permission ProjectAccess on Project {
+  allow Role.Admin -> *
+  deny Role.Member -> delete
+}
+```
+
+## Data And Enum
+
+```ag
+data User {
+  id: UUID
+  email: String
+  roles: List<Role>
+}
+
+enum Role { Admin | Member }
+```
 
 ## Import
 
@@ -184,6 +202,4 @@ Cyclic imports are detected and rejected at compile time.
 
 ```ag
 // Single-line comment
-
-// There are no block comments
 ```

@@ -17,7 +17,7 @@ export interface Token {
 
 const KEYWORDS = new Set([
   'node', 'component', 'data', 'enum', 'service', 'invariant', 'test',
-  'deny', 'allow', 'flow', 'require', 'encryption', 'on',
+  'deny', 'allow', 'flow', 'dataflow', 'require', 'encryption', 'on',
   'runs_on', 'paths', 'trust', 'connectivity', 'latency', 'failure_mode',
   'protocol', 'auth', 'rate_limit',
   'where', 'no', 'every', 'some',

@@ -16,6 +16,7 @@ import { rustPlugin } from '../analyzers/rust.ts';
 import { javaPlugin, scalaPlugin } from '../analyzers/java.ts';
 import { typescriptServerPlugin } from '../analyzers/typescript-server.ts';
 import { swiftPlugin } from '../analyzers/swift.ts';
+import { loadBalancerConfigPlugin } from '../analyzers/load-balancer.ts';
 import { ExtractionCache, hashArtifact, extractWithCache } from './extraction-cache.ts';
 import {
   buildGraphReport,
@@ -25,6 +26,16 @@ import {
 } from './graph-projection.ts';
 
 export type { FlowFact, GraphFact };
+
+export interface DataFlowFact {
+  data: string;
+  to: string;
+  via: string;
+  evidence: string;
+  file: string;
+  line?: number;
+  confidence: FlowFact['confidence'];
+}
 
 // Registry of built-in plugins (keyed by extension)
 const BUILT_IN_PLUGINS: ExtractorPlugin[] = [
@@ -37,6 +48,7 @@ const BUILT_IN_PLUGINS: ExtractorPlugin[] = [
   scalaPlugin,
   typescriptServerPlugin,
   swiftPlugin,
+  loadBalancerConfigPlugin,
 ];
 
 function buildExtensionMap(plugins: ExtractorPlugin[]): Map<string, ExtractorPlugin> {
@@ -51,8 +63,10 @@ function buildExtensionMap(plugins: ExtractorPlugin[]): Map<string, ExtractorPlu
 
 export interface DeltaResult {
   facts: FlowFact[];
+  dataFlowFacts: DataFlowFact[];
   graphFacts: GraphFact[];
   blockingFacts: FlowFact[];   // confidence=definite (or probable in strict mode)
+  blockingDataFlowFacts: DataFlowFact[];
   warningFacts: FlowFact[];    // confidence=probable (non-strict)
   smtAssertions: string[];     // only for blocking facts
   // Maps "from::to" → the exact SMT assertion string fed to Z3
@@ -62,6 +76,29 @@ export interface DeltaResult {
   graphWarnings: Array<{ graphFactId: string; message: string }>;
   /** Number of files whose extraction result came from cache */
   cacheHits: number;
+}
+
+function smtId(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
+function inferDataFlowFacts(flowFacts: FlowFact[], artifact: ArchitectureArtifact): DataFlowFact[] {
+  const handles = new Map((artifact.componentData ?? []).map(c => [c.component, c.handles]));
+  const dataFlowFacts: DataFlowFact[] = [];
+  for (const fact of flowFacts) {
+    for (const data of handles.get(fact.from) ?? []) {
+      dataFlowFacts.push({
+        data,
+        to: fact.to,
+        via: fact.from,
+        evidence: `${fact.from} handles ${data}; ${fact.evidence}`,
+        file: fact.file,
+        ...(fact.line ? { line: fact.line } : {}),
+        confidence: fact.confidence,
+      });
+    }
+  }
+  return dataFlowFacts;
 }
 
 function defaultStrategyForPlugin(plugin: ExtractorPlugin): ExtractionStrategy {
@@ -169,13 +206,22 @@ export async function generateDeltaAssertions(
 
   const projection = projectGraphToFlows(uniqueGraphFacts, artifact, { strict });
   const graphReport = buildGraphReport(uniqueGraphFacts, projection);
+  const dataFlowFacts = inferDataFlowFacts(projection.flowFacts, artifact);
+  const blockingDataFlowFacts = dataFlowFacts.filter(f =>
+    artifact.invariants.some(inv => inv.rules.some(rule =>
+      rule.kind === 'DenyDataFlow' && rule.data === f.data && rule.to === f.to,
+    )),
+  );
+  const dataFlowAssertions = blockingDataFlowFacts.map(f => `(assert (DataFlow ${smtId(f.data)} ${smtId(f.to)}))`);
 
   return {
     facts: projection.flowFacts,
+    dataFlowFacts,
     graphFacts: uniqueGraphFacts,
     blockingFacts: projection.blockingFacts,
+    blockingDataFlowFacts,
     warningFacts: projection.warningFacts,
-    smtAssertions: projection.smtAssertions,
+    smtAssertions: [...projection.smtAssertions, ...dataFlowAssertions],
     factSmtMap: projection.factSmtMap,
     graphReport,
     unresolvedTargets: projection.unresolvedTargets,

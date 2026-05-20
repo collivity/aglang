@@ -11,6 +11,34 @@ const GREEN  = '\x1b[32m';
 const MAGENTA = '\x1b[35m';
 
 function formatViolationBlock(v: GateViolation): string[] {
+  if (v.type === 'dataflow_violation') {
+    return [
+      '',
+      `${RED}${BOLD}╔══════════════════════════════════════════════════════════╗${RESET}`,
+      `${RED}${BOLD}║        aglang Dataflow Policy Violation                  ║${RESET}`,
+      `${RED}${BOLD}╚══════════════════════════════════════════════════════════╝${RESET}`,
+      '',
+      `${BOLD}Invariant Violated:${RESET}  ${YELLOW}${v.invariant}${RESET}`,
+      `${BOLD}Rule:${RESET}                deny dataflow ${CYAN}${v.detected.data}${RESET} → ${CYAN}${v.detected.to}${RESET}`,
+      `${BOLD}Via component:${RESET}       ${CYAN}${v.detected.via ?? v.detected.from}${RESET}`,
+      '',
+      `${BOLD}Detected in file:${RESET}`,
+      `  ${v.detected.file}`,
+      '',
+      `${BOLD}Evidence:${RESET} [confidence: ${v.detected.confidence}]`,
+      `  ${v.detected.evidence}`,
+      '',
+      `${BOLD}Explanation:${RESET}`,
+      `  ${v.message}`,
+      '',
+      `${BOLD}Z3 Proof (conflicting assertions):${RESET}`,
+      `  ${CYAN}Permanent rule:${RESET} ${v.z3_proof.permanent_constraint}`,
+      `  ${CYAN}Delta (your code/config):${RESET} ${v.z3_proof.delta_assertion}`,
+      `  These two assertions are mutually UNSAT — formal proof of violation.`,
+    ];
+  }
+
+  const rule = v.rule as { kind: string; from: string; to: string };
   return [
     '',
     `${RED}${BOLD}╔══════════════════════════════════════════════════════════╗${RESET}`,
@@ -18,7 +46,7 @@ function formatViolationBlock(v: GateViolation): string[] {
     `${RED}${BOLD}╚══════════════════════════════════════════════════════════╝${RESET}`,
     '',
     `${BOLD}Invariant Violated:${RESET}  ${YELLOW}${v.invariant}${RESET}`,
-    `${BOLD}Rule:${RESET}                ${v.rule.kind} ${CYAN}${v.rule.from}${RESET} → ${CYAN}${v.rule.to}${RESET}`,
+    `${BOLD}Rule:${RESET}                ${rule.kind} ${CYAN}${rule.from}${RESET} → ${CYAN}${rule.to}${RESET}`,
     '',
     `${BOLD}Detected in file:${RESET}`,
     `  ${v.detected.file}`,
@@ -28,7 +56,7 @@ function formatViolationBlock(v: GateViolation): string[] {
     '',
     `${BOLD}Explanation:${RESET}`,
     `  ${v.message}`,
-    `  The architecture requires that ${v.rule.from} does NOT directly access ${v.rule.to}.`,
+    `  The architecture requires that ${rule.from} does NOT directly access ${rule.to}.`,
     '',
     `${BOLD}Z3 Proof (conflicting assertions):${RESET}`,
     `  ${CYAN}Permanent rule:${RESET} ${v.z3_proof.permanent_constraint}`,

@@ -16,6 +16,9 @@ hero:
       text: How it works
       link: /how-it-works
     - theme: alt
+      text: Examples
+      link: /examples
+    - theme: alt
       text: View on GitHub
       link: https://github.com/collivity/aglang
 
@@ -30,7 +33,7 @@ features:
 
   - icon: 🏗️
     title: Architecture as Code
-    details: Write human-readable .ag files that describe your system components, data flows, contracts, workflow policies, and invariants.
+    details: Write human-readable .ag files with explicit enforcement levels for formal Z3 rules, deterministic policies, and advisory guidance.
 
   - icon: 🔒
     title: Z3-backed Commit Enforcement

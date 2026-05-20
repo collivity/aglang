@@ -186,15 +186,29 @@ export function check(program: Program): CheckError[] {
           errors.push({ message: `Component '${decl.name}' consumes unknown contract '${contractName}'` });
         }
       }
+      for (const dataName of (decl.handles ?? [])) {
+        if (!declaredData.has(dataName)) {
+          errors.push({ message: `Component '${decl.name}' handles unknown data type '${dataName}'` });
+        }
+      }
     }
 
     if (decl.kind === 'InvariantDecl') {
       for (const rule of decl.rules) {
-        if (!validFlowEndpoints.has(rule.from)) {
-          errors.push({ message: `Invariant '${decl.name}': unknown source '${rule.from}'` });
-        }
-        if (!validFlowEndpoints.has(rule.to)) {
-          errors.push({ message: `Invariant '${decl.name}': unknown target '${rule.to}'` });
+        if (rule.kind === 'DenyDataFlow') {
+          if (!declaredData.has(rule.data)) {
+            errors.push({ message: `Invariant '${decl.name}': unknown data type '${rule.data}'` });
+          }
+          if (!validFlowEndpoints.has(rule.to)) {
+            errors.push({ message: `Invariant '${decl.name}': unknown dataflow target '${rule.to}'` });
+          }
+        } else {
+          if (!validFlowEndpoints.has(rule.from)) {
+            errors.push({ message: `Invariant '${decl.name}': unknown source '${rule.from}'` });
+          }
+          if (!validFlowEndpoints.has(rule.to)) {
+            errors.push({ message: `Invariant '${decl.name}': unknown target '${rule.to}'` });
+          }
         }
       }
     }

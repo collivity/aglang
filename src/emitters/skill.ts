@@ -15,6 +15,11 @@ export interface SkillManifest {
     emit_context: string;
   };
   violation_schema: object;
+  enforcement: Array<{
+    declaration: string;
+    level: string;
+    mechanism: string;
+  }>;
   confidence_levels: Record<string, string>;
   advisory_note: string;
 }
@@ -136,15 +141,15 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
         agent_context: { type: 'string', description: 'Plain-text summary for agent consumption' },
       },
     },
+    enforcement: artifact.enforcement ?? [],
     confidence_levels: {
       definite: 'BLOCKING — Pattern is definitively detected (e.g. DI constructor injection). Will fail the gate.',
       probable:  'WARNING — Pattern is likely present (e.g. new-instantiation) but not certain. Non-blocking.',
       possible:  'INFO — Pattern may be present. Informational only. Never blocks.',
     },
     advisory_note:
-      'State machine transitions and permission rules in AGENTS.md are advisory — ' +
-      'they are not yet enforced by Z3 at commit time but MUST be followed. ' +
-      'Flow invariants (deny flow A -> B) ARE enforced and will block commits.',
+      'Enforcement is declaration-specific. Flow deny invariants and change_policy rules are Z3-backed. ' +
+      'Contracts and workflow policies are deterministic policy gates. State machines, permissions, and encryption requirements are advisory unless this manifest says otherwise.',
   };
 }
 

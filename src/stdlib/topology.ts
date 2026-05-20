@@ -124,7 +124,9 @@ export const VALID_AUTH_VALUES = new Set([
 export const BASE_SMT_DECLARATIONS: string[] = [
   '; === aglang base sorts ===',
   '(declare-sort Entity 0)',
+  '(declare-sort DataType 0)',
   '(declare-fun Flow      (Entity Entity) Bool)',
+  '(declare-fun DataFlow  (DataType Entity) Bool)',
   '(declare-fun Encrypted (Entity Entity) Bool)',
   '(declare-fun Trusted   (Entity) Bool)',
   '(declare-fun IsNode    (Entity) Bool)',

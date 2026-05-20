@@ -10,15 +10,25 @@ export type ArtifactEndpoint =
   | { kind: 'queue_publish'; topic: string }
   | { kind: 'queue_subscribe'; topic: string };
 
+export type ArtifactInvariantRule =
+  | { kind: 'DenyFlow'; from: string; to: string }
+  | { kind: 'RequireEncryption'; from: string; to: string }
+  | { kind: 'DenyDataFlow'; data: string; to: string };
+
 export interface ArchitectureArtifact {
   schemaVersion: number;
   sourcePath: string;
+  enforcement: Array<{
+    declaration: string;
+    level: 'formal_z3' | 'deterministic_policy' | 'advisory';
+    mechanism: string;
+  }>;
   // SMT-LIB constraint strings (permanent rules — enforced by Z3 at commit time)
   constraints: string[];
   // Maps component name → path glob (for diff-time file-to-component lookup)
   mappings: Record<string, string>;
   // All declared invariant names for diagnostics
-  invariants: Array<{ name: string; rules: Array<{ kind: string; from: string; to: string }> }>;
+  invariants: Array<{ name: string; rules: ArtifactInvariantRule[] }>;
   // Nodes and components for context emission
   nodes: Array<{ name: string; type: string; trust?: string; protocol?: string; auth?: string }>;
   // Enum declarations for context and agent use
@@ -54,6 +64,10 @@ export interface ArchitectureArtifact {
     component: string;
     implements: string[];
     consumes: string[];
+  }>;
+  componentData: Array<{
+    component: string;
+    handles: string[];
   }>;
   // External extractor plugin package names declared in the spec
   plugins: string[];
@@ -112,6 +126,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   const permissions: ArchitectureArtifact['permissions'] = [];
   const contracts: ArchitectureArtifact['contracts'] = [];
   const componentContracts: ArchitectureArtifact['componentContracts'] = [];
+  const componentData: ArchitectureArtifact['componentData'] = [];
   const plugins: string[] = [];
   const repos: ArchitectureArtifact['repos'] = [];
   const componentRepos: Record<string, string> = {};
@@ -131,11 +146,19 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
           consumes: decl.consumes ?? [],
         });
       }
+      if ((decl.handles?.length ?? 0) > 0) {
+        componentData.push({
+          component: decl.name,
+          handles: decl.handles ?? [],
+        });
+      }
     }
     if (decl.kind === 'InvariantDecl') {
       invariants.push({
         name: decl.name,
-        rules: decl.rules.map(r => ({ kind: r.kind, from: r.from, to: r.to })),
+        rules: decl.rules.map<ArtifactInvariantRule>(r => r.kind === 'DenyDataFlow'
+          ? ({ kind: r.kind, data: r.data, to: r.to })
+          : ({ kind: r.kind, from: r.from, to: r.to })),
       });
     }
     if (decl.kind === 'NodeDecl') {
@@ -220,8 +243,50 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   }
 
   return {
-    schemaVersion: 7,
+    schemaVersion: 9,
     sourcePath,
+    enforcement: [
+      {
+        declaration: 'invariant deny flow',
+        level: 'formal_z3',
+        mechanism: 'Flow facts extracted from code are asserted against SMT-LIB constraints.',
+      },
+      {
+        declaration: 'invariant deny dataflow',
+        level: 'formal_z3',
+        mechanism: 'Dataflow facts inferred from handled data and extracted flows are asserted against SMT-LIB constraints.',
+      },
+      {
+        declaration: 'change_policy',
+        level: 'formal_z3',
+        mechanism: 'Touched-component facts are asserted against SMT-LIB implication rules.',
+      },
+      {
+        declaration: 'contract',
+        level: 'deterministic_policy',
+        mechanism: 'Route extractors compare implemented and consumed endpoints against declared contracts.',
+      },
+      {
+        declaration: 'workflow_policy',
+        level: 'deterministic_policy',
+        mechanism: 'GitHub Actions facts are checked for publish/deploy/release, permissions, and step order.',
+      },
+      {
+        declaration: 'invariant require encryption',
+        level: 'advisory',
+        mechanism: 'Reported as warnings because extractors do not yet prove encryption.',
+      },
+      {
+        declaration: 'machine',
+        level: 'advisory',
+        mechanism: 'Emitted to AGENTS.md for agent guidance; transition extraction is not enforced yet.',
+      },
+      {
+        declaration: 'permission',
+        level: 'advisory',
+        mechanism: 'Emitted to AGENTS.md for agent guidance; access-control extraction is not enforced yet.',
+      },
+    ],
     constraints,
     mappings,
     invariants,
@@ -232,6 +297,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
     permissions,
     contracts,
     componentContracts,
+    componentData,
     plugins,
     repos,
     componentRepos,

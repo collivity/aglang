@@ -35,12 +35,11 @@ export function translate(program: Program): string[] {
     stmts.push('');
   }
 
-  // Data types as uninterpreted sorts — structural details not encoded in SMT
-  // (we encode state constraints as reachability predicates, not full types)
+  // Data types as constants over DataType — structural details are not encoded in SMT.
   if (dataTypes.length > 0) {
-    stmts.push('; === data type sorts ===');
+    stmts.push('; === data type declarations ===');
     for (const d of dataTypes) {
-      stmts.push(`(declare-sort ${smtId(d.name)} 0)`);
+      stmts.push(`(declare-const ${smtId(d.name)} DataType)`);
     }
     stmts.push('');
   }
@@ -79,10 +78,14 @@ export function translate(program: Program): string[] {
     for (const inv of invariants) {
       stmts.push(`; --- ${inv.name} ---`);
       for (const rule of inv.rules) {
-        const from = smtId(rule.from);
-        const to = smtId(rule.to);
         if (rule.kind === 'DenyFlow') {
+          const from = smtId(rule.from);
+          const to = smtId(rule.to);
           stmts.push(`(assert (=> (Flow ${from} ${to}) false))`);
+        } else if (rule.kind === 'DenyDataFlow') {
+          const data = smtId(rule.data);
+          const to = smtId(rule.to);
+          stmts.push(`(assert (=> (DataFlow ${data} ${to}) false))`);
         }
         // RequireEncryption: NOT emitted as Z3 constraint.
         // Encryption cannot be determined from static code analysis alone —
