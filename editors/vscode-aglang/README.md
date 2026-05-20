@@ -50,4 +50,4 @@ Save this as `architecture.ag`. The extension will highlight syntax and show par
 
 ## License
 
-MIT © Collivity
+ISC — see [LICENSE](./LICENSE).

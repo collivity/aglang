@@ -4,6 +4,25 @@ node node_runtime : agent_runtime {
   trust: trusted
 }
 
+node github_actions : ci_runner {
+  trust: trusted
+}
+
+node npm_registry : package_registry {
+  trust: trusted
+  auth: api_key
+}
+
+node github_pages : static_host {
+  trust: trusted
+  auth: oauth2
+}
+
+node github_releases : release_host {
+  trust: trusted
+  auth: oauth2
+}
+
 component CliCompiler {
   runs_on: node_runtime
   paths: "src/index.ts"
@@ -49,6 +68,46 @@ component DocsSite {
   paths: "{docs,site,scripts}/**/*.{md,ts,js,mjs}"
 }
 
+component PackageMetadata {
+  runs_on: node_runtime
+  paths: "{package.json,package-lock.json}"
+}
+
+component AgentSkill {
+  runs_on: node_runtime
+  paths: "skills/aglang/SKILL.md"
+}
+
+component AgentSkillInstaller {
+  runs_on: node_runtime
+  paths: "scripts/postinstall-agent-skill.mjs"
+}
+
+component ReadmeDocs {
+  runs_on: node_runtime
+  paths: "README.md"
+}
+
+component CliReferenceDocs {
+  runs_on: node_runtime
+  paths: "docs/cli/reference.md"
+}
+
+component PublicDocs {
+  runs_on: node_runtime
+  paths: "docs/**/*.md"
+}
+
+component ReleaseWorkflow {
+  runs_on: github_actions
+  paths: ".github/workflows/release.yml"
+}
+
+component DocsWorkflow {
+  runs_on: github_actions
+  paths: ".github/workflows/docs.yml"
+}
+
 component VscodeExtension {
   runs_on: node_runtime
   paths: "editors/vscode-aglang/src/**/*.ts"
@@ -91,4 +150,29 @@ invariant VscodeApiBoundary {
   deny flow VscodeExtension -> ExtractorAnalyzers
   deny flow VscodeExtension -> SmtBackend
   deny flow VscodeExtension -> GraphProjection
+}
+
+workflow_policy ReleaseSafety {
+  allow publish ReleaseWorkflow -> npm_registry when tag "v*.*.*"
+  allow release ReleaseWorkflow -> github_releases when tag "v*.*.*"
+  allow deploy DocsWorkflow -> github_pages when branch "master"
+  deny publish * -> npm_registry when pull_request
+  deny release * -> github_releases when pull_request
+  deny deploy * -> github_pages when pull_request
+  require before ReleaseWorkflow "npm run typecheck" -> "npm publish"
+  require before ReleaseWorkflow "npm run build" -> "npm publish"
+  require before ReleaseWorkflow "npm test" -> "npm publish"
+  require before ReleaseWorkflow "npm pack --dry-run" -> "npm publish"
+  require before ReleaseWorkflow "npm run docs:build" -> "npm publish"
+  deny permission * contents: write when pull_request
+}
+
+change_policy DocsFreshness {
+  require touched CliReferenceDocs when touched CliCompiler
+  require touched ReadmeDocs when touched CliCompiler
+  require touched CliReferenceDocs when touched PackageMetadata
+  require touched ReadmeDocs when touched PackageMetadata
+  require touched AgentSkill when touched PackageMetadata
+  require touched AgentSkill when touched AgentSkillInstaller
+  require touched PublicDocs when touched AgentSkill
 }

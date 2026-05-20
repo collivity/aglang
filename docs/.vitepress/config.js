@@ -1,6 +1,6 @@
 module.exports = {
   title: 'aglang',
-  description: 'Architecture Ground Language — agent-first architectural guardrails enforced at git-commit time via Z3 SMT solving.',
+  description: 'Architecture Ground Language — agent-facing architecture validation for continuous coding feedback and Z3-backed enforcement.',
   base: '/aglang/',
 
   themeConfig: {
@@ -56,7 +56,7 @@ module.exports = {
 
     footer: {
       message: 'Released under the ISC License.',
-      copyright: 'Copyright © 2025 Collivity'
+      copyright: 'Copyright © 2026 Collivity'
     },
 
     editLink: {
@@ -72,7 +72,7 @@ module.exports = {
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/aglang/logo.svg' }],
     ['meta', { name: 'og:type', content: 'website' }],
-    ['meta', { name: 'og:title', content: 'aglang — Architectural Guardrails for AI Agents' }],
-    ['meta', { name: 'og:description', content: 'Enforce architectural rules at git-commit time using SMT solving. Works with C#, Python, TypeScript, Go, Rust, JVM, Swift.' }],
+    ['meta', { name: 'og:title', content: 'aglang — Architecture Validation for Coding Agents' }],
+    ['meta', { name: 'og:description', content: 'Give agents a live interface to architecture rules with continuous validation and Z3-backed enforcement.' }],
   ]
 };

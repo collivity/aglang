@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: aglang
-  text: Architectural Guardrails for AI Agents
-  tagline: Define your system architecture once. Enforce it automatically at every git commit — for humans and AI agents alike.
+  text: Architecture Validation for Coding Agents
+  tagline: Give agents a live interface to your architecture rules, so they can validate work in progress while coding and still get Z3-backed enforcement before commits land.
   image:
     src: /hero.svg
     alt: aglang architecture pipeline diagram
@@ -20,53 +20,72 @@ hero:
       link: https://github.com/collivity/aglang
 
 features:
+  - icon: 🤖
+    title: Packaged Agent Skill
+    details: Install the aglang Codex skill so agents know when to read AGENTS.md, run aglc checks, and treat architecture verdicts as coding feedback.
+
+  - icon: 🔁
+    title: Work-in-progress Validation
+    details: Agents can run check-file during focused edits and check --all before finishing, long before a pre-commit hook fires.
+
   - icon: 🏗️
     title: Architecture as Code
-    details: Write human-readable .ag files that describe your system components, data flows, and invariants.
-
-  - icon: 🤖
-    title: Agent-First Design
-    details: Run aglc add once — AI agents get a skill.json manifest and AGENTS.md context so they understand your rules automatically.
+    details: Write human-readable .ag files that describe your system components, data flows, contracts, workflow policies, and invariants.
 
   - icon: 🔒
-    title: Git-Commit Enforcement
-    details: A pre-commit hook runs Z3 SMT solving against every staged change. Violations are rejected with precise diagnostics before the commit lands.
+    title: Z3-backed Commit Enforcement
+    details: Pre-commit hooks and CI checks run deterministic SMT solving against real extracted code behavior. Violations are rejected with precise diagnostics.
+
+  - icon: 📚
+    title: Docs Freshness Policies
+    details: Use change_policy rules to require docs, skills, package metadata, and implementation surfaces to move together in the same checked diff.
 
   - icon: 🌐
     title: 8 Language Extractors
     details: Automatically extract routes, dependencies, and infrastructure from C#, Python, TypeScript, Go, Rust, Java/Kotlin, Swift, and more.
 
-  - icon: 📐
-    title: Formal Verification
-    details: Architectural rules compile to SMT-LIB formulas. Z3 provides mathematical proof of violations — not heuristics, not guesses.
-
   - icon: 🔌
     title: Pluggable & Extensible
-    details: Add custom extractors via the plugin protocol. Import from OpenAPI or Terraform. Works with any codebase, any team size.
+    details: Add custom extractors via the plugin protocol. Import from OpenAPI or Terraform.
 ---
 
 ## Install
 
+Install the CLI and the packaged agent skill:
+
 ```bash
 npm install -g @collivity/aglang
+aglc install-agent-skill
 ```
 
-Then bootstrap any project with one command:
+Then bootstrap a project:
 
 ```bash
 aglc add /path/to/your/project
 ```
 
-Architecture spec, compiled artifact, git hook, and AI agent manifest — all set up automatically. [Full getting-started guide →](./guide/getting-started)
+`aglc add` creates the starter architecture spec, compiled artifact, git hook, and project-specific agent manifest. [Full getting-started guide →](./guide/getting-started)
+
+---
+
+## How agents should use aglang
+
+The packaged skill gives agents generic aglang behavior; the project repo supplies its own rules through `AGENTS.md`, `skill.json`, and `architecture.o`.
+
+1. Read `AGENTS.md` before coding.
+2. Validate focused edits with `aglc check-file --arch architecture.o --file <path> --json`.
+3. Validate the whole guarded project before finishing with `aglc check --arch architecture.o --project . --all --json`.
+4. Ask before creating, editing, regenerating, or compiling `.ag` architecture specs or generated architecture artifacts.
+5. Use planning/design sessions for architecture authoring, where engineers can review intended spec changes.
 
 ---
 
 ## How it works — at a glance
 
-aglang is a **Dual-Compiler System**. Your `.ag` spec compiles to SMT-LIB math formulas; every `git commit` triggers a second compiler that extracts what your changed code actually does and feeds it to Z3:
+aglang is a **dual-compiler system** exposed as an agent workflow. Your `.ag` spec compiles to SMT-LIB math formulas; during coding or commit checks, a second compiler extracts what changed code actually does and feeds it to Z3:
 
 ```
-Your .ag spec                    Your codebase (git diff)
+Your .ag spec                 Your codebase (file or project)
       │                                    │
       ▼                                    ▼
 [aglc compile]              [AST extractors — 8 languages]
@@ -80,4 +99,4 @@ Your .ag spec                    Your codebase (git diff)
                     UNSAT → pass ✓  │  SAT → reject with proof ✗
 ```
 
-Z3 is deterministic math — there are no heuristics, no LLM guesses, and no false negatives. [Full pipeline walkthrough →](./how-it-works)
+Agents use the same interface while code is still in progress; pre-commit hooks and CI use it as the final enforcement point. Z3 is deterministic math — no LLM guesses. [Full pipeline walkthrough →](./how-it-works)

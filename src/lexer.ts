@@ -35,6 +35,8 @@ const KEYWORDS = new Set([
   'workflow_policy', 'publish', 'deploy', 'release', 'before', 'branch', 'tag',
   'pull_request', 'contents', 'packages', 'pages', 'id_token', 'actions',
   'checks', 'deployments', 'issues', 'metadata', 'security_events',
+  // Change coupling policies
+  'change_policy', 'touched',
 ]);
 
 // Matches numbers optionally followed by a time/rate unit: 100ms, 5s, 1000rps

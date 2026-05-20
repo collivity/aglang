@@ -8,6 +8,7 @@ import type {
   StateMachineDecl, TransitionRule, PermissionDecl, PermissionRule,
   ContractDecl, ContractEndpoint, PluginDecl, RepoDecl,
   WorkflowPolicyDecl, WorkflowPolicyRule, WorkflowCondition, WorkflowPolicyAction,
+  ChangePolicyDecl, ChangePolicyRule,
 } from './ast.ts';
 
 export class ParseError extends Error {
@@ -551,6 +552,25 @@ export function parse(tokens: Token[]): Program {
     return { kind: 'WorkflowPolicyDecl', name, rules };
   }
 
+  function parseChangePolicyDecl(): ChangePolicyDecl {
+    expect('KEYWORD', 'change_policy');
+    const name = expect('IDENT').value;
+    const rules: ChangePolicyRule[] = [];
+    expect('LBRACE');
+    while (!match('RBRACE') && !eof()) {
+      expect('KEYWORD', 'require');
+      expect('KEYWORD', 'touched');
+      const required = expect('IDENT').value;
+      expect('KEYWORD', 'when');
+      expect('KEYWORD', 'touched');
+      const trigger = expect('IDENT').value;
+      consume('SEMICOLON');
+      rules.push({ kind: 'RequireTouched', required, trigger });
+    }
+    expect('RBRACE');
+    return { kind: 'ChangePolicyDecl', name, rules };
+  }
+
   // test NAME { assert ... }
   function parseTestDecl(): TestDecl {
     expect('KEYWORD', 'test');
@@ -582,6 +602,7 @@ export function parse(tokens: Token[]): Program {
         case 'contract':   declarations.push(parseContractDecl()); break;
         case 'plugin':     declarations.push(parsePluginDecl()); break;
         case 'workflow_policy': declarations.push(parseWorkflowPolicyDecl()); break;
+        case 'change_policy': declarations.push(parseChangePolicyDecl()); break;
         case 'repo':       declarations.push(parseRepoDecl()); break;
         case 'test':       declarations.push(parseTestDecl()); break;
         default:

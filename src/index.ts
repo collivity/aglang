@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // aglc — Architecture Ground Language Compiler CLI
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, cpSync } from 'fs';
 import { resolve, dirname, basename } from 'path';
+import { fileURLToPath } from 'url';
 import { check } from './checker.ts';
 import { emitArtifact, writeArtifact, loadArtifact } from './emitters/artifact.ts';
 import { emitAgentsMarkdown } from './emitters/agents.ts';
@@ -13,6 +14,7 @@ import { generateDeltaAssertions } from './runtime/delta-assert.ts';
 import { runGate } from './runtime/gate.ts';
 import { runContractGate } from './runtime/contract-gate.ts';
 import { runWorkflowGate, workflowDebugPathForArch } from './runtime/workflow-gate.ts';
+import { runChangeGate } from './runtime/change-gate.ts';
 import { formatVerdict, formatVerdictJson } from './runtime/diagnostic.ts';
 import type { ArchitectureArtifact } from './emitters/artifact.ts';
 import { generateSpec } from './generate.ts';
@@ -37,6 +39,7 @@ Commands:
   aglc generate [projectRoot] [--out <file.ag>]             Scan codebase → auto-generate starter .ag spec
   aglc emit-context --arch <arch.o> [--out <path>]          Emit AGENTS.md for AI agents
   aglc emit-skill   --arch <arch.o> [--out <path>]          Emit skill.json manifest for AI agents
+  aglc install-agent-skill [--path <skills-dir>]            Install packaged aglang Codex skill for local agents
   aglc install [--project <dir>] [--arch <arch.o>]          Install pre-commit git hook
   aglc check --arch <arch.o> --project <dir> [--repo-filter <Name>] [--all] [--json]  Check staged git diff or whole project vs architecture
   aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt] [--workflow-z3] [--dump-workflow-smt]  Analyze a specific file
@@ -268,7 +271,7 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
       ? 'No files matched tracked components. Check allowed.'
       : 'No staged changes in tracked components. Commit allowed.';
     if (jsonMode) {
-      process.stdout.write(JSON.stringify({ schema_version: 2, passed: true, violations: [], contract_violations: [], warnings: [], contract_warnings: [], timestamp: new Date().toISOString(), artifact: archPath, agent_context: msg }, null, 2) + '\n');
+      process.stdout.write(JSON.stringify({ schema_version: 2, passed: true, violations: [], contract_violations: [], workflow_violations: [], change_violations: [], warnings: [], contract_warnings: [], workflow_warnings: [], timestamp: new Date().toISOString(), artifact: archPath, agent_context: msg }, null, 2) + '\n');
     } else {
       log(`[aglc] ${msg}`);
     }
@@ -290,12 +293,14 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
     workflowZ3: args.includes('--workflow-z3'),
     dumpWorkflowSmt: args.includes('--dump-workflow-smt') ? workflowDebugPathForArch(archPath) : undefined,
   });
+  const changeResult = await runChangeGate(artifact, changed);
 
   if (
     delta.blockingFacts.length === 0 &&
     delta.warningFacts.length === 0 &&
     contractResult.violations.length === 0 &&
-    workflowResult.violations.length === 0
+    workflowResult.violations.length === 0 &&
+    changeResult.violations.length === 0
   ) {
     const msg = 'No architectural violations detected. Commit allowed.';
     if (jsonMode) {
@@ -305,6 +310,7 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
         violations: [],
         contract_violations: [],
         workflow_violations: [],
+        change_violations: [],
         warnings: [],
         contract_warnings: contractResult.warnings,
         workflow_warnings: workflowResult.warnings,
@@ -332,7 +338,8 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
   verdict.contract_warnings = contractResult.warnings;
   verdict.workflow_violations = workflowResult.violations;
   verdict.workflow_warnings = workflowResult.warnings;
-  verdict.passed = verdict.passed && contractResult.violations.length === 0 && workflowResult.violations.length === 0;
+  verdict.change_violations = changeResult.violations;
+  verdict.passed = verdict.passed && contractResult.violations.length === 0 && workflowResult.violations.length === 0 && changeResult.violations.length === 0;
 
   if (jsonMode) {
     process.stdout.write(formatVerdictJson(verdict, archPath) + '\n');
@@ -372,6 +379,7 @@ async function checkFile(archPath: string, filePath: string) {
         violations: [],
         contract_violations: [],
         workflow_violations: workflowResult.violations,
+        change_violations: [],
         warnings: [],
         contract_warnings: [],
         workflow_warnings: workflowResult.warnings,
@@ -388,6 +396,7 @@ async function checkFile(archPath: string, filePath: string) {
         contract_warnings: [],
         workflow_violations: workflowResult.violations,
         workflow_warnings: workflowResult.warnings,
+        change_violations: [],
       }));
     }
     process.exit(passed ? 0 : 1);
@@ -397,7 +406,7 @@ async function checkFile(archPath: string, filePath: string) {
 
   if (!componentName) {
     if (jsonMode) {
-      process.stdout.write(JSON.stringify({ schema_version: 2, passed: true, violations: [], contract_violations: [], warnings: [], contract_warnings: [], timestamp: new Date().toISOString(), artifact: archPath, agent_context: `File does not belong to any tracked component: ${absFile}` }, null, 2) + '\n');
+      process.stdout.write(JSON.stringify({ schema_version: 2, passed: true, violations: [], contract_violations: [], workflow_violations: [], change_violations: [], warnings: [], contract_warnings: [], workflow_warnings: [], timestamp: new Date().toISOString(), artifact: archPath, agent_context: `File does not belong to any tracked component: ${absFile}` }, null, 2) + '\n');
     } else {
       log(`[aglc] File does not belong to any tracked component: ${absFile}`);
     }
@@ -432,8 +441,11 @@ async function checkFile(archPath: string, filePath: string) {
           passed: true,
           violations: [],
           contract_violations: [],
+          workflow_violations: [],
+          change_violations: [],
           warnings: [],
           contract_warnings: [],
+          workflow_warnings: [],
           timestamp: new Date().toISOString(),
           artifact: archPath,
           agent_context: 'No architectural flow patterns detected.',
@@ -469,6 +481,7 @@ async function checkFile(archPath: string, filePath: string) {
   verdict.contract_warnings = contractResult.warnings;
   verdict.workflow_violations = workflowResult.violations;
   verdict.workflow_warnings = workflowResult.warnings;
+  verdict.change_violations = [];
   verdict.passed = verdict.passed && contractResult.violations.length === 0 && workflowResult.violations.length === 0;
 
   if (jsonMode) {
@@ -477,6 +490,34 @@ async function checkFile(archPath: string, filePath: string) {
     console.log(formatVerdict(verdict));
   }
   process.exit(verdict.passed ? 0 : 1);
+}
+
+// ─────────────────────────────────────────────────────────────
+// INSTALL-AGENT-SKILL (generic Codex skill shipped with npm package)
+// ─────────────────────────────────────────────────────────────
+function packageRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..');
+}
+
+function defaultSkillsDir(): string {
+  const codexHome = process.env.CODEX_HOME;
+  const userProfile = process.env.USERPROFILE;
+  const home = process.env.HOME;
+  return resolve(codexHome ?? (userProfile ? resolve(userProfile, '.codex') : resolve(home ?? '.', '.codex')), 'skills');
+}
+
+function installAgentSkill(outDir: string) {
+  const source = resolve(packageRoot(), 'skills', 'aglang');
+  if (!existsSync(source)) {
+    logErr(`Error: packaged aglang skill not found at ${source}`);
+    logErr(`Reinstall @collivity/aglang or run from a complete package.`);
+    process.exit(1);
+  }
+  const target = resolve(outDir, 'aglang');
+  mkdirSync(outDir, { recursive: true });
+  cpSync(source, target, { recursive: true, force: true });
+  log(`✓ Installed aglang agent skill → ${target}`);
+  log(`  Agents that discover ${outDir} can now load the aglang interface automatically when relevant.`);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -684,6 +725,9 @@ function getArg(flag: string): string | undefined {
     const archPath = getArg('--arch') ?? 'architecture.o';
     const outPath = getArg('--out') ?? 'skill.json';
     emitSkill(archPath, outPath);
+
+  } else if (command === 'install-agent-skill') {
+    installAgentSkill(getArg('--path') ?? defaultSkillsDir());
 
   } else if (command === 'check') {
     const archPath = getArg('--arch') ?? 'architecture.o';

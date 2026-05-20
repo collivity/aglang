@@ -139,6 +139,36 @@ Supported actions in v1 are `publish`, `deploy`, `release`, `permission`, and `b
 
 CI/CD node types are `ci_runner`, `package_registry`, `container_registry`, `static_host`, and `release_host`.
 
+## Change Policy
+
+`change_policy` blocks enforce that related components are updated together in the same checked diff. This is useful for docs freshness, package metadata reviews, generated agent context, and release-safety workflows.
+
+```ag
+component CliCompiler {
+  runs_on: node_runtime
+  paths: "src/index.ts"
+}
+
+component CliReferenceDocs {
+  runs_on: node_runtime
+  paths: "docs/cli/reference.md"
+}
+
+component ReadmeDocs {
+  runs_on: node_runtime
+  paths: "README.md"
+}
+
+change_policy DocsFreshness {
+  require touched CliReferenceDocs when touched CliCompiler
+  require touched ReadmeDocs when touched CliCompiler
+}
+```
+
+Semantics: if any staged file maps to the trigger component, at least one staged file must map to the required component. The gate emits Z3-backed `change_violations[]` in JSON verdicts when the implication cannot be satisfied.
+
+Change policies prove that declared surfaces changed together; they do not prove that prose is semantically complete.
+
 ## Import
 
 Import another `.ag` file to compose large specs:

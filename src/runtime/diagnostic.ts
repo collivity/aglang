@@ -87,7 +87,12 @@ export function formatVerdict(verdict: GateVerdict): string {
     }
   }
 
-  if (verdict.passed && (verdict.contract_violations?.length ?? 0) === 0) {
+  if (
+    verdict.passed &&
+    (verdict.contract_violations?.length ?? 0) === 0 &&
+    (verdict.workflow_violations?.length ?? 0) === 0 &&
+    (verdict.change_violations?.length ?? 0) === 0
+  ) {
     parts.push(`${BOLD}${GREEN}✓ aglang: Architecture check passed. Commit allowed.${RESET}`);
     return parts.join('\n');
   }
@@ -113,6 +118,21 @@ export function formatVerdict(verdict: GateVerdict): string {
     parts.push(`${BOLD}Message:${RESET}   ${v.message}`);
   }
 
+  for (const v of (verdict.change_violations ?? [])) {
+    parts.push('');
+    parts.push(`${RED}${BOLD}╔══════════════════════════════════════════════════════════╗${RESET}`);
+    parts.push(`${RED}${BOLD}║        aglang Change Policy Violation                    ║${RESET}`);
+    parts.push(`${RED}${BOLD}╚══════════════════════════════════════════════════════════╝${RESET}`);
+    parts.push('');
+    parts.push(`${BOLD}Policy:${RESET}     ${YELLOW}${v.policy}${RESET}`);
+    parts.push(`${BOLD}Trigger:${RESET}    ${CYAN}${v.trigger}${RESET}`);
+    parts.push(`${BOLD}Required:${RESET}   ${CYAN}${v.required}${RESET}`);
+    parts.push(`${BOLD}Required glob:${RESET} ${v.required_glob}`);
+    parts.push(`${BOLD}Message:${RESET}    ${v.message}`);
+    parts.push(`${BOLD}Trigger files:${RESET}`);
+    for (const file of v.trigger_files) parts.push(`  ${file}`);
+  }
+
   parts.push('');
   parts.push(`${RED}${BOLD}Commit Aborted.${RESET} Fix all layering violations before committing.`);
   parts.push(`Tip: run ${CYAN}aglc check-file --json${RESET} for machine-readable violation details.`);
@@ -127,8 +147,9 @@ export function formatVerdictJson(verdict: GateVerdict, artifactPath: string): s
   const contractWarnings = verdict.contract_warnings ?? [];
   const workflowViolations = verdict.workflow_violations ?? [];
   const workflowWarnings = verdict.workflow_warnings ?? [];
-  const totalViolations = verdict.violations.length + contractViolations.length + workflowViolations.length;
-  const overallPassed = verdict.passed && contractViolations.length === 0 && workflowViolations.length === 0;
+  const changeViolations = verdict.change_violations ?? [];
+  const totalViolations = verdict.violations.length + contractViolations.length + workflowViolations.length + changeViolations.length;
+  const overallPassed = verdict.passed && contractViolations.length === 0 && workflowViolations.length === 0 && changeViolations.length === 0;
 
   return JSON.stringify({
     schema_version: 2,
@@ -138,6 +159,7 @@ export function formatVerdictJson(verdict: GateVerdict, artifactPath: string): s
     violations: verdict.violations,
     contract_violations: contractViolations,
     workflow_violations: workflowViolations,
+    change_violations: changeViolations,
     warnings: verdict.warnings,
     contract_warnings: contractWarnings,
     workflow_warnings: workflowWarnings,
@@ -147,6 +169,7 @@ export function formatVerdictJson(verdict: GateVerdict, artifactPath: string): s
       : `${totalViolations} violation(s) detected. See violations[] and contract_violations[]. ` +
         `Flow violations include z3_proof with conflicting SMT assertions. ` +
         `Contract violations include proof with the contract assertion vs extracted code. ` +
+        `Change violations include z3_proof with touched-component assertions. ` +
         `Read AGENTS.md for full architectural rules and fix your code accordingly.`,
   }, null, 2);
 }

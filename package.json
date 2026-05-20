@@ -1,7 +1,7 @@
 {
   "name": "@collivity/aglang",
   "version": "0.1.0",
-  "description": "Architecture Ground Language — dual-compiler system that enforces architectural rules against real code at git-commit time using Z3 SMT solving",
+  "description": "Architecture Ground Language — agent-facing architecture validation for continuous coding feedback and Z3-backed enforcement",
   "type": "module",
   "main": "build/aglc.js",
   "bin": {
@@ -14,6 +14,7 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "prepare": "npm run build",
+    "postinstall": "node scripts/postinstall-agent-skill.mjs",
     "start": "tsx src/index.ts",
     "test": "vitest run",
     "dev": "tsx src/index.ts",
@@ -41,7 +42,7 @@
   "license": "ISC",
   "repository": {
     "type": "git",
-    "url": "https://github.com/collivity/aglang"
+    "url": "git+https://github.com/collivity/aglang.git"
   },
   "homepage": "https://collivity.github.io/aglang",
   "bugs": {
@@ -49,6 +50,8 @@
   },
   "files": [
     "build/aglc.js",
+    "scripts/postinstall-agent-skill.mjs",
+    "skills",
     "stdlib",
     "README.md",
     "LICENSE"

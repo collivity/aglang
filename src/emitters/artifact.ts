@@ -89,6 +89,15 @@ export interface ArchitectureArtifact {
         }
     >;
   }>;
+  // Change coupling policies (evaluated by the change gate)
+  changePolicies: Array<{
+    name: string;
+    rules: Array<{
+      kind: 'RequireTouched';
+      required: string;
+      trigger: string;
+    }>;
+  }>;
 }
 
 export function emitArtifact(program: Program, sourcePath: string): ArchitectureArtifact {
@@ -107,6 +116,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   const repos: ArchitectureArtifact['repos'] = [];
   const componentRepos: Record<string, string> = {};
   const workflowPolicies: ArchitectureArtifact['workflowPolicies'] = [];
+  const changePolicies: ArchitectureArtifact['changePolicies'] = [];
 
   for (const decl of program.declarations) {
     if (decl.kind === 'ComponentDecl') {
@@ -201,10 +211,16 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
         rules: decl.rules.map(rule => ({ ...rule })),
       });
     }
+    if (decl.kind === 'ChangePolicyDecl') {
+      changePolicies.push({
+        name: decl.name,
+        rules: decl.rules.map(rule => ({ ...rule })),
+      });
+    }
   }
 
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     sourcePath,
     constraints,
     mappings,
@@ -220,6 +236,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
     repos,
     componentRepos,
     workflowPolicies,
+    changePolicies,
   };
 }
 

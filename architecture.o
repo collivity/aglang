@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 6,
+  "schemaVersion": 7,
   "sourcePath": "C:\\Users\\pante\\Codespaces\\aglang\\architecture.ag",
   "constraints": [
     "; === aglang base sorts ===",
@@ -14,6 +14,18 @@
     "(declare-const node_runtime Entity)",
     "(assert (IsNode node_runtime))",
     "(assert (= (Trusted node_runtime) true))",
+    "(declare-const github_actions Entity)",
+    "(assert (IsNode github_actions))",
+    "(assert (= (Trusted github_actions) true))",
+    "(declare-const npm_registry Entity)",
+    "(assert (IsNode npm_registry))",
+    "(assert (= (Trusted npm_registry) true))",
+    "(declare-const github_pages Entity)",
+    "(assert (IsNode github_pages))",
+    "(assert (= (Trusted github_pages) true))",
+    "(declare-const github_releases Entity)",
+    "(assert (IsNode github_releases))",
+    "(assert (= (Trusted github_releases) true))",
     "",
     "; === component declarations ===",
     "(declare-const CliCompiler Entity)",
@@ -34,6 +46,22 @@
     "(assert (IsComp SpecGenerator))",
     "(declare-const DocsSite Entity)",
     "(assert (IsComp DocsSite))",
+    "(declare-const PackageMetadata Entity)",
+    "(assert (IsComp PackageMetadata))",
+    "(declare-const AgentSkill Entity)",
+    "(assert (IsComp AgentSkill))",
+    "(declare-const AgentSkillInstaller Entity)",
+    "(assert (IsComp AgentSkillInstaller))",
+    "(declare-const ReadmeDocs Entity)",
+    "(assert (IsComp ReadmeDocs))",
+    "(declare-const CliReferenceDocs Entity)",
+    "(assert (IsComp CliReferenceDocs))",
+    "(declare-const PublicDocs Entity)",
+    "(assert (IsComp PublicDocs))",
+    "(declare-const ReleaseWorkflow Entity)",
+    "(assert (IsComp ReleaseWorkflow))",
+    "(declare-const DocsWorkflow Entity)",
+    "(assert (IsComp DocsWorkflow))",
     "(declare-const VscodeExtension Entity)",
     "(assert (IsComp VscodeExtension))",
     "(declare-const Tests Entity)",
@@ -76,6 +104,14 @@
     "Emitters": "src/emitters/**/*.ts",
     "SpecGenerator": "src/generate.ts",
     "DocsSite": "{docs,site,scripts}/**/*.{md,ts,js,mjs}",
+    "PackageMetadata": "{package.json,package-lock.json}",
+    "AgentSkill": "skills/aglang/SKILL.md",
+    "AgentSkillInstaller": "scripts/postinstall-agent-skill.mjs",
+    "ReadmeDocs": "README.md",
+    "CliReferenceDocs": "docs/cli/reference.md",
+    "PublicDocs": "docs/**/*.md",
+    "ReleaseWorkflow": ".github/workflows/release.yml",
+    "DocsWorkflow": ".github/workflows/docs.yml",
     "VscodeExtension": "editors/vscode-aglang/src/**/*.ts",
     "Tests": "tests/**/*.ts"
   },
@@ -206,6 +242,29 @@
       "name": "node_runtime",
       "type": "agent_runtime",
       "trust": "trusted"
+    },
+    {
+      "name": "github_actions",
+      "type": "ci_runner",
+      "trust": "trusted"
+    },
+    {
+      "name": "npm_registry",
+      "type": "package_registry",
+      "trust": "trusted",
+      "auth": "api_key"
+    },
+    {
+      "name": "github_pages",
+      "type": "static_host",
+      "trust": "trusted",
+      "auth": "oauth2"
+    },
+    {
+      "name": "github_releases",
+      "type": "release_host",
+      "trust": "trusted",
+      "auth": "oauth2"
     }
   ],
   "enums": [],
@@ -217,5 +276,156 @@
   "plugins": [],
   "repos": [],
   "componentRepos": {},
-  "workflowPolicies": []
+  "workflowPolicies": [
+    {
+      "name": "ReleaseSafety",
+      "rules": [
+        {
+          "kind": "ActionRule",
+          "effect": "allow",
+          "action": "publish",
+          "workflow": "ReleaseWorkflow",
+          "target": "npm_registry",
+          "when": {
+            "kind": "tag",
+            "value": "v*.*.*"
+          }
+        },
+        {
+          "kind": "ActionRule",
+          "effect": "allow",
+          "action": "release",
+          "workflow": "ReleaseWorkflow",
+          "target": "github_releases",
+          "when": {
+            "kind": "tag",
+            "value": "v*.*.*"
+          }
+        },
+        {
+          "kind": "ActionRule",
+          "effect": "allow",
+          "action": "deploy",
+          "workflow": "DocsWorkflow",
+          "target": "github_pages",
+          "when": {
+            "kind": "branch",
+            "value": "master"
+          }
+        },
+        {
+          "kind": "ActionRule",
+          "effect": "deny",
+          "action": "publish",
+          "workflow": "*",
+          "target": "npm_registry",
+          "when": {
+            "kind": "pull_request"
+          }
+        },
+        {
+          "kind": "ActionRule",
+          "effect": "deny",
+          "action": "release",
+          "workflow": "*",
+          "target": "github_releases",
+          "when": {
+            "kind": "pull_request"
+          }
+        },
+        {
+          "kind": "ActionRule",
+          "effect": "deny",
+          "action": "deploy",
+          "workflow": "*",
+          "target": "github_pages",
+          "when": {
+            "kind": "pull_request"
+          }
+        },
+        {
+          "kind": "BeforeRule",
+          "workflow": "ReleaseWorkflow",
+          "before": "npm run typecheck",
+          "after": "npm publish"
+        },
+        {
+          "kind": "BeforeRule",
+          "workflow": "ReleaseWorkflow",
+          "before": "npm run build",
+          "after": "npm publish"
+        },
+        {
+          "kind": "BeforeRule",
+          "workflow": "ReleaseWorkflow",
+          "before": "npm test",
+          "after": "npm publish"
+        },
+        {
+          "kind": "BeforeRule",
+          "workflow": "ReleaseWorkflow",
+          "before": "npm pack --dry-run",
+          "after": "npm publish"
+        },
+        {
+          "kind": "BeforeRule",
+          "workflow": "ReleaseWorkflow",
+          "before": "npm run docs:build",
+          "after": "npm publish"
+        },
+        {
+          "kind": "PermissionRule",
+          "effect": "deny",
+          "workflow": "*",
+          "permission": "contents",
+          "access": "write",
+          "when": {
+            "kind": "pull_request"
+          }
+        }
+      ]
+    }
+  ],
+  "changePolicies": [
+    {
+      "name": "DocsFreshness",
+      "rules": [
+        {
+          "kind": "RequireTouched",
+          "required": "CliReferenceDocs",
+          "trigger": "CliCompiler"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ReadmeDocs",
+          "trigger": "CliCompiler"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "CliReferenceDocs",
+          "trigger": "PackageMetadata"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ReadmeDocs",
+          "trigger": "PackageMetadata"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "AgentSkill",
+          "trigger": "PackageMetadata"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "AgentSkill",
+          "trigger": "AgentSkillInstaller"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "PublicDocs",
+          "trigger": "AgentSkill"
+        }
+      ]
+    }
+  ]
 }

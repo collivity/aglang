@@ -45,19 +45,22 @@ Detects: `package.json`, `.csproj`, `go.mod`, `Cargo.toml`, `build.gradle`, `Pod
 
 ## `aglc check`
 
-Check the current staged git diff against a compiled architecture artifact.
+Check the current staged git diff, or the whole guarded project, against a compiled architecture artifact.
 
 ```bash
-aglc check --arch <architecture.o> --project <dir> [--json] [--workflow-z3] [--dump-workflow-smt]
+aglc check --arch <architecture.o> --project <dir> [--all] [--json] [--workflow-z3] [--dump-workflow-smt]
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--arch` | Path to compiled `.o` artifact |
 | `--project` | Git project root to scan |
+| `--all` | Scan all tracked component files instead of only staged changes |
 | `--json` | Output machine-readable JSON verdict to stdout |
 | `--workflow-z3` | Include workflow policy SMT debug snippets in workflow violations |
 | `--dump-workflow-smt` | Write workflow policy SMT debug snippets to `workflow-debug.smt2` |
+
+`aglc check` also evaluates `change_policy` blocks against the staged diff, or against every tracked component file when `--all` is used. Change policy failures appear in `change_violations[]`.
 
 **Exit codes:**
 - `0` — No violations (commit may proceed)
@@ -67,7 +70,7 @@ aglc check --arch <architecture.o> --project <dir> [--json] [--workflow-z3] [--d
 
 ## `aglc check-file`
 
-Analyze a specific file against the architecture (useful for CI or IDE integration).
+Analyze a specific file against the architecture. Coding agents should use this during focused edits before waiting for a commit hook.
 
 ```bash
 aglc check-file --arch <architecture.o> --file <path> [--json] [--dump-smt] [--workflow-z3] [--dump-workflow-smt]
@@ -91,6 +94,32 @@ aglc install [--project <dir>] [--arch <architecture.o>]
 ```
 
 The hook runs `aglc check` before every `git commit`. Writes to `.git/hooks/pre-commit`.
+
+---
+
+## `aglc install-agent-skill`
+
+Install the generic aglang Codex skill shipped in the npm package.
+
+```bash
+aglc install-agent-skill [--path <skills-dir>]
+```
+
+Default output is `${CODEX_HOME:-~/.codex}/skills/aglang`. This gives agents a reusable interface to aglang commands and workflows. Project-specific architecture rules still come from `AGENTS.md` and `skill.json`.
+
+Use `--path <skills-dir>` to install into a custom skill directory:
+
+```bash
+aglc install-agent-skill --path ./tmp-skills
+```
+
+The npm package also runs a best-effort `postinstall` step that copies the same skill into `${CODEX_HOME:-~/.codex}/skills/aglang`. This postinstall never fails the npm installation if the copy cannot be completed.
+
+Opt out of postinstall skill installation:
+
+```bash
+AGLANG_SKIP_AGENT_SKILL_INSTALL=1 npm install -g @collivity/aglang
+```
 
 ---
 

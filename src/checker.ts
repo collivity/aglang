@@ -1,5 +1,5 @@
 // Type checker — validates the AST against the stdlib ontology (multi-pass)
-import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, StateMachineDecl, PermissionDecl, ContractDecl, WorkflowPolicyDecl } from './ast.ts';
+import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, StateMachineDecl, PermissionDecl, ContractDecl, WorkflowPolicyDecl, ChangePolicyDecl } from './ast.ts';
 import { VALID_NODE_TYPES, VALID_TRUST_VALUES, VALID_CONNECTIVITY_VALUES, VALID_PROTOCOL_VALUES, VALID_AUTH_VALUES } from './stdlib/topology.ts';
 
 export interface CheckError {
@@ -63,6 +63,7 @@ export function check(program: Program): CheckError[] {
   const declaredPermissions = new Map<string, PermissionDecl>();
   const declaredContracts = new Map<string, ContractDecl>();
   const declaredWorkflowPolicies = new Map<string, WorkflowPolicyDecl>();
+  const declaredChangePolicies = new Map<string, ChangePolicyDecl>();
 
   for (const decl of program.declarations) {
     switch (decl.kind) {
@@ -104,6 +105,10 @@ export function check(program: Program): CheckError[] {
       case 'WorkflowPolicyDecl':
         if (declaredWorkflowPolicies.has(decl.name)) errors.push({ message: `Duplicate workflow policy name '${decl.name}'` });
         else declaredWorkflowPolicies.set(decl.name, decl);
+        break;
+      case 'ChangePolicyDecl':
+        if (declaredChangePolicies.has(decl.name)) errors.push({ message: `Duplicate change policy name '${decl.name}'` });
+        else declaredChangePolicies.set(decl.name, decl);
         break;
       case 'RepoDecl':
         // Collect declared repos for cross-reference validation below
@@ -283,6 +288,17 @@ export function check(program: Program): CheckError[] {
         }
         if (rule.kind === 'BeforeRule' && !declaredComponents.has(rule.workflow)) {
           errors.push({ message: `workflow_policy '${decl.name}': unknown workflow component '${rule.workflow}'` });
+        }
+      }
+    }
+
+    if (decl.kind === 'ChangePolicyDecl') {
+      for (const rule of decl.rules) {
+        if (!declaredComponents.has(rule.required)) {
+          errors.push({ message: `change_policy '${decl.name}': unknown required component '${rule.required}'` });
+        }
+        if (!declaredComponents.has(rule.trigger)) {
+          errors.push({ message: `change_policy '${decl.name}': unknown trigger component '${rule.trigger}'` });
         }
       }
     }

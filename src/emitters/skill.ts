@@ -33,14 +33,14 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
       check_file:
         `aglc check-file --arch "${absArch}" --file <absolute_path_to_file> --json`,
       check_project:
-        `aglc check --arch "${absArch}" --project <project_root> --json`,
+        `aglc check --arch "${absArch}" --project <project_root> --all --json`,
       emit_context:
         `aglc emit-context --arch "${absArch}" --out AGENTS.md`,
     },
     violation_schema: {
       '$schema': 'http://json-schema.org/draft-07/schema#',
       type: 'object',
-      required: ['schema_version', 'passed', 'timestamp', 'artifact', 'violations', 'contract_violations', 'warnings', 'contract_warnings'],
+      required: ['schema_version', 'passed', 'timestamp', 'artifact', 'violations', 'contract_violations', 'workflow_violations', 'change_violations', 'warnings', 'contract_warnings'],
       properties: {
         schema_version: { type: 'integer', enum: [2] },
         passed: { type: 'boolean', description: 'true = commit allowed, false = violations detected' },
@@ -90,6 +90,28 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
               declared: { type: ['string', 'null'] },
               extracted: { type: ['string', 'null'] },
               proof: { type: 'object' },
+            },
+          },
+        },
+        workflow_violations: {
+          type: 'array',
+          description: 'GitHub Actions workflow policy violations',
+          items: { type: 'object' },
+        },
+        change_violations: {
+          type: 'array',
+          description: 'Required companion changes missing from the checked diff',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', enum: ['change_violation'] },
+              policy: { type: 'string' },
+              trigger: { type: 'string' },
+              required: { type: 'string' },
+              message: { type: 'string' },
+              trigger_files: { type: 'array', items: { type: 'string' } },
+              required_glob: { type: 'string' },
+              z3_proof: { type: 'object' },
             },
           },
         },

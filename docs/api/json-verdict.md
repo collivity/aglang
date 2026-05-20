@@ -14,6 +14,7 @@ interface Verdict {
   violations: FlowViolation[]
   contract_violations: ContractViolation[]
   workflow_violations: WorkflowViolation[]
+  change_violations: ChangeViolation[]
 
   warnings: FlowWarning[]
   contract_warnings: ContractViolation[]
@@ -35,6 +36,7 @@ interface Verdict {
   "violations": [],
   "contract_violations": [],
   "workflow_violations": [],
+  "change_violations": [],
   "warnings": [],
   "contract_warnings": [],
   "workflow_warnings": []
@@ -55,6 +57,31 @@ interface Verdict {
       "file": ".github/workflows/docs.yml",
       "message": "publish to npm_registry is not covered by any matching allow rule",
       "evidence": "run: npm publish"
+    }
+  ]
+}
+```
+
+### Change policy violation
+
+```json
+{
+  "schema_version": 2,
+  "passed": false,
+  "change_violations": [
+    {
+      "type": "change_violation",
+      "policy": "DocsFreshness",
+      "trigger": "CliCompiler",
+      "required": "CliReferenceDocs",
+      "message": "DocsFreshness requires CliReferenceDocs when CliCompiler changes",
+      "trigger_files": ["src/index.ts"],
+      "required_glob": "docs/cli/reference.md",
+      "z3_proof": {
+        "policy_constraint": "(assert (=> Touched_CliCompiler Touched_CliReferenceDocs))",
+        "trigger_assertion": "(assert Touched_CliCompiler)",
+        "missing_assertion": "(assert (not Touched_CliReferenceDocs))"
+      }
     }
   ]
 }

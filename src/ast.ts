@@ -174,6 +174,18 @@ export interface WorkflowPolicyDecl {
   rules: WorkflowPolicyRule[];
 }
 
+export interface ChangePolicyRule {
+  kind: 'RequireTouched';
+  required: string;
+  trigger: string;
+}
+
+export interface ChangePolicyDecl {
+  kind: 'ChangePolicyDecl';
+  name: string;
+  rules: ChangePolicyRule[];
+}
+
 export type Declaration =
   | NodeDecl
   | DataDecl
@@ -186,6 +198,7 @@ export type Declaration =
   | ContractDecl
   | PluginDecl
   | WorkflowPolicyDecl
+  | ChangePolicyDecl
   | RepoDecl
   | TestDecl;
 

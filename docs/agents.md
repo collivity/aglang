@@ -1,6 +1,6 @@
 # AI Agents
 
-aglang is designed as an **agent-first** language. AI coding agents (GitHub Copilot, Claude, Cursor, Devin, etc.) can operate autonomously for long stretches — aglang acts as formal guardrails they cannot bypass.
+aglang is designed as an **agent-facing architecture validation interface**. AI coding agents can use it continuously while they work: read the local architecture context, validate focused edits with JSON verdicts, and rely on the same Z3-backed checks that run at commit time.
 
 ## Why agents need architectural guardrails
 
@@ -9,9 +9,19 @@ When an AI agent refactors code, it may:
 - Add a database call in a public-facing handler
 - Bypass an auth layer "for simplicity"
 
-Traditional code review catches these eventually. aglang catches them **at commit time**, with mathematical proof of the violation, before any code lands.
+Traditional code review catches these eventually. aglang catches them while the agent is still coding, then enforces the same rules at commit time with mathematical proof of the violation.
 
 ## Setup for agents
+
+### 0. Install the generic skill interface
+
+```bash
+aglc install-agent-skill
+```
+
+This installs the packaged `aglang` Codex skill into `${CODEX_HOME:-~/.codex}/skills/aglang`, so agents know the CLI workflows after npm install. This is generic product knowledge; project-specific rules still come from `AGENTS.md` and `skill.json`.
+
+When installed from npm, aglang also attempts this step automatically during `postinstall`. Set `AGLANG_SKIP_AGENT_SKILL_INSTALL=1` to opt out.
 
 ### 1. One-shot bootstrap
 
@@ -24,6 +34,8 @@ This creates:
 - `architecture.o` — the compiled artifact
 - `skill.json` — agent skill manifest
 - `.git/hooks/pre-commit` — enforcement hook
+
+`.ag` files are engineer-guided architecture source. Coding agents should not create, edit, regenerate, or compile changes to `.ag` specs unless the engineer explicitly asks for architecture/spec work, ideally in a planning or design session.
 
 ### 2. Emit agent context
 
@@ -41,18 +53,15 @@ aglc emit-skill --arch architecture.o --out skill.json
 
 `skill.json` follows the emerging AI skill/tool manifest format. Agents that support it can load architectural constraints as part of their toolchain.
 
-## The enforcement loop
+## Continuous validation loop
 
 ```
-Agent writes code → git commit → pre-commit hook → aglc check
+Agent reads AGENTS.md → edits code → aglc check-file --json
+                                  → aglc check --all --json
+                                  → git commit hook runs same gate
                                                         │
-                                          Z3 UNSAT → commit passes ✓
-                                          Z3 SAT   → commit rejected ✗
-                                                        │
-                                               Precise diagnostic printed
-                                               with component names and
-                                               file paths for the agent
-                                               to act on
+                                          Z3 UNSAT → pass ✓
+                                          Z3 SAT   → fix reported code ✗
 ```
 
 ## JSON mode for programmatic integration
@@ -60,7 +69,8 @@ Agent writes code → git commit → pre-commit hook → aglc check
 All check commands support `--json` for machine-readable output:
 
 ```bash
-aglc check --arch architecture.o --project . --json
+aglc check-file --arch architecture.o --file src/api/gateway/checkout.py --json
+aglc check --arch architecture.o --project . --all --json
 ```
 
 ```json
@@ -78,11 +88,13 @@ Agents can parse this JSON and decide how to fix the violation rather than readi
 
 ## Workflow for agent-managed projects
 
-1. **Agent bootstraps** with `aglc add` on first run
-2. **Agent reads** `AGENTS.md` before making architectural changes
-3. **Agent commits** — the hook runs automatically, blocking violations
-4. **On violation** — the agent receives structured JSON feedback and self-corrects
-5. **Architecture evolves** — when expanding the system, the agent updates `architecture.ag` and re-compiles
+1. **Setup** — an engineer or authorized setup agent runs `aglc add` and reviews the generated `.ag` spec.
+2. **Agent reads** — coding agents read `AGENTS.md` and `skill.json` before making implementation changes.
+3. **Agent validates while coding** — run `aglc check-file --json` for focused edits.
+4. **Agent validates before finishing** — run `aglc check --all --json` for the guarded project.
+5. **Architecture evolves deliberately** — agents ask before changing `.ag`, `architecture.o`, `AGENTS.md`, or `skill.json`.
+
+When `change_violations[]` appear, update the required companion component in the same change. For example, a CLI or package metadata change may require README, CLI reference, or agent skill updates.
 
 ## Recommended AGENTS.md placement
 
@@ -91,7 +103,7 @@ Place `AGENTS.md` in the project root. Most agent frameworks automatically injec
 ```
 my-project/
 ├── AGENTS.md          ← agent reads this
-├── architecture.ag    ← source of truth (agent may edit)
+├── architecture.ag    ← source of truth (engineer-guided edits)
 ├── architecture.o     ← compiled artifact (do not edit)
 ├── skill.json         ← agent skill manifest
 └── src/
