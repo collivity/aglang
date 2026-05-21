@@ -1,6 +1,6 @@
 {
   "name": "@collivity/aglang",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Architecture Ground Language — agent-facing architecture validation for continuous coding feedback and Z3-backed enforcement",
   "type": "module",
   "main": "build/aglc.js",
