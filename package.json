@@ -5,7 +5,7 @@
   "type": "module",
   "main": "build/aglc.js",
   "bin": {
-    "aglc": "./build/aglc.js"
+    "aglc": "build/aglc.js"
   },
   "engines": {
     "node": ">=18"

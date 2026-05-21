@@ -26,6 +26,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Preflight npm auth
+        run: |
+          echo "npm identity: $(npm whoami)"
+          npm view @collivity/aglang version
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Typecheck
         run: npm run typecheck
 
