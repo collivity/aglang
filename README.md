@@ -1,8 +1,8 @@
 # aglang · Architecture Ground Language
 
-**aglang** is an agent-facing architecture validation interface for coding agents and engineering teams. Describe your system's topology, components, invariants, workflow policies, and API contracts in a `.ag` spec file. The compiler turns those rules into mathematical constraints, then `aglc` checks implementation work continuously while coding and at commit time using Z3 SMT solving.
+**aglang** keeps coding agents inside your repository’s architecture rules. Describe topology, components, invariants, workflow policies, and API contracts in a `.ag` spec file. `aglc` turns those rules into enforceable checks, then validates implementation work continuously while coding and at commit time.
 
-Designed as an **agent-first guardrail**: agents read `AGENTS.md`, validate focused edits with `aglc check-file --json`, validate the full guarded project with `aglc check --all --json`, and ask before changing `.ag` architecture source.
+Designed as an **agent-first guardrail**: agents read `AGENTS.md`, validate focused edits with `aglc check-file --json`, validate the full guarded project with `aglc check --all --json`, and ask before changing `.ag` architecture source. Under the hood, hard rules are compiled into solver-backed constraints so violations come with precise proof details instead of vague warnings.
 
 ---
 
@@ -24,7 +24,7 @@ Designed as an **agent-first guardrail**: agents read `AGENTS.md`, validate focu
   aglc check              ← file/project/diff → extracts flow facts
          │
          ▼
-  Z3 SMT solver           ← evaluates spec constraints against delta facts
+  solver-backed gate      ← evaluates spec constraints against delta facts
          │
     ┌────┴────┐
    SAT      UNSAT
@@ -34,7 +34,7 @@ Designed as an **agent-first guardrail**: agents read `AGENTS.md`, validate focu
 
 1. **Architecture build** — `aglc compile spec.ag` produces `architecture.o` (a JSON artifact with SMT-LIB2 constraints + component→path mappings).
 2. **Work-in-progress validation** — agents run `aglc check-file --json` while editing and `aglc check --all --json` before finishing.
-3. **Commit enforcement** — the pre-commit hook runs `aglc check`, extracts flow, reachability, propagated dataflow, trust-boundary, dependency-injection, workflow, and contract facts, feeds formal facts with the compiled constraints to Z3, and blocks the commit if any hard rule is violated.
+3. **Commit enforcement** — the pre-commit hook runs `aglc check`, extracts flow, reachability, propagated dataflow, trust-boundary, dependency-injection, workflow, and contract facts, feeds formal facts with the compiled constraints to the solver, and blocks the commit if any hard rule is violated.
 4. **Agent bootstrap** — `aglc add` can create a starter `.ag` spec, compiled artifact, hook, and agent files for engineer review.
 
 
@@ -48,7 +48,7 @@ Designed as an **agent-first guardrail**: agents read `AGENTS.md`, validate focu
   5. It chooses extractors by file extension, for example .ts, .cs, .py, .go, .rs, .java, .kt.
   6. Extractors emit flow facts, using AST where available and regex fallback where needed.
   7. Those facts are normalized through graph projection.
-  8. Z3 checks the projected flows against the invariant constraints from architecture.o.
+  8. The solver checks the projected flows against the invariant constraints from architecture.o.
 
   If you edit architecture.ag, run npm run arch:compile before npm run arch:check.
 

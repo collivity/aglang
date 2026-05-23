@@ -1,6 +1,6 @@
 # How aglang Works
 
-aglang is a **dual-compiler system with explicit enforcement semantics**. Unlike a traditional language compiler (like `gcc` or `tsc`) that turns source code into machine code or JavaScript, aglang compiles high-level system rules into a checked artifact, while runtime gates extract facts from code, workflows, and diffs. Some rules are proven with Z3; others are deterministic policy checks; advisory declarations are emitted to agent context without blocking by themselves.
+aglang is a **dual-compiler system with explicit enforcement semantics**. Unlike a traditional language compiler (like `gcc` or `tsc`) that turns source code into machine code or JavaScript, aglang compiles high-level system rules into a checked artifact, while runtime gates extract facts from code, workflows, and diffs. Some hard rules are proven with solver-backed checks; others are deterministic policy checks; advisory declarations are emitted to agent context without blocking by themselves.
 
 Here is the step-by-step breakdown of how an `.ag` file goes from a clean text specification to a live, real-time mathematical gate.
 
@@ -25,7 +25,7 @@ The compiler reads your `.ag` file and parses it into an **Architecture Abstract
 
 ### Step 2 — Translating to First-Order Logic (SMT-LIB Format)
 
-The compiler strips away the developer-friendly words and translates formal rules into standard **SMT-LIB** formulas — the universal language of math solvers like Z3.
+The compiler strips away the developer-friendly words and translates formal rules into standard **SMT-LIB** formulas that a solver can evaluate precisely.
 
 For example, this invariant rule:
 
@@ -54,7 +54,7 @@ The compiler outputs a compiled JSON artifact (`architecture.o`). This file cont
 
 ## Phase 2: The Commit-Time Gate (Real-Time)
 
-This is what happens the moment an agent or human types `git commit`. The Arch runtime springs into action.
+This is what happens the moment an agent or human types `git commit`. The aglang runtime springs into action.
 
 ```
    [Human/Agent edits code]
@@ -148,9 +148,9 @@ For dependency-injection policies, C# constructor/lifetime/service-locator facts
 (assert (Resolves Application IServiceProvider))
 ```
 
-### Step 4 — Z3 Checks the Combined State
+### Step 4 — The Solver Checks the Combined State
 
-The Arch runtime opens an in-memory Z3 context and loads **two things**:
+The aglang runtime opens an in-memory solver context and loads **two things**:
 
 1. **Permanent constraints** compiled from the `.ag` file — `(Flow(A,B) ⟹ Violation)`
 2. **Dynamic assertions** extracted from the current diff — `(assert (Flow PublicGateway LedgerDatabase))`
@@ -180,10 +180,10 @@ Commit aborted.
 
 | Property | How it's achieved |
 |---|---|
-| **Un-hallucinate-able** | Z3 is deterministic math, not an LLM guess |
-| **Blazing fast** | Only the _changed_ files are extracted; Z3 runs in-process via WASM |
+| **Un-hallucinate-able** | The solver is deterministic math, not an LLM guess |
+| **Blazing fast** | Only the _changed_ files are extracted; the solver runs in-process via WASM |
 | **Language-agnostic** | SMT-LIB is the intermediate representation; extractors are pluggable |
-| **No false negatives** | `fail-close`: if Z3 returns `unknown`, the commit is blocked |
+| **No false negatives** | `fail-close`: if the solver returns `unknown`, the commit is blocked |
 | **Actionable errors** | Violations include the file, line, component name, and rule — not just "blocked" |
 
 By decoupling the high-level design specification from the micro-analysis of Git diffs — using SMT formulas as the intermediate byte-code — aglang remains automated, precise, and auditable.

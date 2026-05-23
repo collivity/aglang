@@ -22,7 +22,7 @@ npm install github:collivity/aglang
 - **Node.js** ≥ 18 — [nodejs.org](https://nodejs.org)
 - A git repository
 
-> Z3 is bundled via the `z3-solver` npm package (WebAssembly) — no system install needed.
+> The solver ships via the `z3-solver` npm package (WebAssembly) — no system install needed.
 
 ---
 
@@ -58,7 +58,7 @@ Then recompile:
 aglc compile architecture.ag
 ```
 
-From now on, any commit that creates a direct path from `PublicAPI` to `Database` is blocked with a precise error message.
+From now on, any commit that creates a direct path from `PublicAPI` to `Database` is blocked with a precise error message and proof details.
 
 ---
 

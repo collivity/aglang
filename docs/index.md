@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: aglang
-  text: Architecture Validation for Coding Agents
-  tagline: Give agents a live interface to your architecture rules, so they can validate work in progress while coding and still get Z3-backed enforcement before commits land.
+  text: Architecture Guardrails for Coding Agents
+  tagline: Give agents a live interface to your architecture rules, so they can validate work in progress while coding and still get solver-backed enforcement before commits land.
   image:
     src: /hero.svg
     alt: aglang architecture pipeline diagram
@@ -33,15 +33,15 @@ features:
 
   - icon: 🧩
     title: Enterprise Graph Policies
-    details: Model transitive reachability, data classification propagation, trust boundaries, DI closure, and lifetime hazards as Z3-backed architecture rules.
+    details: Model transitive reachability, data classification propagation, trust boundaries, DI closure, and lifetime hazards as enforceable architecture rules.
 
   - icon: 🏗️
     title: Architecture as Code
     details: Write human-readable .ag files with explicit enforcement levels for formal Z3 rules, deterministic policies, and advisory guidance.
 
   - icon: 🔒
-    title: Z3-backed Commit Enforcement
-    details: Pre-commit hooks and CI checks run deterministic SMT solving against real extracted code behavior. Violations are rejected with precise diagnostics.
+    title: Solver-backed Commit Enforcement
+    details: Pre-commit hooks and CI checks run deterministic constraint solving against real extracted code behavior. Violations are rejected with precise diagnostics.
 
   - icon: 📚
     title: Docs Freshness Policies
@@ -89,7 +89,7 @@ The packaged skill gives agents generic aglang behavior; the project repo suppli
 
 ## How it works — at a glance
 
-aglang is a **dual-compiler system** exposed as an agent workflow. Your `.ag` spec compiles to SMT-LIB math formulas; during coding or commit checks, a second compiler extracts what changed code actually does and feeds it to Z3:
+aglang is a **dual-compiler system** exposed as an agent workflow. Your `.ag` spec compiles to SMT-LIB math formulas; during coding or commit checks, a second compiler extracts what changed code actually does and feeds it to the solver:
 
 ```
 Your .ag spec                 Your codebase (file or project)
@@ -101,9 +101,9 @@ Your .ag spec                 Your codebase (file or project)
  architecture.o              FlowFact[]  (what code talks to what)
 (SMT constraints)                         │
       │                                   │
-      └─────────────── Z3 Solver ─────────┘
+      └────────────── solver-backed check ────────┘
                              │
                     SAT → pass ✓  │  UNSAT → reject with proof ✗
 ```
 
-Agents use the same interface while code is still in progress; pre-commit hooks and CI use it as the final enforcement point. Z3 is deterministic math — no LLM guesses. [Full pipeline walkthrough →](./how-it-works)
+Agents use the same interface while code is still in progress; pre-commit hooks and CI use it as the final enforcement point. The solver is deterministic math — no LLM guesses. [Full pipeline walkthrough →](./how-it-works)
