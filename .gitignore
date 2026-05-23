@@ -19,3 +19,5 @@ docs/temp/
 docs-build/
 .vitepress-out/
 site/
+/tmp
+.DS_Store

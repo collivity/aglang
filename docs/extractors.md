@@ -16,7 +16,7 @@ aglang ships with built-in extractors for 8 language ecosystems. Each extractor 
 | **Go** | `go.mod` | net/http + gorilla/mux + gin + echo + fiber handlers, database/sql, gorm, mongo-go-driver |
 | **Rust** | `Cargo.toml` | Actix-web, Axum, Rocket handlers, diesel, sqlx, tokio-postgres |
 | **Java / Kotlin (JVM)** | `build.gradle`, `pom.xml` | Spring MVC/Boot controllers, JDBC, JPA, MyBatis |
-| **Swift** | `Package.swift`, `Podfile` | Vapor routes, URLSession, Alamofire, iOS networking patterns |
+| **Swift** | `Package.swift`, `Podfile` | Vapor routes, URLSession, Alamofire, SPM module imports, UIKit MVVM + Combine Input/Output patterns, Keychain, UserDefaults |
 | **Terraform** | `*.tf` | Infrastructure resources → `node` declarations (via `aglc import-tf`) |
 
 ## How extraction works
