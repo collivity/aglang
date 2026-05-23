@@ -74,12 +74,12 @@ routes:
 
     expect(delta.facts.some(f => f.from === 'LoadBalancer' && f.to === 'NonGdprService')).toBe(true);
     expect(delta.blockingDataFlowFacts).toHaveLength(1);
-    expect(delta.smtAssertions.some(s => s.includes('DataFlow CustomerProfile NonGdprService'))).toBe(true);
+    expect(delta.smtAssertions.some(s => s.includes('DataCanReach CustomerProfile NonGdprService'))).toBe(true);
 
     const verdict = await runGate(artifact, delta);
     expect(verdict.passed).toBe(false);
     expect(verdict.violations[0]!.type).toBe('dataflow_violation');
-    expect(verdict.violations[0]!.z3_proof.permanent_constraint).toContain('DataFlow CustomerProfile NonGdprService');
+    expect(verdict.violations[0]!.z3_proof.permanent_constraint).toContain('DataCanReach CustomerProfile NonGdprService');
   });
 
   it('allows the same data routed only to the GDPR service', async () => {

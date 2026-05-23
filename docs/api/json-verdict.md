@@ -11,7 +11,7 @@ interface Verdict {
   timestamp: string
   artifact: string
 
-  violations: FlowViolation[]
+  violations: ArchitectureViolation[]
   contract_violations: ContractViolation[]
   workflow_violations: WorkflowViolation[]
   change_violations: ChangeViolation[]
@@ -62,9 +62,17 @@ interface Verdict {
 }
 ```
 
-Flow violations may also have `"type": "dataflow_violation"` when a `deny dataflow` invariant is violated. These include the denied data type in `detected.data` and the component that carried it in `detected.via`.
+Architecture violations use these `type` values:
 
-Dependency-injection policy failures appear in the same `violations[]` array with `"type": "di_violation"`. They include the violated `di_policy` name, the detected constructor/lifetime/service-locator evidence, and a Z3 proof.
+- `flow_violation` for direct `deny flow`.
+- `reach_violation` for transitive `deny reach`; `detected.path` contains the proof path.
+- `dataflow_violation` for `deny dataflow`; `detected.data` and `detected.via` identify the propagated data.
+- `data_policy_violation` for `data_policy` classification or jurisdiction rules.
+- `trust_policy_violation` for `trust_policy` auth or classified trust-boundary rules.
+- `di_violation` for dependency-injection policy failures.
+- `permission_violation` for protected operations missing matching authorization evidence when an extractor can prove the operation.
+
+Dependency-injection policy failures include the violated `di_policy` name, the detected constructor/lifetime/service-locator evidence, and a Z3 proof. Reach-based DI failures may include `detected.path`.
 
 ```json
 {

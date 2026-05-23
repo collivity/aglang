@@ -37,6 +37,22 @@ describe('parser', () => {
     expect(program.declarations[0]!.kind).toBe('EnumDecl');
   });
 
+  it('keeps uppercase classification and jurisdiction entries as data fields', () => {
+    const tokens = tokenize(`
+      data CustomerProfile {
+        classification: String
+        jurisdiction: String
+      }
+    `);
+    const program = parse(tokens);
+    const data = program.declarations[0]!;
+    expect(data.kind).toBe('DataDecl');
+    if (data.kind === 'DataDecl') {
+      expect(data.classification).toBeUndefined();
+      expect(data.fields.map(f => f.key)).toEqual(['classification', 'jurisdiction']);
+    }
+  });
+
   it('parses a contract block', () => {
     const tokens = tokenize(`
       contract MyApi {

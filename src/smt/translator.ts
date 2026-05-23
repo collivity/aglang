@@ -1,5 +1,5 @@
 // SMT-LIB 2.6 translator — converts checked AST to formula strings
-import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, ResourceDecl, DiPolicyDecl } from '../ast.ts';
+import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, ResourceDecl, DiPolicyDecl, DataPolicyDecl, TrustPolicyDecl, PermissionDecl } from '../ast.ts';
 import { BASE_SMT_DECLARATIONS } from '../stdlib/topology.ts';
 import { expandInvariantRules } from '../invariant-selectors.ts';
 
@@ -15,6 +15,9 @@ export function translate(program: Program): string[] {
   const components: ComponentDecl[] = [];
   const invariants: InvariantDecl[] = [];
   const diPolicies: DiPolicyDecl[] = [];
+  const dataPolicies: DataPolicyDecl[] = [];
+  const trustPolicies: TrustPolicyDecl[] = [];
+  const permissions: PermissionDecl[] = [];
   const enums: EnumDecl[] = [];
   const dataTypes: DataDecl[] = [];
 
@@ -24,6 +27,9 @@ export function translate(program: Program): string[] {
     else if (d.kind === 'ComponentDecl') components.push(d);
     else if (d.kind === 'InvariantDecl') invariants.push(d);
     else if (d.kind === 'DiPolicyDecl') diPolicies.push(d);
+    else if (d.kind === 'DataPolicyDecl') dataPolicies.push(d);
+    else if (d.kind === 'TrustPolicyDecl') trustPolicies.push(d);
+    else if (d.kind === 'PermissionDecl') permissions.push(d);
     else if (d.kind === 'EnumDecl') enums.push(d);
     else if (d.kind === 'DataDecl') dataTypes.push(d);
   }
@@ -43,8 +49,26 @@ export function translate(program: Program): string[] {
   // Data types as constants over DataType — structural details are not encoded in SMT.
   if (dataTypes.length > 0) {
     stmts.push('; === data type declarations ===');
+    const classifications = new Set<string>();
+    const jurisdictions = new Set<string>();
     for (const d of dataTypes) {
       stmts.push(`(declare-const ${smtId(d.name)} DataType)`);
+      if (d.classification) classifications.add(d.classification);
+      if (d.jurisdiction) jurisdictions.add(d.jurisdiction);
+    }
+    for (const c of classifications) {
+      stmts.push(`(declare-const Classification__${smtId(c)} Classification)`);
+    }
+    for (const j of jurisdictions) {
+      stmts.push(`(declare-const Jurisdiction__${smtId(j)} Jurisdiction)`);
+    }
+    for (const d of dataTypes) {
+      if (d.classification) {
+        stmts.push(`(assert (ClassifiedAs ${smtId(d.name)} Classification__${smtId(d.classification)}))`);
+      }
+      if (d.jurisdiction) {
+        stmts.push(`(assert (JurisdictionOf ${smtId(d.name)} Jurisdiction__${smtId(d.jurisdiction)}))`);
+      }
     }
     stmts.push('');
   }
@@ -103,10 +127,14 @@ export function translate(program: Program): string[] {
         const from = smtId(rule.from);
         const to = smtId(rule.to);
         stmts.push(`(assert (=> (Flow ${from} ${to}) false))`);
+      } else if (rule.kind === 'DenyReach') {
+        const from = smtId(rule.from);
+        const to = smtId(rule.to);
+        stmts.push(`(assert (=> (CanReach ${from} ${to}) false))`);
       } else if (rule.kind === 'DenyDataFlow') {
         const data = smtId(rule.data);
         const to = smtId(rule.to);
-        stmts.push(`(assert (=> (DataFlow ${data} ${to}) false))`);
+        stmts.push(`(assert (=> (DataCanReach ${data} ${to}) false))`);
       }
       // RequireEncryption: NOT emitted as Z3 constraint.
       // Encryption cannot be determined from static code analysis alone —
@@ -135,13 +163,62 @@ export function translate(program: Program): string[] {
       for (const rule of policy.rules) {
         if (rule.kind === 'DenyInject') {
           stmts.push(`(assert (=> (Injects ${smtId(rule.from)} ${smtId(rule.to)}) false))`);
+        } else if (rule.kind === 'DenyInjectReach') {
+          stmts.push(`(assert (=> (InjectReach ${smtId(rule.from)} ${smtId(rule.to)}) false))`);
         } else if (rule.kind === 'DenyLifetime') {
           stmts.push(`(assert (=> (LifetimeDepends Lifetime__${rule.from} Lifetime__${rule.to}) false))`);
+        } else if (rule.kind === 'DenyLifetimeReach') {
+          stmts.push(`(assert (=> (LifetimeReach Lifetime__${rule.from} Lifetime__${rule.to}) false))`);
         } else if (rule.kind === 'DenyResolve') {
           stmts.push(`(assert (=> (Resolves ${smtId(rule.from)} ${smtId(rule.service)}) false))`);
         }
       }
     }
+    stmts.push('');
+  }
+
+  if (dataPolicies.length > 0) {
+    stmts.push('; === data policy rules ===');
+    for (const policy of dataPolicies) {
+      stmts.push(`; --- ${policy.name} ---`);
+      for (const rule of policy.rules) {
+        if (rule.kind === 'DenyClassification') {
+          stmts.push(`(assert (forall ((d DataType) (e Entity)) (=> (and (ClassifiedAs d Classification__${smtId(rule.classification)}) (DataCanReach d e) (= (Trusted e) ${rule.toTrust === 'trusted' ? 'true' : 'false'})) false)))`);
+        } else {
+          stmts.push(`(assert (forall ((d DataType)) (=> (and (JurisdictionOf d Jurisdiction__${smtId(rule.jurisdiction)}) (DataCanReach d ${smtId(rule.to)})) false)))`);
+        }
+      }
+    }
+    stmts.push('');
+  }
+
+  if (trustPolicies.length > 0) {
+    stmts.push('; === trust policy rules ===');
+    for (const policy of trustPolicies) {
+      stmts.push(`; --- ${policy.name} ---`);
+      for (const rule of policy.rules) {
+        if (rule.kind === 'RequireAuth') {
+          stmts.push(`; require auth ${rule.fromTrust} -> ${rule.toTrust} is evaluated by the runtime trust gate`);
+        } else {
+          stmts.push(`; deny flow ${rule.fromTrust} -> ${rule.toTrust} when data ${rule.classification} is evaluated by the runtime trust gate`);
+        }
+      }
+    }
+    stmts.push('');
+  }
+
+  if (permissions.length > 0) {
+    stmts.push('; === permission declarations ===');
+    const operations = new Set<string>();
+    const roles = new Set<string>();
+    for (const permission of permissions) {
+      for (const rule of permission.rules) {
+        for (const op of rule.operations) operations.add(op);
+        if (rule.roleEnum !== '*' && rule.roleValue !== '*') roles.add(`${rule.roleEnum}__${rule.roleValue}`);
+      }
+    }
+    for (const op of operations) stmts.push(`(declare-const Operation__${smtId(op)} Operation)`);
+    for (const role of roles) stmts.push(`(declare-const Role__${smtId(role)} RoleType)`);
     stmts.push('');
   }
 

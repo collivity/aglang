@@ -95,7 +95,9 @@ Agents can parse this JSON and decide how to fix the violation rather than readi
 4. **Agent validates before finishing** — run `aglc check --all --json` for the guarded project.
 5. **Architecture evolves deliberately** — agents ask before changing `.ag`, `architecture.o`, `AGENTS.md`, or `skill.json`.
 
-When `di_violation` entries appear in `violations[]`, fix the implementation dependency graph. Do not work around the gate by editing `.ag` unless the engineer explicitly asks to change the intended architecture.
+When `reach_violation`, `data_policy_violation`, or `trust_policy_violation` entries appear in `violations[]`, use `detected.path`, `detected.data`, and the Z3 proof to remove the forbidden path or add the declared auth/trust boundary the architecture requires.
+
+When `di_violation` entries appear in `violations[]`, fix the implementation dependency graph. Reach-based DI failures may include a transitive `detected.path`. Do not work around the gate by editing `.ag` unless the engineer explicitly asks to change the intended architecture.
 
 When `change_violations[]` appear, update the required companion component in the same change. For example, a CLI or package metadata change may require README, CLI reference, or agent skill updates.
 

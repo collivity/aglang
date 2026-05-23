@@ -8,7 +8,7 @@ import type { ChangedComponent } from './diff-parser.ts';
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
 import type { ExtractionStrategy, ExtractorPlugin, FlowFact, GraphFact } from '../analyzers/plugin.ts';
 import { discoverPlugins } from '../analyzers/plugin.ts';
-import { csharpPlugin, extractDiFactsFromCSharp, type DiFact } from '../analyzers/csharp.ts';
+import { csharpPlugin, extractAuthFactsFromCSharp, extractDiFactsFromCSharp, type AuthFact, type DiFact } from '../analyzers/csharp.ts';
 import { kotlinPlugin } from '../analyzers/kotlin.ts';
 import { pythonPlugin } from '../analyzers/python.ts';
 import { goPlugin } from '../analyzers/golang.ts';
@@ -31,10 +31,51 @@ export interface DataFlowFact {
   data: string;
   to: string;
   via: string;
+  path?: string[];
   evidence: string;
   file: string;
   line?: number;
   confidence: FlowFact['confidence'];
+}
+
+export interface ReachFact {
+  from: string;
+  to: string;
+  path: string[];
+  evidence: string;
+  file: string;
+  line?: number;
+  confidence: FlowFact['confidence'];
+  graphEvidence?: FlowFact['graphEvidence'];
+}
+
+export interface TrustPolicyFact {
+  policy: string;
+  rule: ArchitectureArtifact['trustPolicies'][number]['rules'][number];
+  from: string;
+  to: string;
+  path?: string[];
+  data?: string;
+  classification?: string;
+  evidence: string;
+  file: string;
+  confidence: FlowFact['confidence'];
+}
+
+export type RuntimeDiFact = DiFact & {
+  reachKind?: 'inject_reach' | 'lifetime_reach';
+  path?: string[];
+};
+
+export interface PermissionViolationFact {
+  permission: string;
+  component: string;
+  operation: string;
+  data: string;
+  evidence: string;
+  file: string;
+  line?: number;
+  confidence: 'definite';
 }
 
 // Registry of built-in plugins (keyed by extension)
@@ -64,11 +105,16 @@ function buildExtensionMap(plugins: ExtractorPlugin[]): Map<string, ExtractorPlu
 export interface DeltaResult {
   facts: FlowFact[];
   dataFlowFacts: DataFlowFact[];
+  reachFacts: ReachFact[];
   graphFacts: GraphFact[];
   blockingFacts: FlowFact[];   // confidence=definite (or probable in strict mode)
   blockingDataFlowFacts: DataFlowFact[];
+  blockingReachFacts: ReachFact[];
+  blockingTrustPolicyFacts: TrustPolicyFact[];
   diFacts: DiFact[];
-  blockingDiFacts: DiFact[];
+  blockingDiFacts: RuntimeDiFact[];
+  authFacts: AuthFact[];
+  blockingPermissionFacts: PermissionViolationFact[];
   warningFacts: FlowFact[];    // confidence=probable (non-strict)
   smtAssertions: string[];     // only for blocking facts
   // Maps "from::to" → the exact SMT assertion string fed to Z3
@@ -93,6 +139,12 @@ function diFactMatchesPolicy(fact: DiFact, artifact: ArchitectureArtifact): bool
     if (fact.kind === 'lifetime_dependency' && rule.kind === 'DenyLifetime') {
       return rule.from === fact.fromLifetime && rule.to === fact.toLifetime;
     }
+    if (fact.kind === 'inject' && rule.kind === 'DenyInjectReach') {
+      return false;
+    }
+    if (fact.kind === 'lifetime_dependency' && rule.kind === 'DenyLifetimeReach') {
+      return false;
+    }
     if (fact.kind === 'resolve' && rule.kind === 'DenyResolve') {
       return rule.from === fact.from && rule.service === fact.service;
     }
@@ -101,6 +153,13 @@ function diFactMatchesPolicy(fact: DiFact, artifact: ArchitectureArtifact): bool
 }
 
 function buildDiAssertion(fact: DiFact): string {
+  const runtimeFact = fact as RuntimeDiFact;
+  if (runtimeFact.reachKind === 'inject_reach' && fact.kind === 'inject') {
+    return `(assert (InjectReach ${smtId(fact.from)} ${smtId(fact.to)}))`;
+  }
+  if (runtimeFact.reachKind === 'lifetime_reach' && fact.kind === 'lifetime_dependency') {
+    return `(assert (LifetimeReach Lifetime__${fact.fromLifetime} Lifetime__${fact.toLifetime}))`;
+  }
   if (fact.kind === 'inject') {
     return `(assert (Injects ${smtId(fact.from)} ${smtId(fact.to)}))`;
   }
@@ -110,15 +169,135 @@ function buildDiAssertion(fact: DiFact): string {
   return `(assert (Resolves ${smtId(fact.from)} ${smtId(fact.service)}))`;
 }
 
-function inferDataFlowFacts(flowFacts: FlowFact[], artifact: ArchitectureArtifact): DataFlowFact[] {
+function computeDiReachFacts(diFacts: DiFact[], artifact: ArchitectureArtifact): RuntimeDiFact[] {
+  const injectEdges = diFacts.filter((f): f is Extract<DiFact, { kind: 'inject' }> => f.kind === 'inject');
+  const lifetimeEdges = diFacts.filter((f): f is Extract<DiFact, { kind: 'lifetime_dependency' }> => f.kind === 'lifetime_dependency');
+  const byFrom = new Map<string, typeof injectEdges>();
+  for (const edge of injectEdges) {
+    const bucket = byFrom.get(edge.from) ?? [];
+    bucket.push(edge);
+    byFrom.set(edge.from, bucket);
+  }
+  const reachFacts: RuntimeDiFact[] = [];
+  for (const policy of artifact.diPolicies ?? []) {
+    for (const rule of policy.rules) {
+      if (rule.kind === 'DenyInjectReach') {
+        const queue = (byFrom.get(rule.from) ?? []).map(edge => ({ edge, path: [edge.from, edge.to] }));
+        const seen = new Set<string>();
+        while (queue.length > 0) {
+          const item = queue.shift()!;
+          if (seen.has(item.edge.to)) continue;
+          seen.add(item.edge.to);
+          if (item.edge.to === rule.to) {
+            reachFacts.push({
+              ...item.edge,
+              from: rule.from,
+              to: rule.to,
+              reachKind: 'inject_reach',
+              path: item.path,
+              evidence: `DI injection path: ${item.path.join(' -> ')}`,
+            });
+            break;
+          }
+          for (const next of byFrom.get(item.edge.to) ?? []) {
+            if (!item.path.includes(next.to)) queue.push({ edge: next, path: [...item.path, next.to] });
+          }
+        }
+      }
+      if (rule.kind === 'DenyLifetimeReach') {
+        const byLifetime = new Map<string, typeof lifetimeEdges>();
+        for (const edge of lifetimeEdges) {
+          const bucket = byLifetime.get(edge.fromLifetime) ?? [];
+          bucket.push(edge);
+          byLifetime.set(edge.fromLifetime, bucket);
+        }
+        const queue = (byLifetime.get(rule.from) ?? []).map(edge => ({ edge, lifetimes: [edge.fromLifetime, edge.toLifetime], components: [edge.from, edge.to] }));
+        const seen = new Set<string>();
+        while (queue.length > 0) {
+          const item = queue.shift()!;
+          if (seen.has(item.edge.toLifetime)) continue;
+          seen.add(item.edge.toLifetime);
+          if (item.edge.toLifetime === rule.to) {
+            reachFacts.push({
+              ...item.edge,
+              fromLifetime: rule.from,
+              toLifetime: rule.to,
+              reachKind: 'lifetime_reach',
+              path: item.components,
+              evidence: `DI lifetime path: ${item.lifetimes.join(' -> ')} via ${item.components.join(' -> ')}`,
+            });
+            break;
+          }
+          for (const next of byLifetime.get(item.edge.toLifetime) ?? []) {
+            if (!item.lifetimes.includes(next.toLifetime)) {
+              queue.push({
+                edge: next,
+                lifetimes: [...item.lifetimes, next.toLifetime],
+                components: [...item.components, next.to],
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+  return reachFacts;
+}
+
+function computeReachFacts(flowFacts: FlowFact[]): ReachFact[] {
+  const byFrom = new Map<string, FlowFact[]>();
+  for (const fact of flowFacts) {
+    const bucket = byFrom.get(fact.from) ?? [];
+    bucket.push(fact);
+    byFrom.set(fact.from, bucket);
+  }
+  const reachFacts: ReachFact[] = [];
+  const seen = new Set<string>();
+  for (const start of byFrom.keys()) {
+    const queue: Array<{ current: string; path: string[]; first: FlowFact; confidence: FlowFact['confidence'] }> = [];
+    for (const edge of byFrom.get(start) ?? []) {
+      queue.push({ current: edge.to, path: [edge.from, edge.to], first: edge, confidence: edge.confidence });
+    }
+    while (queue.length > 0) {
+      const item = queue.shift()!;
+      const key = `${start}::${item.current}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        reachFacts.push({
+          from: start,
+          to: item.current,
+          path: item.path,
+          confidence: item.confidence,
+          evidence: `Reachability path: ${item.path.join(' -> ')}`,
+          file: item.first.file,
+          line: item.first.line,
+          graphEvidence: item.first.graphEvidence,
+        });
+      }
+      for (const next of byFrom.get(item.current) ?? []) {
+        if (item.path.includes(next.to)) continue;
+        queue.push({
+          current: next.to,
+          path: [...item.path, next.to],
+          first: item.first,
+          confidence: item.confidence === 'definite' && next.confidence === 'definite' ? 'definite' : 'probable',
+        });
+      }
+    }
+  }
+  return reachFacts;
+}
+
+function inferDataFlowFacts(reachFacts: ReachFact[], artifact: ArchitectureArtifact): DataFlowFact[] {
   const handles = new Map((artifact.componentData ?? []).map(c => [c.component, c.handles]));
   const dataFlowFacts: DataFlowFact[] = [];
-  for (const fact of flowFacts) {
+  for (const fact of reachFacts) {
     for (const data of handles.get(fact.from) ?? []) {
       dataFlowFacts.push({
         data,
         to: fact.to,
         via: fact.from,
+        path: fact.path,
         evidence: `${fact.from} handles ${data}; ${fact.evidence}`,
         file: fact.file,
         ...(fact.line ? { line: fact.line } : {}),
@@ -127,6 +306,129 @@ function inferDataFlowFacts(flowFacts: FlowFact[], artifact: ArchitectureArtifac
     }
   }
   return dataFlowFacts;
+}
+
+function entityTrust(entity: string, artifact: ArchitectureArtifact): string | undefined {
+  const direct = [...(artifact.nodes ?? []), ...(artifact.resources ?? [])].find(n => n.name === entity)?.trust;
+  if (direct) return direct;
+  const nodeName = artifact.componentNodes?.[entity];
+  return nodeName ? (artifact.nodes ?? []).find(n => n.name === nodeName)?.trust : undefined;
+}
+
+function entityAuth(entity: string, artifact: ArchitectureArtifact): string | undefined {
+  const direct = [...(artifact.nodes ?? []), ...(artifact.resources ?? [])].find(n => n.name === entity)?.auth;
+  if (direct) return direct;
+  const nodeName = artifact.componentNodes?.[entity];
+  return nodeName ? (artifact.nodes ?? []).find(n => n.name === nodeName)?.auth : undefined;
+}
+
+function dataClassification(data: string, artifact: ArchitectureArtifact): string | undefined {
+  return (artifact.dataTypes ?? []).find(d => d.name === data)?.classification;
+}
+
+function dataJurisdiction(data: string, artifact: ArchitectureArtifact): string | undefined {
+  return (artifact.dataTypes ?? []).find(d => d.name === data)?.jurisdiction;
+}
+
+function factMatchesDataPolicies(fact: DataFlowFact, artifact: ArchitectureArtifact): boolean {
+  const classification = dataClassification(fact.data, artifact);
+  const jurisdiction = dataJurisdiction(fact.data, artifact);
+  const targetTrust = entityTrust(fact.to, artifact);
+  return (artifact.dataPolicies ?? []).some(policy => policy.rules.some(rule => {
+    if (rule.kind === 'DenyClassification') {
+      return classification === rule.classification && targetTrust === rule.toTrust;
+    }
+    return jurisdiction === rule.jurisdiction && fact.to === rule.to;
+  }));
+}
+
+function inferTrustPolicyFacts(reachFacts: ReachFact[], dataFlowFacts: DataFlowFact[], artifact: ArchitectureArtifact): TrustPolicyFact[] {
+  const facts: TrustPolicyFact[] = [];
+  for (const policy of artifact.trustPolicies ?? []) {
+    for (const rule of policy.rules) {
+      if (rule.kind === 'RequireAuth') {
+        for (const fact of reachFacts) {
+          if (entityTrust(fact.from, artifact) === rule.fromTrust &&
+              entityTrust(fact.to, artifact) === rule.toTrust &&
+              (!entityAuth(fact.to, artifact) || entityAuth(fact.to, artifact) === 'none')) {
+            facts.push({
+              policy: policy.name,
+              rule,
+              from: fact.from,
+              to: fact.to,
+              path: fact.path,
+              evidence: `${fact.evidence}; target auth is '${entityAuth(fact.to, artifact) ?? 'none'}'`,
+              file: fact.file,
+              confidence: fact.confidence,
+            });
+          }
+        }
+      } else {
+        for (const fact of dataFlowFacts) {
+          const classification = dataClassification(fact.data, artifact);
+          if (classification === rule.classification &&
+              entityTrust(fact.via, artifact) === rule.fromTrust &&
+              entityTrust(fact.to, artifact) === rule.toTrust) {
+            facts.push({
+              policy: policy.name,
+              rule,
+              from: fact.via,
+              to: fact.to,
+              path: fact.path,
+              data: fact.data,
+              classification,
+              evidence: fact.evidence,
+              file: fact.file,
+              confidence: fact.confidence,
+            });
+          }
+        }
+      }
+    }
+  }
+  return facts;
+}
+
+function roleMatchesPermission(check: Extract<AuthFact, { kind: 'checks_role' }>, roleEnum: string, roleValue: string): boolean {
+  if (roleEnum === '*' || roleValue === '*') return true;
+  return check.role === roleValue || check.role === `${roleEnum}.${roleValue}` || check.role === `${roleEnum}__${roleValue}`;
+}
+
+function operationMatches(operations: string[], operation: string): boolean {
+  return operations.includes('*') || operations.includes(operation);
+}
+
+function inferPermissionViolations(authFacts: AuthFact[], artifact: ArchitectureArtifact): PermissionViolationFact[] {
+  const checksByComponent = new Map<string, Array<Extract<AuthFact, { kind: 'checks_role' }>>>();
+  for (const fact of authFacts) {
+    if (fact.kind === 'checks_role') {
+      const bucket = checksByComponent.get(fact.component) ?? [];
+      bucket.push(fact);
+      checksByComponent.set(fact.component, bucket);
+    }
+  }
+  const violations: PermissionViolationFact[] = [];
+  for (const performs of authFacts.filter((f): f is Extract<AuthFact, { kind: 'performs' }> => f.kind === 'performs')) {
+    const permission = (artifact.permissionPolicies ?? artifact.permissions ?? []).find(p => p.onType === performs.data);
+    if (!permission) continue;
+    const allowRules = permission.rules.filter(rule => rule.kind === 'allow' && operationMatches(rule.operations, performs.operation));
+    if (allowRules.length === 0) continue;
+    const checks = checksByComponent.get(performs.component) ?? [];
+    const hasMatchingCheck = allowRules.some(rule => checks.some(check => roleMatchesPermission(check, rule.roleEnum, rule.roleValue)));
+    if (!hasMatchingCheck) {
+      violations.push({
+        permission: permission.name,
+        component: performs.component,
+        operation: performs.operation,
+        data: performs.data,
+        evidence: `${performs.evidence}; no matching role check for allow rule`,
+        file: performs.file,
+        line: performs.line,
+        confidence: 'definite',
+      });
+    }
+  }
+  return violations;
 }
 
 function defaultStrategyForPlugin(plugin: ExtractorPlugin): ExtractionStrategy {
@@ -239,15 +541,25 @@ export async function generateDeltaAssertions(
 
   const projection = projectGraphToFlows(uniqueGraphFacts, artifact, { strict });
   const graphReport = buildGraphReport(uniqueGraphFacts, projection);
-  const dataFlowFacts = inferDataFlowFacts(projection.flowFacts, artifact);
+  const reachFacts = computeReachFacts(projection.flowFacts);
+  const blockingReachFacts = reachFacts.filter(f =>
+    artifact.invariants.some(inv => inv.rules.some(rule =>
+      rule.kind === 'DenyReach' && rule.from === f.from && rule.to === f.to,
+    )),
+  );
+  const dataFlowFacts = inferDataFlowFacts(reachFacts, artifact);
   const blockingDataFlowFacts = dataFlowFacts.filter(f =>
     artifact.invariants.some(inv => inv.rules.some(rule =>
       rule.kind === 'DenyDataFlow' && rule.data === f.data && rule.to === f.to,
-    )),
+    )) || factMatchesDataPolicies(f, artifact),
   );
-  const dataFlowAssertions = blockingDataFlowFacts.map(f => `(assert (DataFlow ${smtId(f.data)} ${smtId(f.to)}))`);
+  const reachAssertions = blockingReachFacts.map(f => `(assert (CanReach ${smtId(f.from)} ${smtId(f.to)}))`);
+  const dataFlowAssertions = blockingDataFlowFacts.map(f => `(assert (DataCanReach ${smtId(f.data)} ${smtId(f.to)}))`);
+  const blockingTrustPolicyFacts = inferTrustPolicyFacts(reachFacts, dataFlowFacts, artifact);
   const diFacts = extractDiFactsFromCSharp(csharpInputs, artifact.mappings);
-  const blockingDiFacts = diFacts.filter(f => diFactMatchesPolicy(f, artifact));
+  const directBlockingDiFacts = diFacts.filter(f => diFactMatchesPolicy(f, artifact));
+  const diReachFacts = computeDiReachFacts(diFacts, artifact);
+  const blockingDiFacts = [...directBlockingDiFacts, ...diReachFacts];
   const diFactSmtMap = new Map<string, string>();
   const diAssertions = blockingDiFacts.map(f => {
     const assertion = buildDiAssertion(f);
@@ -260,17 +572,24 @@ export async function generateDeltaAssertions(
     }
     return assertion;
   });
+  const authFacts = extractAuthFactsFromCSharp(csharpInputs, artifact.permissionPolicies ?? artifact.permissions ?? []);
+  const blockingPermissionFacts = inferPermissionViolations(authFacts, artifact);
 
   return {
     facts: projection.flowFacts,
     dataFlowFacts,
+    reachFacts,
     graphFacts: uniqueGraphFacts,
     blockingFacts: projection.blockingFacts,
     blockingDataFlowFacts,
+    blockingReachFacts,
+    blockingTrustPolicyFacts,
     diFacts,
     blockingDiFacts,
+    authFacts,
+    blockingPermissionFacts,
     warningFacts: projection.warningFacts,
-    smtAssertions: [...projection.smtAssertions, ...dataFlowAssertions, ...diAssertions],
+    smtAssertions: [...projection.smtAssertions, ...reachAssertions, ...dataFlowAssertions, ...diAssertions],
     factSmtMap: projection.factSmtMap,
     diFactSmtMap,
     graphReport,

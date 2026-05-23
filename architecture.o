@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 11,
+  "schemaVersion": 12,
   "sourcePath": "C:\\Users\\pante\\Codespaces\\aglang\\architecture.ag",
   "enforcement": [
     {
@@ -10,7 +10,27 @@
     {
       "declaration": "invariant deny dataflow",
       "level": "formal_z3",
-      "mechanism": "Dataflow facts inferred from handled data and extracted flows are asserted against SMT-LIB constraints."
+      "mechanism": "Dataflow facts inferred from handled data and extracted reachability are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant deny reach",
+      "level": "formal_z3",
+      "mechanism": "Transitive flow reachability facts extracted from code are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "data_policy",
+      "level": "formal_z3",
+      "mechanism": "Classified and jurisdictional data reachability facts are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "trust_policy",
+      "level": "formal_z3",
+      "mechanism": "Trust boundary facts are checked against extracted reachability, data classification, and declared auth metadata."
+    },
+    {
+      "declaration": "permission",
+      "level": "formal_z3",
+      "mechanism": "Extracted protected operations are checked for matching role evidence where extractors can prove authorization facts."
     },
     {
       "declaration": "change_policy",
@@ -41,11 +61,6 @@
       "declaration": "machine",
       "level": "advisory",
       "mechanism": "Emitted to AGENTS.md for agent guidance; transition extraction is not enforced yet."
-    },
-    {
-      "declaration": "permission",
-      "level": "advisory",
-      "mechanism": "Emitted to AGENTS.md for agent guidance; access-control extraction is not enforced yet."
     }
   ],
   "constraints": [
@@ -53,12 +68,25 @@
     "(declare-sort Entity 0)",
     "(declare-sort DataType 0)",
     "(declare-sort ServiceType 0)",
+    "(declare-sort Classification 0)",
+    "(declare-sort Jurisdiction 0)",
+    "(declare-sort Operation 0)",
+    "(declare-sort RoleType 0)",
     "(declare-datatype Lifetime ((Lifetime__singleton) (Lifetime__scoped) (Lifetime__transient)))",
     "(declare-fun Flow      (Entity Entity) Bool)",
+    "(declare-fun CanReach  (Entity Entity) Bool)",
     "(declare-fun DataFlow  (DataType Entity) Bool)",
+    "(declare-fun DataCanReach (DataType Entity) Bool)",
+    "(declare-fun ClassifiedAs (DataType Classification) Bool)",
+    "(declare-fun JurisdictionOf (DataType Jurisdiction) Bool)",
     "(declare-fun Injects   (Entity Entity) Bool)",
+    "(declare-fun InjectReach (Entity Entity) Bool)",
     "(declare-fun LifetimeDepends (Lifetime Lifetime) Bool)",
+    "(declare-fun LifetimeReach (Lifetime Lifetime) Bool)",
     "(declare-fun Resolves  (Entity ServiceType) Bool)",
+    "(declare-fun RequiresAuth (Entity Entity) Bool)",
+    "(declare-fun Performs (Entity Operation DataType) Bool)",
+    "(declare-fun ChecksRole (Entity RoleType) Bool)",
     "(declare-fun Encrypted (Entity Entity) Bool)",
     "(declare-fun Trusted   (Entity) Bool)",
     "(declare-fun IsNode    (Entity) Bool)",
@@ -306,6 +334,7 @@
       ]
     }
   ],
+  "reachPolicies": [],
   "nodes": [
     {
       "name": "node_runtime",
@@ -341,10 +370,32 @@
   "dataTypes": [],
   "stateMachines": [],
   "permissions": [],
+  "permissionPolicies": [],
   "contracts": [],
   "componentContracts": [],
   "componentData": [],
   "componentMeta": [],
+  "componentNodes": {
+    "CliCompiler": "node_runtime",
+    "LanguageFrontend": "node_runtime",
+    "SmtBackend": "node_runtime",
+    "RuntimeGate": "node_runtime",
+    "ExtractorAnalyzers": "node_runtime",
+    "GraphProjection": "node_runtime",
+    "Emitters": "node_runtime",
+    "SpecGenerator": "node_runtime",
+    "DocsSite": "node_runtime",
+    "PackageMetadata": "node_runtime",
+    "AgentSkill": "node_runtime",
+    "AgentSkillInstaller": "node_runtime",
+    "ReadmeDocs": "node_runtime",
+    "CliReferenceDocs": "node_runtime",
+    "PublicDocs": "node_runtime",
+    "ReleaseWorkflow": "github_actions",
+    "DocsWorkflow": "github_actions",
+    "VscodeExtension": "node_runtime",
+    "Tests": "node_runtime"
+  },
   "plugins": [],
   "repos": [],
   "componentRepos": {},
@@ -459,6 +510,8 @@
     }
   ],
   "diPolicies": [],
+  "dataPolicies": [],
+  "trustPolicies": [],
   "changePolicies": [
     {
       "name": "DocsFreshness",

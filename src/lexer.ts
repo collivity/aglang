@@ -19,6 +19,7 @@ const KEYWORDS = new Set([
   'node', 'component', 'data', 'enum', 'service', 'invariant', 'test',
   'resource', 'role', 'layer',
   'deny', 'allow', 'flow', 'dataflow', 'require', 'encryption', 'on',
+  'reach',
   'runs_on', 'paths', 'trust', 'connectivity', 'latency', 'failure_mode',
   'protocol', 'auth', 'rate_limit',
   'where', 'no', 'every', 'some',
@@ -39,6 +40,9 @@ const KEYWORDS = new Set([
   // Dependency injection and lifetime policies
   'di_policy', 'inject', 'lifetime', 'singleton', 'scoped', 'transient',
   'resolve', 'from',
+  // Data/trust policy support
+  'data_policy', 'trust_policy', 'classification', 'jurisdiction',
+  'trusted', 'untrusted', 'semi_trusted',
   // Change coupling policies
   'change_policy', 'touched',
 ]);

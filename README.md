@@ -34,7 +34,7 @@ Designed as an **agent-first guardrail**: agents read `AGENTS.md`, validate focu
 
 1. **Architecture build** — `aglc compile spec.ag` produces `architecture.o` (a JSON artifact with SMT-LIB2 constraints + component→path mappings).
 2. **Work-in-progress validation** — agents run `aglc check-file --json` while editing and `aglc check --all --json` before finishing.
-3. **Commit enforcement** — the pre-commit hook runs `aglc check`, extracts flow, dataflow, dependency-injection, workflow, and contract facts, feeds formal facts with the compiled constraints to Z3, and blocks the commit if any hard rule is violated.
+3. **Commit enforcement** — the pre-commit hook runs `aglc check`, extracts flow, reachability, propagated dataflow, trust-boundary, dependency-injection, workflow, and contract facts, feeds formal facts with the compiled constraints to Z3, and blocks the commit if any hard rule is violated.
 4. **Agent bootstrap** — `aglc add` can create a starter `.ag` spec, compiled artifact, hook, and agent files for engineer review.
 
 
@@ -199,7 +199,7 @@ Not every declaration is enforced the same way:
 
 | Level | Declarations | Behavior |
 |---|---|---|
-| `formal_z3` | `invariant deny flow`, `invariant deny dataflow`, `di_policy`, `change_policy` | Facts are asserted into SMT and checked by Z3. |
+| `formal_z3` | `invariant deny flow`, `invariant deny reach`, `invariant deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy` | Facts are asserted into SMT and checked by Z3 when extractors produce definite evidence. |
 | `deterministic_policy` | `contract`, `workflow_policy` | Extracted route/workflow facts are checked by deterministic gates. |
 | `advisory` | `machine`, `permission`, `require encryption` | Emitted to docs and agent context; not blocking until an extractor/gate enforces them. |
 
@@ -360,6 +360,7 @@ component <name> {
 // Invariant
 invariant <name> {
   deny flow <ComponentOrNode> -> <ComponentOrNode>
+  deny reach <ComponentOrNode> -> <ComponentOrNode>
   deny dataflow <DataType> -> <ComponentOrNode>
   require encryption on flow <ComponentOrNode> -> <ComponentOrNode>  // advisory
 }
@@ -372,8 +373,21 @@ change_policy <name> {
 // Dependency injection policy
 di_policy <name> {
   deny inject <Component> -> <Component>
+  deny inject_reach <Component> -> <Component>
   deny lifetime singleton -> scoped
+  deny lifetime_reach singleton -> scoped
   deny resolve IServiceProvider from <Component>
+}
+
+// Data and trust policies
+data_policy <name> {
+  deny classification pii -> untrusted
+  deny jurisdiction eu -> <ComponentOrNode>
+}
+
+trust_policy <name> {
+  require auth untrusted -> trusted
+  deny flow trusted -> untrusted when data pii
 }
 
 // API contract
@@ -401,6 +415,8 @@ permission <name> {
 
 // Data types
 data <Name> {
+  classification: pii
+  jurisdiction: eu
   field: Type
 }
 
@@ -445,20 +461,21 @@ All check commands emit a JSON object when `--json` is passed:
   "artifact": "architecture.o",
   "violations": [
     {
-      "type": "flow_violation",
+      "type": "reach_violation",
       "invariant": "Layered",
-      "rule": { "kind": "DenyFlow", "from": "Api", "to": "db" },
+      "rule": { "kind": "DenyReach", "from": "UI", "to": "Db" },
       "detected": {
-        "from": "Api",
-        "to": "db",
+        "from": "UI",
+        "to": "Db",
+        "path": ["UI", "Service", "Db"],
         "confidence": "definite",
-        "evidence": "ApplicationDbContext injected via constructor",
+        "evidence": "Reachability path: UI -> Service -> Db",
         "file": "/abs/path/to/file.cs"
       },
       "message": "...",
       "z3_proof": {
-        "permanent_constraint": "(assert (=> (Flow Api db) false))",
-        "delta_assertion": "(assert (Flow Api db))",
+        "permanent_constraint": "(assert (=> (CanReach UI Db) false))",
+        "delta_assertion": "(assert (CanReach UI Db))",
         "explanation": "Z3 returned UNSAT — both assertions cannot be simultaneously true"
       }
     }

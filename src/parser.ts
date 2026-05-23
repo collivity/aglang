@@ -9,6 +9,7 @@ import type {
   ContractDecl, ContractEndpoint, PluginDecl, RepoDecl,
   WorkflowPolicyDecl, WorkflowPolicyRule, WorkflowCondition, WorkflowPolicyAction,
   ChangePolicyDecl, ChangePolicyRule, DiLifetime, DiPolicyDecl, DiPolicyRule,
+  DataPolicyDecl, DataPolicyRule, TrustPolicyDecl, TrustPolicyRule,
 } from './ast.ts';
 
 export class ParseError extends Error {
@@ -141,15 +142,23 @@ export function parse(tokens: Token[]): Program {
     expect('KEYWORD', 'data');
     const name = expect('IDENT').value;
     const fields: Field[] = [];
+    let classification: string | undefined;
+    let jurisdiction: string | undefined;
     expect('LBRACE');
     while (!match('RBRACE') && !eof()) {
-      const key = expect('IDENT').value;
+      const key = expectIdent().value;
       expect('COLON');
+      if ((key === 'classification' || key === 'jurisdiction') && /^[a-z_]/.test(peek().value)) {
+        const value = expectIdent().value;
+        if (key === 'classification') classification = value;
+        else jurisdiction = value;
+        continue;
+      }
       // Type expression: collect until next key: or }
       let typeExpr = '';
       while (
         !match('RBRACE') && !eof() &&
-        !(peek().kind === 'IDENT' && tokens[pos + 1]?.kind === 'COLON')
+        !((peek().kind === 'IDENT' || peek().kind === 'KEYWORD') && tokens[pos + 1]?.kind === 'COLON')
       ) {
         const t = advance();
         typeExpr += (typeExpr ? ' ' : '') + t.value;
@@ -157,7 +166,13 @@ export function parse(tokens: Token[]): Program {
       fields.push({ key, typeExpr: typeExpr.trim().replace(/\s*<\s*/g, '<').replace(/\s*>\s*/g, '>').replace(/\s*,\s*/g, ', ').replace(/\s*\|\s*/g, ' | ') });
     }
     expect('RBRACE');
-    return { kind: 'DataDecl', name, fields };
+    return {
+      kind: 'DataDecl',
+      name,
+      fields,
+      ...(classification ? { classification } : {}),
+      ...(jurisdiction ? { jurisdiction } : {}),
+    };
   }
 
   function parseIdentList(): string[] {
@@ -258,13 +273,13 @@ export function parse(tokens: Token[]): Program {
       const action = advance().value; // 'deny' or 'require'
       if (action === 'deny') {
         const denied = advance();
-        if (denied.value === 'flow') {
+        if (denied.value === 'flow' || denied.value === 'reach') {
           const fromEndpoint = parseInvariantEndpoint();
           expect('ARROW');
           const toEndpoint = parseInvariantEndpoint();
           consume('SEMICOLON');
           rules.push({
-            kind: 'DenyFlow',
+            kind: denied.value === 'reach' ? 'DenyReach' : 'DenyFlow',
             from: endpointName(fromEndpoint),
             to: endpointName(toEndpoint),
             fromEndpoint,
@@ -277,7 +292,7 @@ export function parse(tokens: Token[]): Program {
           consume('SEMICOLON');
           rules.push({ kind: 'DenyDataFlow', data, to });
         } else {
-          throw new ParseError(`expected 'flow' or 'dataflow' after deny`, denied);
+          throw new ParseError(`expected 'flow', 'reach', or 'dataflow' after deny`, denied);
         }
       } else if (action === 'require') {
         expect('KEYWORD', 'encryption');
@@ -645,12 +660,30 @@ export function parse(tokens: Token[]): Program {
         continue;
       }
 
+      if (ruleKind.value === 'inject_reach') {
+        const from = expect('IDENT').value;
+        expect('ARROW');
+        const to = expect('IDENT').value;
+        consume('SEMICOLON');
+        rules.push({ kind: 'DenyInjectReach', from, to });
+        continue;
+      }
+
       if (ruleKind.value === 'lifetime') {
         const from = parseDiLifetime();
         expect('ARROW');
         const to = parseDiLifetime();
         consume('SEMICOLON');
         rules.push({ kind: 'DenyLifetime', from, to });
+        continue;
+      }
+
+      if (ruleKind.value === 'lifetime_reach') {
+        const from = parseDiLifetime();
+        expect('ARROW');
+        const to = parseDiLifetime();
+        consume('SEMICOLON');
+        rules.push({ kind: 'DenyLifetimeReach', from, to });
         continue;
       }
 
@@ -663,10 +696,77 @@ export function parse(tokens: Token[]): Program {
         continue;
       }
 
-      throw new ParseError(`expected 'inject', 'lifetime', or 'resolve' after deny`, ruleKind);
+      throw new ParseError(`expected 'inject', 'inject_reach', 'lifetime', 'lifetime_reach', or 'resolve' after deny`, ruleKind);
     }
     expect('RBRACE');
     return { kind: 'DiPolicyDecl', name, rules };
+  }
+
+  function parseDataPolicyDecl(): DataPolicyDecl {
+    expect('KEYWORD', 'data_policy');
+    const name = expect('IDENT').value;
+    const rules: DataPolicyRule[] = [];
+    expect('LBRACE');
+    while (!match('RBRACE') && !eof()) {
+      const action = advance();
+      if (action.value !== 'deny') {
+        throw new ParseError(`expected 'deny' in data_policy block`, action);
+      }
+      const selector = advance();
+      if (selector.value === 'classification') {
+        const classification = expectIdent().value;
+        expect('ARROW');
+        const toTrust = expectIdent().value;
+        consume('SEMICOLON');
+        rules.push({ kind: 'DenyClassification', classification, toTrust });
+        continue;
+      }
+      if (selector.value === 'jurisdiction') {
+        const jurisdiction = expectIdent().value;
+        expect('ARROW');
+        const to = expect('IDENT').value;
+        consume('SEMICOLON');
+        rules.push({ kind: 'DenyJurisdiction', jurisdiction, to });
+        continue;
+      }
+      throw new ParseError(`expected 'classification' or 'jurisdiction' after deny`, selector);
+    }
+    expect('RBRACE');
+    return { kind: 'DataPolicyDecl', name, rules };
+  }
+
+  function parseTrustPolicyDecl(): TrustPolicyDecl {
+    expect('KEYWORD', 'trust_policy');
+    const name = expect('IDENT').value;
+    const rules: TrustPolicyRule[] = [];
+    expect('LBRACE');
+    while (!match('RBRACE') && !eof()) {
+      const action = advance();
+      if (action.value === 'require') {
+        expect('KEYWORD', 'auth');
+        const fromTrust = expectIdent().value;
+        expect('ARROW');
+        const toTrust = expectIdent().value;
+        consume('SEMICOLON');
+        rules.push({ kind: 'RequireAuth', fromTrust, toTrust });
+        continue;
+      }
+      if (action.value === 'deny') {
+        expect('KEYWORD', 'flow');
+        const fromTrust = expectIdent().value;
+        expect('ARROW');
+        const toTrust = expectIdent().value;
+        expect('KEYWORD', 'when');
+        expect('KEYWORD', 'data');
+        const classification = expectIdent().value;
+        consume('SEMICOLON');
+        rules.push({ kind: 'DenyFlowWhenData', fromTrust, toTrust, classification });
+        continue;
+      }
+      throw new ParseError(`expected 'require' or 'deny' in trust_policy block`, action);
+    }
+    expect('RBRACE');
+    return { kind: 'TrustPolicyDecl', name, rules };
   }
 
   function parseChangePolicyDecl(): ChangePolicyDecl {
@@ -721,6 +821,8 @@ export function parse(tokens: Token[]): Program {
         case 'plugin':     declarations.push(parsePluginDecl()); break;
         case 'workflow_policy': declarations.push(parseWorkflowPolicyDecl()); break;
         case 'di_policy': declarations.push(parseDiPolicyDecl()); break;
+        case 'data_policy': declarations.push(parseDataPolicyDecl()); break;
+        case 'trust_policy': declarations.push(parseTrustPolicyDecl()); break;
         case 'change_policy': declarations.push(parseChangePolicyDecl()); break;
         case 'repo':       declarations.push(parseRepoDecl()); break;
         case 'test':       declarations.push(parseTestDecl()); break;

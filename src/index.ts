@@ -297,7 +297,11 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
 
   if (
     delta.blockingFacts.length === 0 &&
+    delta.blockingReachFacts.length === 0 &&
+    delta.blockingDataFlowFacts.length === 0 &&
+    delta.blockingTrustPolicyFacts.length === 0 &&
     delta.blockingDiFacts.length === 0 &&
+    delta.blockingPermissionFacts.length === 0 &&
     delta.warningFacts.length === 0 &&
     contractResult.violations.length === 0 &&
     workflowResult.violations.length === 0 &&

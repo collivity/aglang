@@ -55,6 +55,27 @@ export type DiFact =
       line?: number;
     };
 
+export type AuthFact =
+  | {
+      kind: 'performs';
+      component: string;
+      operation: string;
+      data: string;
+      confidence: 'definite';
+      evidence: string;
+      file: string;
+      line?: number;
+    }
+  | {
+      kind: 'checks_role';
+      component: string;
+      role: string;
+      confidence: 'definite';
+      evidence: string;
+      file: string;
+      line?: number;
+    };
+
 function withStrategy(facts: FlowFact[], strategy: ExtractionStrategy): FlowFact[] {
   return facts.map(f => ({ ...f, strategy: f.strategy ?? strategy }));
 }
@@ -456,6 +477,90 @@ export function extractDiFactsFromCSharp(
         file: filePath,
         line: lineOf(content, m.index),
       });
+    }
+  }
+
+  return facts;
+}
+
+export function extractAuthFactsFromCSharp(
+  inputs: Array<{ componentName: string; files: string[] }>,
+  permissions: Array<{ onType: string; rules: Array<{ operations: string[] }> }>,
+): AuthFact[] {
+  const protectedData = [...new Set(permissions.map(p => p.onType))];
+  const protectedOps = [...new Set(permissions.flatMap(p => p.rules.flatMap(r => r.operations)).filter(op => op !== '*'))];
+  const facts: AuthFact[] = [];
+  const seen = new Set<string>();
+  const add = (fact: AuthFact): void => {
+    const key = `${fact.kind}:${JSON.stringify(fact)}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      facts.push(fact);
+    }
+  };
+
+  for (const input of inputs) {
+    for (const filePath of input.files) {
+      let content: string;
+      try { content = readFileSync(filePath, 'utf8'); } catch { continue; }
+
+      const authorizeRe = /\[Authorize\s*(?:\(([^)]*)\))?\]/g;
+      let m: RegExpExecArray | null;
+      while ((m = authorizeRe.exec(content)) !== null) {
+        const args = m[1] ?? '';
+        const roles = /Roles\s*=\s*"([^"]+)"/.exec(args)?.[1];
+        if (roles) {
+          for (const role of roles.split(',').map(r => r.trim()).filter(Boolean)) {
+            add({
+              kind: 'checks_role',
+              component: input.componentName,
+              role,
+              confidence: 'definite',
+              evidence: `[Authorize(Roles="${roles}")]`,
+              file: filePath,
+              line: lineOf(content, m.index),
+            });
+          }
+        }
+      }
+
+      const isInRoleRe = /\bUser\.IsInRole\s*\(\s*"([^"]+)"\s*\)/g;
+      while ((m = isInRoleRe.exec(content)) !== null) {
+        add({
+          kind: 'checks_role',
+          component: input.componentName,
+          role: m[1]!,
+          confidence: 'definite',
+          evidence: `User.IsInRole("${m[1]}")`,
+          file: filePath,
+          line: lineOf(content, m.index),
+        });
+      }
+
+      const operationHints: Array<[RegExp, string]> = [
+        [/\b(HttpDelete|Delete\w*)\b/i, 'delete'],
+        [/\b(HttpPost|Create\w*)\b/i, 'create'],
+        [/\b(HttpPut|HttpPatch|Update\w*|Edit\w*)\b/i, 'update'],
+        [/\b(HttpGet|Get\w*|Read\w*)\b/i, 'read'],
+      ];
+      for (const data of protectedData) {
+        if (!new RegExp(`\\b${data}\\b`).test(content)) continue;
+        for (const [pattern, inferredOperation] of operationHints) {
+          if (!pattern.test(content)) continue;
+          const operations = protectedOps.includes(inferredOperation) ? [inferredOperation] : protectedOps;
+          for (const operation of operations) {
+            add({
+              kind: 'performs',
+              component: input.componentName,
+              operation,
+              data,
+              confidence: 'definite',
+              evidence: `C# endpoint/member appears to perform '${operation}' on '${data}'`,
+              file: filePath,
+            });
+          }
+        }
+      }
     }
   }
 

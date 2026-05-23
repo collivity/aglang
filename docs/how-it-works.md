@@ -101,9 +101,9 @@ This is what happens the moment an agent or human types `git commit`. The Arch r
 
 | Level | Used for | Meaning |
 |---|---|---|
-| `formal_z3` | `deny flow`, `deny dataflow`, `di_policy`, `change_policy` | Facts are asserted into SMT and checked by Z3. |
+| `formal_z3` | `deny flow`, `deny reach`, `deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy` | Facts are asserted into SMT and checked by Z3 when extractors produce definite evidence. |
 | `deterministic_policy` | `contract`, `workflow_policy` | Extracted facts are checked by deterministic code paths with exact diagnostics. |
-| `advisory` | `machine`, `permission`, `require encryption` | Rules are emitted to docs/agent context, but do not block yet. |
+| `advisory` | `machine`, `require encryption` | Rules are emitted to docs/agent context, but do not block yet. |
 
 This distinction is part of the product contract: aglang should not imply that advisory declarations are formally enforced.
 

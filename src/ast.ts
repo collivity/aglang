@@ -38,6 +38,8 @@ export interface DataDecl {
   kind: 'DataDecl';
   name: string;
   fields: Field[];
+  classification?: string;
+  jurisdiction?: string;
 }
 
 export interface ComponentDecl {
@@ -67,6 +69,7 @@ export type InvariantEndpoint =
 
 export type InvariantRule =
   | { kind: 'DenyFlow'; from: string; to: string; fromEndpoint?: InvariantEndpoint; toEndpoint?: InvariantEndpoint }
+  | { kind: 'DenyReach'; from: string; to: string; fromEndpoint?: InvariantEndpoint; toEndpoint?: InvariantEndpoint }
   | { kind: 'RequireEncryption'; from: string; to: string; fromEndpoint?: InvariantEndpoint; toEndpoint?: InvariantEndpoint }
   | { kind: 'DenyDataFlow'; data: string; to: string };
 
@@ -195,7 +198,9 @@ export type DiLifetime = 'singleton' | 'scoped' | 'transient';
 
 export type DiPolicyRule =
   | { kind: 'DenyInject'; from: string; to: string }
+  | { kind: 'DenyInjectReach'; from: string; to: string }
   | { kind: 'DenyLifetime'; from: DiLifetime; to: DiLifetime }
+  | { kind: 'DenyLifetimeReach'; from: DiLifetime; to: DiLifetime }
   | { kind: 'DenyResolve'; service: string; from: string };
 
 export interface DiPolicyDecl {
@@ -216,6 +221,26 @@ export interface ChangePolicyDecl {
   rules: ChangePolicyRule[];
 }
 
+export type DataPolicyRule =
+  | { kind: 'DenyClassification'; classification: string; toTrust: string }
+  | { kind: 'DenyJurisdiction'; jurisdiction: string; to: string };
+
+export interface DataPolicyDecl {
+  kind: 'DataPolicyDecl';
+  name: string;
+  rules: DataPolicyRule[];
+}
+
+export type TrustPolicyRule =
+  | { kind: 'RequireAuth'; fromTrust: string; toTrust: string }
+  | { kind: 'DenyFlowWhenData'; fromTrust: string; toTrust: string; classification: string };
+
+export interface TrustPolicyDecl {
+  kind: 'TrustPolicyDecl';
+  name: string;
+  rules: TrustPolicyRule[];
+}
+
 export type Declaration =
   | NodeDecl
   | ResourceDecl
@@ -231,6 +256,8 @@ export type Declaration =
   | WorkflowPolicyDecl
   | DiPolicyDecl
   | ChangePolicyDecl
+  | DataPolicyDecl
+  | TrustPolicyDecl
   | RepoDecl
   | TestDecl;
 

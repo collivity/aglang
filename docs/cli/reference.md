@@ -60,7 +60,7 @@ aglc check --arch <architecture.o> --project <dir> [--all] [--json] [--workflow-
 | `--workflow-z3` | Include workflow policy SMT debug snippets in workflow violations |
 | `--dump-workflow-smt` | Write workflow policy SMT debug snippets to `workflow-debug.smt2` |
 
-`aglc check` also evaluates `di_policy` blocks from extracted implementation facts and `change_policy` blocks against the staged diff, or against every tracked component file when `--all` is used. Dependency-injection failures appear as `di_violation` entries in `violations[]`; change policy failures appear in `change_violations[]`.
+`aglc check` also evaluates reachability, propagated dataflow, `data_policy`, `trust_policy`, `di_policy`, and `change_policy` blocks against the staged diff, or against every tracked component file when `--all` is used. Reachability and trust failures appear as `reach_violation`, `data_policy_violation`, or `trust_policy_violation` entries in `violations[]`; dependency-injection failures appear as `di_violation`; change policy failures appear in `change_violations[]`.
 
 **Exit codes:**
 - `0` — No violations (commit may proceed)

@@ -9,14 +9,17 @@ aglang declarations have explicit enforcement levels:
 | Declaration | Level | Meaning |
 |-------------|-------|---------|
 | `invariant deny flow` | `formal_z3` | Extracted flow facts are checked against SMT-LIB constraints in Z3. |
-| `invariant deny dataflow` | `formal_z3` | Dataflow facts inferred from handled data and extracted flows are checked in Z3. |
+| `invariant deny reach` | `formal_z3` | Transitive flow reachability is checked in Z3. |
+| `invariant deny dataflow` | `formal_z3` | Dataflow facts inferred from handled data and extracted reachability are checked in Z3. |
+| `data_policy` | `formal_z3` | Data classification and jurisdiction rules are checked against propagated data reachability. |
+| `trust_policy` | `formal_z3` | Trust-boundary auth and classified data boundary rules are checked from extracted facts and declared node metadata. |
 | `change_policy` | `formal_z3` | Touched-component facts are checked against SMT-LIB implication rules in Z3. |
 | `di_policy` | `formal_z3` | Definite constructor-injection, lifetime, and service-locator facts are checked in Z3. |
 | `contract` | `deterministic_policy` | Route facts are compared against declared implements/consumes contracts. |
 | `workflow_policy` | `deterministic_policy` | GitHub Actions facts are checked for release, deploy, publish, permission, and step-order rules. |
 | `invariant require encryption` | `advisory` | Reported as a warning because static extraction does not yet prove encryption. |
 | `machine` | `advisory` | Emitted to agent context; transition extraction is not enforced yet. |
-| `permission` | `advisory` | Emitted to agent context; access-control extraction is not enforced yet. |
+| `permission` | `formal_z3` | Authorization intent is emitted and can be enforced when extractors produce definite operation and role-check evidence. |
 
 `formal_z3` and `deterministic_policy` violations block checks. `advisory` declarations guide agents and docs, but do not block by themselves unless a future extractor/gate promotes them.
 
@@ -97,6 +100,7 @@ Flow invariants declare component or node relationships that must not be violate
 ```ag
 invariant <Name> {
   deny flow <ComponentOrNode> -> <ComponentOrNode>
+  deny reach <ComponentOrNode> -> <ComponentOrNode>
   deny flow role <RoleName> -> resource <ResourceNameOrType>
   deny flow layer <LayerName> -> resource <ResourceNameOrType>
   deny dataflow <DataType> -> <ComponentOrNode>
@@ -113,9 +117,45 @@ invariant Layering {
 }
 ```
 
-`deny flow` is Z3-backed. `require encryption on flow` is currently advisory because extractors do not yet prove encrypted transport.
+`deny flow` is direct-only for compatibility. Use `deny reach` to block transitive paths such as `UI -> Service -> Db`. `require encryption on flow` is currently advisory because extractors do not yet prove encrypted transport.
 
-`deny dataflow` is also Z3-backed. It blocks when a component that `handles` a data type has an extracted flow to the denied target.
+`deny dataflow` is also Z3-backed. It blocks when a component that `handles` a data type can reach the denied target through one or more extracted flows.
+
+## Data Metadata And Policies
+
+Data declarations can carry classification and jurisdiction metadata:
+
+```ag
+data CustomerProfile {
+  classification: pii
+  jurisdiction: eu
+  id: UUID
+}
+```
+
+`data_policy` blocks use those labels over propagated data reachability:
+
+```ag
+data_policy Privacy {
+  deny classification pii -> untrusted
+  deny jurisdiction eu -> NonGdprService
+}
+```
+
+The first rule blocks classified data reaching any declared entity whose trust metadata is `untrusted`. The second blocks data with a specific jurisdiction from reaching a named component, node, or resource.
+
+## Trust Policy
+
+Trust policies use `trust:` and `auth:` metadata from nodes and resources. Components inherit metadata from their `runs_on` node.
+
+```ag
+trust_policy Boundaries {
+  require auth untrusted -> trusted
+  deny flow trusted -> untrusted when data pii
+}
+```
+
+`require auth` blocks an extracted path from an untrusted entity to a trusted entity when the target has no declared auth. `deny flow ... when data` blocks classified data crossing the declared trust boundary.
 
 ## Contract
 
@@ -205,8 +245,10 @@ component Application {
 
 di_policy DependencyInjection {
   deny inject Views -> BleManager
+  deny inject_reach Views -> Repositories
   deny inject ViewModels -> Repositories
   deny lifetime singleton -> scoped
+  deny lifetime_reach singleton -> scoped
   deny resolve IServiceProvider from Application
 }
 ```
@@ -214,10 +256,12 @@ di_policy DependencyInjection {
 Semantics:
 
 - `deny inject A -> B` blocks a constructor dependency from component `A` to component `B`.
+- `deny inject_reach A -> B` blocks a transitive constructor dependency path from component `A` to component `B`.
 - `deny lifetime singleton -> scoped` blocks a singleton-registered service depending on a scoped-registered service.
+- `deny lifetime_reach singleton -> scoped` blocks a transitive lifetime path from singleton to scoped.
 - `deny resolve IServiceProvider from Application` blocks service-locator access from `Application`.
 
-Each blocking DI fact becomes an SMT assertion such as `(assert (Injects Views BleManager))` or `(assert (LifetimeDepends Lifetime__singleton Lifetime__scoped))`. The compiled `di_policy` contributes the opposite implication, so Z3 returns UNSAT and the JSON verdict reports a `di_violation`.
+Each blocking DI fact becomes an SMT assertion such as `(assert (Injects Views BleManager))`, `(assert (InjectReach Views Repositories))`, or `(assert (LifetimeReach Lifetime__singleton Lifetime__scoped))`. The compiled `di_policy` contributes the opposite implication, so Z3 returns UNSAT and the JSON verdict reports a `di_violation`.
 
 ## State Machine
 
@@ -238,7 +282,7 @@ machine OrderLifecycle on Order.status {
 
 ## Permission
 
-Permissions describe role/action rules. They are advisory in the current runtime.
+Permissions describe role/action rules. They are formal when extractors provide definite authorization evidence; otherwise they remain agent-visible intent.
 
 ```ag
 enum Role { Admin | Member }
@@ -253,6 +297,8 @@ permission ProjectAccess on Project {
 
 ```ag
 data User {
+  classification: pii
+  jurisdiction: eu
   id: UUID
   email: String
   roles: List<Role>

@@ -7,6 +7,9 @@ function ruleDescription(rule: ArtifactInvariantRule): string {
   if (rule.kind === 'DenyFlow') {
     return `**FORBIDDEN**: \`${rule.from}\` must NOT directly access \`${rule.to}\``;
   }
+  if (rule.kind === 'DenyReach') {
+    return `**FORBIDDEN**: \`${rule.from}\` must NOT transitively reach \`${rule.to}\``;
+  }
   if (rule.kind === 'DenyDataFlow') {
     return `**FORBIDDEN**: data \`${rule.data}\` must NOT flow to \`${rule.to}\``;
   }
@@ -20,8 +23,14 @@ function diRuleDescription(rule: ArtifactDiPolicyRule): string {
   if (rule.kind === 'DenyInject') {
     return `**FORBIDDEN**: \`${rule.from}\` must NOT constructor-inject \`${rule.to}\``;
   }
+  if (rule.kind === 'DenyInjectReach') {
+    return `**FORBIDDEN**: \`${rule.from}\` must NOT reach \`${rule.to}\` through constructor injection`;
+  }
   if (rule.kind === 'DenyLifetime') {
     return `**FORBIDDEN**: \`${rule.from}\` services must NOT depend on \`${rule.to}\` services`;
+  }
+  if (rule.kind === 'DenyLifetimeReach') {
+    return `**FORBIDDEN**: \`${rule.from}\` services must NOT transitively depend on \`${rule.to}\` services`;
   }
   return `**FORBIDDEN**: \`${rule.from}\` must NOT resolve \`${rule.service}\` via service locator`;
 }
@@ -140,6 +149,42 @@ export function emitAgentsMarkdown(artifact: ArchitectureArtifact): string {
     }
   }
 
+  if ((artifact.dataPolicies ?? []).length > 0) {
+    lines.push(`## Data Policies`);
+    lines.push('');
+    lines.push(`> **Enforced at commit time** — classification and jurisdiction labels are checked over propagated data reachability.`);
+    lines.push('');
+    for (const policy of artifact.dataPolicies ?? []) {
+      lines.push(`### \`${policy.name}\``);
+      for (const rule of policy.rules) {
+        if (rule.kind === 'DenyClassification') {
+          lines.push(`- **FORBIDDEN**: classification \`${rule.classification}\` must NOT reach trust \`${rule.toTrust}\``);
+        } else {
+          lines.push(`- **FORBIDDEN**: jurisdiction \`${rule.jurisdiction}\` must NOT reach \`${rule.to}\``);
+        }
+      }
+      lines.push('');
+    }
+  }
+
+  if ((artifact.trustPolicies ?? []).length > 0) {
+    lines.push(`## Trust Policies`);
+    lines.push('');
+    lines.push(`> **Enforced at commit time** — trust-boundary auth and classified data rules are checked when extractors can prove definite facts.`);
+    lines.push('');
+    for (const policy of artifact.trustPolicies ?? []) {
+      lines.push(`### \`${policy.name}\``);
+      for (const rule of policy.rules) {
+        if (rule.kind === 'RequireAuth') {
+          lines.push(`- **REQUIRE AUTH** from trust \`${rule.fromTrust}\` to trust \`${rule.toTrust}\``);
+        } else {
+          lines.push(`- **FORBIDDEN**: data \`${rule.classification}\` must NOT flow from trust \`${rule.fromTrust}\` to trust \`${rule.toTrust}\``);
+        }
+      }
+      lines.push('');
+    }
+  }
+
   // Enum types (domain vocabulary)
   if ((artifact.enums ?? []).length > 0) {
     lines.push(`## Domain Enums`);
@@ -164,6 +209,8 @@ export function emitAgentsMarkdown(artifact: ArchitectureArtifact): string {
       lines.push('');
       lines.push(`| Field | Type |`);
       lines.push(`|-------|------|`);
+      if (d.classification) lines.push(`| \`classification\` | \`${d.classification}\` |`);
+      if (d.jurisdiction) lines.push(`| \`jurisdiction\` | \`${d.jurisdiction}\` |`);
       for (const f of d.fields) {
         lines.push(`| \`${f.key}\` | \`${f.typeExpr}\` |`);
       }
@@ -204,8 +251,7 @@ export function emitAgentsMarkdown(artifact: ArchitectureArtifact): string {
   if ((artifact.permissions ?? []).length > 0) {
     lines.push(`## Permission Rules`);
     lines.push('');
-    lines.push(`> ⚠️ **Advisory rules** — not yet Z3-enforced at commit time, but you MUST follow these.`);
-    lines.push(`> Agents: implement all access control checks according to these rules.`);
+    lines.push(`> **Enforced when extractor evidence is available** — agents MUST still implement all access control checks according to these rules.`);
     lines.push('');
     for (const perm of artifact.permissions) {
       lines.push(`### \`${perm.name}\` — on \`${perm.onType}\``);

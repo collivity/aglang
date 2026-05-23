@@ -32,8 +32,8 @@ features:
     details: Agents can run check-file during focused edits and check --all before finishing, long before a pre-commit hook fires.
 
   - icon: 🧩
-    title: DI and Lifetime Policies
-    details: Model constructor injection, singleton-to-scoped lifetime hazards, and service-locator bans as Z3-backed architecture rules.
+    title: Enterprise Graph Policies
+    details: Model transitive reachability, data classification propagation, trust boundaries, DI closure, and lifetime hazards as Z3-backed architecture rules.
 
   - icon: 🏗️
     title: Architecture as Code

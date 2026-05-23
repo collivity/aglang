@@ -32,7 +32,7 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
     version: '1.0',
     description:
       'Validates code changes against architectural invariants enforced by the Z3 SMT solver. ' +
-      'Use check_file before committing code to detect layering violations.',
+      'Use check_file before committing code to detect direct flow, reachability, data, trust, DI, and workflow violations.',
     context_file: 'AGENTS.md',
     commands: {
       check_file:
@@ -57,7 +57,18 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
             type: 'object',
             required: ['type', 'invariant', 'rule', 'detected', 'message'],
             properties: {
-              type: { type: 'string', enum: ['flow_violation'] },
+              type: {
+                type: 'string',
+                enum: [
+                  'flow_violation',
+                  'reach_violation',
+                  'dataflow_violation',
+                  'data_policy_violation',
+                  'trust_policy_violation',
+                  'di_violation',
+                  'permission_violation',
+                ],
+              },
               invariant: { type: 'string', description: 'Name of the violated invariant' },
               rule: {
                 type: 'object',
@@ -65,6 +76,7 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
                   kind: { type: 'string' },
                   from: { type: 'string', description: 'Source component' },
                   to: { type: 'string', description: 'Target component or node' },
+                  data: { type: 'string', description: 'Data type for data policy violations' },
                 },
               },
               detected: {
@@ -72,6 +84,9 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
                 properties: {
                   from: { type: 'string' },
                   to: { type: 'string' },
+                  data: { type: 'string' },
+                  via: { type: 'string' },
+                  path: { type: 'array', items: { type: 'string' } },
                   confidence: { type: 'string', enum: ['definite', 'probable', 'possible'] },
                   evidence: { type: 'string', description: 'Human-readable description of the detected pattern' },
                   file: { type: 'string', description: 'Absolute path to the file containing the violation' },
@@ -149,7 +164,7 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
     },
     advisory_note:
       'Enforcement is declaration-specific. Flow deny invariants and change_policy rules are Z3-backed. ' +
-      'Contracts and workflow policies are deterministic policy gates. State machines, permissions, and encryption requirements are advisory unless this manifest says otherwise.',
+      'Reachability, propagated dataflow, trust boundary, DI, contract, and workflow policies are enforced when extractors produce definite evidence. State machines and encryption requirements remain advisory unless this manifest says otherwise.',
   };
 }
 

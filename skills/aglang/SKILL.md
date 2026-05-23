@@ -77,8 +77,11 @@ Use `--workflow-z3` to include workflow SMT debug snippets in JSON verdicts. Use
 Check commands return schema version 2. Important fields:
 
 - `passed`: overall result.
-- `violations`: architecture flow violations with Z3 proof details.
-- `dataflow_violation`: a violation type inside `violations[]` for classified data flowing to a denied component or node.
+- `violations`: architecture flow, reachability, data, trust, DI, and permission violations with proof details.
+- `reach_violation`: a violation type inside `violations[]` for a transitive `deny reach` path; inspect `detected.path`.
+- `dataflow_violation`: a violation type inside `violations[]` for data reaching a denied component or node.
+- `data_policy_violation`: a violation type inside `violations[]` for classification or jurisdiction rules.
+- `trust_policy_violation`: a violation type inside `violations[]` for auth/trust-boundary rules.
 - `di_violation`: a violation type inside `violations[]` for `di_policy` failures such as forbidden constructor injection, singleton-to-scoped lifetime dependency, or denied service-locator access.
 - `contract_violations`: API contract mismatches.
 - `workflow_violations`: GitHub Actions policy violations.

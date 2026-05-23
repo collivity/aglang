@@ -60,25 +60,59 @@ routes:
     backend: NonGdprService
 ```
 
-The built-in config extractor detects a route from `LoadBalancer` to `NonGdprService`. Because `LoadBalancer` declares `handles: CustomerProfile`, aglang infers this dataflow fact:
+The built-in config extractor detects a route from `LoadBalancer` to `NonGdprService`. Because `LoadBalancer` declares `handles: CustomerProfile`, aglang infers this propagated data reachability fact:
 
 ```text
-DataFlow(CustomerProfile, NonGdprService)
+DataCanReach(CustomerProfile, NonGdprService)
 ```
 
 The invariant compiles to this Z3 constraint:
 
 ```smt2
-(assert (=> (DataFlow CustomerProfile NonGdprService) false))
+(assert (=> (DataCanReach CustomerProfile NonGdprService) false))
 ```
 
 The changed config contributes this assertion:
 
 ```smt2
-(assert (DataFlow CustomerProfile NonGdprService))
+(assert (DataCanReach CustomerProfile NonGdprService))
 ```
 
 Together they are unsatisfiable, so `aglc check` fails with a `dataflow_violation`.
+
+## Transitive Reachability
+
+Use `deny reach` when indirect paths matter:
+
+```ag
+invariant Layering {
+  deny reach UI -> Db
+}
+```
+
+If extractors prove `UI -> Service` and `Service -> Db`, aglang emits `CanReach UI Db` and reports a `reach_violation` with `detected.path: ["UI", "Service", "Db"]`.
+
+## Classification And Trust Boundaries
+
+```ag
+data CustomerProfile {
+  classification: pii
+  jurisdiction: eu
+  id: UUID
+}
+
+data_policy Privacy {
+  deny classification pii -> untrusted
+  deny jurisdiction eu -> NonGdprService
+}
+
+trust_policy Boundaries {
+  require auth untrusted -> trusted
+  deny flow trusted -> untrusted when data pii
+}
+```
+
+These policies combine propagated reachability with declared `trust:` and `auth:` metadata. They block only when extractors produce definite flow/data evidence.
 
 Correct config routes the same path to the GDPR-compliant service:
 
@@ -88,7 +122,7 @@ routes:
     backend: GdprService
 ```
 
-That produces `DataFlow(CustomerProfile, GdprService)`, which does not violate `GdprResidency`.
+That produces `DataCanReach(CustomerProfile, GdprService)`, which does not violate `GdprResidency`.
 
 ## What this proves
 

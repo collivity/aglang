@@ -1,5 +1,5 @@
 // Type checker — validates the AST against the stdlib ontology (multi-pass)
-import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, StateMachineDecl, PermissionDecl, ContractDecl, WorkflowPolicyDecl, ChangePolicyDecl, ResourceDecl, InvariantEndpoint, DiPolicyDecl } from './ast.ts';
+import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, StateMachineDecl, PermissionDecl, ContractDecl, WorkflowPolicyDecl, ChangePolicyDecl, ResourceDecl, InvariantEndpoint, DiPolicyDecl, DataPolicyDecl, TrustPolicyDecl } from './ast.ts';
 import { VALID_NODE_TYPES, VALID_RESOURCE_TYPES, VALID_COMPONENT_ROLES, VALID_TRUST_VALUES, VALID_CONNECTIVITY_VALUES, VALID_PROTOCOL_VALUES, VALID_AUTH_VALUES } from './stdlib/topology.ts';
 
 export interface CheckError {
@@ -66,6 +66,8 @@ export function check(program: Program): CheckError[] {
   const declaredWorkflowPolicies = new Map<string, WorkflowPolicyDecl>();
   const declaredDiPolicies = new Map<string, DiPolicyDecl>();
   const declaredChangePolicies = new Map<string, ChangePolicyDecl>();
+  const declaredDataPolicies = new Map<string, DataPolicyDecl>();
+  const declaredTrustPolicies = new Map<string, TrustPolicyDecl>();
 
   for (const decl of program.declarations) {
     switch (decl.kind) {
@@ -120,6 +122,14 @@ export function check(program: Program): CheckError[] {
         if (declaredChangePolicies.has(decl.name)) errors.push({ message: `Duplicate change policy name '${decl.name}'` });
         else declaredChangePolicies.set(decl.name, decl);
         break;
+      case 'DataPolicyDecl':
+        if (declaredDataPolicies.has(decl.name)) errors.push({ message: `Duplicate data_policy name '${decl.name}'` });
+        else declaredDataPolicies.set(decl.name, decl);
+        break;
+      case 'TrustPolicyDecl':
+        if (declaredTrustPolicies.has(decl.name)) errors.push({ message: `Duplicate trust_policy name '${decl.name}'` });
+        else declaredTrustPolicies.set(decl.name, decl);
+        break;
       case 'RepoDecl':
         // Collect declared repos for cross-reference validation below
         break;
@@ -144,6 +154,16 @@ export function check(program: Program): CheckError[] {
     [...declaredComponents.values()]
       .map(c => c.layer)
       .filter((layer): layer is string => Boolean(layer)),
+  );
+  const declaredClassifications = new Set(
+    [...declaredData.values()]
+      .map(d => d.classification)
+      .filter((value): value is string => Boolean(value)),
+  );
+  const declaredJurisdictions = new Set(
+    [...declaredData.values()]
+      .map(d => d.jurisdiction)
+      .filter((value): value is string => Boolean(value)),
   );
 
   function resourceMatches(name: string): boolean {
@@ -234,6 +254,12 @@ export function check(program: Program): CheckError[] {
     }
 
     if (decl.kind === 'DataDecl') {
+      if (decl.classification && !/^[A-Za-z_][\w]*$/.test(decl.classification)) {
+        errors.push({ message: `data '${decl.name}': invalid classification '${decl.classification}'` });
+      }
+      if (decl.jurisdiction && !/^[A-Za-z_][\w]*$/.test(decl.jurisdiction)) {
+        errors.push({ message: `data '${decl.name}': invalid jurisdiction '${decl.jurisdiction}'` });
+      }
       for (const field of decl.fields) {
         validateTypeExpr(field.typeExpr, userTypes, `data '${decl.name}' field '${field.key}'`, errors);
       }
@@ -385,8 +411,51 @@ export function check(program: Program): CheckError[] {
             errors.push({ message: `di_policy '${decl.name}': unknown target component '${rule.to}'` });
           }
         }
+        if (rule.kind === 'DenyInjectReach') {
+          if (!declaredComponents.has(rule.from)) {
+            errors.push({ message: `di_policy '${decl.name}': unknown source component '${rule.from}'` });
+          }
+          if (!declaredComponents.has(rule.to)) {
+            errors.push({ message: `di_policy '${decl.name}': unknown target component '${rule.to}'` });
+          }
+        }
         if (rule.kind === 'DenyResolve' && !declaredComponents.has(rule.from)) {
           errors.push({ message: `di_policy '${decl.name}': unknown source component '${rule.from}'` });
+        }
+      }
+    }
+
+    if (decl.kind === 'DataPolicyDecl') {
+      for (const rule of decl.rules) {
+        if (rule.kind === 'DenyClassification') {
+          if (!declaredClassifications.has(rule.classification)) {
+            errors.push({ message: `data_policy '${decl.name}': unknown classification '${rule.classification}'` });
+          }
+          if (!VALID_TRUST_VALUES.has(rule.toTrust)) {
+            errors.push({ message: `data_policy '${decl.name}': invalid target trust '${rule.toTrust}'. Valid: ${[...VALID_TRUST_VALUES].join(', ')}` });
+          }
+        }
+        if (rule.kind === 'DenyJurisdiction') {
+          if (!declaredJurisdictions.has(rule.jurisdiction)) {
+            errors.push({ message: `data_policy '${decl.name}': unknown jurisdiction '${rule.jurisdiction}'` });
+          }
+          if (!validFlowEndpoints.has(rule.to)) {
+            errors.push({ message: `data_policy '${decl.name}': unknown target '${rule.to}'` });
+          }
+        }
+      }
+    }
+
+    if (decl.kind === 'TrustPolicyDecl') {
+      for (const rule of decl.rules) {
+        if (!VALID_TRUST_VALUES.has(rule.fromTrust)) {
+          errors.push({ message: `trust_policy '${decl.name}': invalid source trust '${rule.fromTrust}'. Valid: ${[...VALID_TRUST_VALUES].join(', ')}` });
+        }
+        if (!VALID_TRUST_VALUES.has(rule.toTrust)) {
+          errors.push({ message: `trust_policy '${decl.name}': invalid target trust '${rule.toTrust}'. Valid: ${[...VALID_TRUST_VALUES].join(', ')}` });
+        }
+        if (rule.kind === 'DenyFlowWhenData' && !declaredClassifications.has(rule.classification)) {
+          errors.push({ message: `trust_policy '${decl.name}': unknown classification '${rule.classification}'` });
         }
       }
     }
