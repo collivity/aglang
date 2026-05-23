@@ -2,9 +2,9 @@
 import type { Token, TokenKind } from './lexer.ts';
 import type {
   Program, Declaration, NodeDecl, NodeType, Prop,
-  DataDecl, Field, EnumDecl, ComponentDecl, ServiceDecl,
+  DataDecl, Field, EnumDecl, ComponentDecl, ServiceDecl, ResourceDecl,
   InvariantDecl, InvariantRule, TestDecl, AssertStmt,
-  QueryChain, Selector, Quantifier,
+  QueryChain, Selector, Quantifier, InvariantEndpoint,
   StateMachineDecl, TransitionRule, PermissionDecl, PermissionRule,
   ContractDecl, ContractEndpoint, PluginDecl, RepoDecl,
   WorkflowPolicyDecl, WorkflowPolicyRule, WorkflowCondition, WorkflowPolicyAction,
@@ -111,6 +111,16 @@ export function parse(tokens: Token[]): Program {
     return { kind: 'NodeDecl', name, nodeType, props };
   }
 
+  // resource NAME : resource_type { props }
+  function parseResourceDecl(): ResourceDecl {
+    expect('KEYWORD', 'resource');
+    const name = expect('IDENT').value;
+    expect('COLON');
+    const resourceType = parseNodeType();
+    const props = parseProps();
+    return { kind: 'ResourceDecl', name, resourceType, props };
+  }
+
   // enum Name { Val1 | Val2 | Val3 }
   function parseEnumDecl(): EnumDecl {
     expect('KEYWORD', 'enum');
@@ -164,6 +174,8 @@ export function parse(tokens: Token[]): Program {
     const name = expect('IDENT').value;
     let runsOn = '';
     let paths = '';
+    let role: string | undefined;
+    let layer: string | undefined;
     let repoRef: string | undefined;
     const implementsList: string[] = [];
     const consumesList: string[] = [];
@@ -176,6 +188,10 @@ export function parse(tokens: Token[]): Program {
         runsOn = expect('IDENT').value;
       } else if (key === 'paths') {
         paths = expect('STRING').value;
+      } else if (key === 'role') {
+        role = expectIdent().value;
+      } else if (key === 'layer') {
+        layer = expect('IDENT').value;
       } else if (key === 'repo') {
         repoRef = expect('IDENT').value;
       } else if (key === 'implements') {
@@ -197,6 +213,8 @@ export function parse(tokens: Token[]): Program {
     if (!paths) throw new Error(`component '${name}' missing paths`);
     return {
       kind: 'ComponentDecl', name, runsOn, paths,
+      ...(role ? { role } : {}),
+      ...(layer ? { layer } : {}),
       ...(repoRef ? { repo: repoRef } : {}),
       ...(implementsList.length > 0 ? { implements: implementsList } : {}),
       ...(consumesList.length > 0 ? { consumes: consumesList } : {}),
@@ -212,6 +230,24 @@ export function parse(tokens: Token[]): Program {
     return { kind: 'ServiceDecl', name, props };
   }
 
+  function endpointName(endpoint: InvariantEndpoint): string {
+    return endpoint.name;
+  }
+
+  function parseInvariantEndpoint(): InvariantEndpoint {
+    const t = advance();
+    if (t.value === 'role' || t.value === 'layer' || t.value === 'resource') {
+      return {
+        kind: t.value as 'role' | 'layer' | 'resource',
+        name: expectIdent().value,
+      };
+    }
+    if (t.kind !== 'IDENT' && t.kind !== 'KEYWORD') {
+      throw new ParseError('expected invariant endpoint', t);
+    }
+    return { kind: 'entity', name: t.value };
+  }
+
   // invariant NAME { deny flow A -> B; | require encryption on flow A -> B; }
   function parseInvariantDecl(): InvariantDecl {
     expect('KEYWORD', 'invariant');
@@ -223,11 +259,17 @@ export function parse(tokens: Token[]): Program {
       if (action === 'deny') {
         const denied = advance();
         if (denied.value === 'flow') {
-          const from = expect('IDENT').value;
+          const fromEndpoint = parseInvariantEndpoint();
           expect('ARROW');
-          const to = expect('IDENT').value;
+          const toEndpoint = parseInvariantEndpoint();
           consume('SEMICOLON');
-          rules.push({ kind: 'DenyFlow', from, to });
+          rules.push({
+            kind: 'DenyFlow',
+            from: endpointName(fromEndpoint),
+            to: endpointName(toEndpoint),
+            fromEndpoint,
+            toEndpoint,
+          });
         } else if (denied.value === 'dataflow') {
           const data = expect('IDENT').value;
           expect('ARROW');
@@ -241,11 +283,17 @@ export function parse(tokens: Token[]): Program {
         expect('KEYWORD', 'encryption');
         expect('KEYWORD', 'on');
         expect('KEYWORD', 'flow');
-        const from = expect('IDENT').value;
+        const fromEndpoint = parseInvariantEndpoint();
         expect('ARROW');
-        const to = expect('IDENT').value;
+        const toEndpoint = parseInvariantEndpoint();
         consume('SEMICOLON');
-        rules.push({ kind: 'RequireEncryption', from, to });
+        rules.push({
+          kind: 'RequireEncryption',
+          from: endpointName(fromEndpoint),
+          to: endpointName(toEndpoint),
+          fromEndpoint,
+          toEndpoint,
+        });
       }
     }
     expect('RBRACE');
@@ -608,6 +656,7 @@ export function parse(tokens: Token[]): Program {
     if (t.kind === 'KEYWORD') {
       switch (t.value) {
         case 'node':       declarations.push(parseNodeDecl()); break;
+        case 'resource':   declarations.push(parseResourceDecl()); break;
         case 'enum':       declarations.push(parseEnumDecl()); break;
         case 'data':       declarations.push(parseDataDecl()); break;
         case 'component':  declarations.push(parseComponentDecl()); break;

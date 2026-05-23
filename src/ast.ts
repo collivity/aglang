@@ -16,6 +16,13 @@ export interface NodeDecl {
   props: Prop[];
 }
 
+export interface ResourceDecl {
+  kind: 'ResourceDecl';
+  name: string;
+  resourceType: NodeType;
+  props: Prop[];
+}
+
 export interface Field {
   key: string;
   typeExpr: string; // e.g. "S2CellID", "PointCloud | GaussianSplat", "meters(f32)"
@@ -38,6 +45,8 @@ export interface ComponentDecl {
   name: string;
   runsOn: string;   // references a NodeDecl name
   paths: string;    // glob pattern pointing at implementation files
+  role?: string;     // controlled architecture role, e.g. presentation/application/domain
+  layer?: string;    // free-form architectural layer name
   repo?: string;    // optional: references a RepoDecl name
   implements?: string[];  // contract names this component implements
   consumes?: string[];    // contract names this component consumes
@@ -50,9 +59,15 @@ export interface ServiceDecl {
   props: Prop[];
 }
 
+export type InvariantEndpoint =
+  | { kind: 'entity'; name: string }
+  | { kind: 'role'; name: string }
+  | { kind: 'layer'; name: string }
+  | { kind: 'resource'; name: string };
+
 export type InvariantRule =
-  | { kind: 'DenyFlow'; from: string; to: string }
-  | { kind: 'RequireEncryption'; from: string; to: string }
+  | { kind: 'DenyFlow'; from: string; to: string; fromEndpoint?: InvariantEndpoint; toEndpoint?: InvariantEndpoint }
+  | { kind: 'RequireEncryption'; from: string; to: string; fromEndpoint?: InvariantEndpoint; toEndpoint?: InvariantEndpoint }
   | { kind: 'DenyDataFlow'; data: string; to: string };
 
 export interface InvariantDecl {
@@ -190,6 +205,7 @@ export interface ChangePolicyDecl {
 
 export type Declaration =
   | NodeDecl
+  | ResourceDecl
   | DataDecl
   | EnumDecl
   | ComponentDecl

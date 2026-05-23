@@ -247,6 +247,7 @@ describe('node-resolver resolveFactTargets', () => {
 
 import { extractRoutesFromSwift } from '../src/analyzers/swift.ts';
 import { swiftPlugin } from '../src/analyzers/swift.ts';
+import { analyzeSwift } from '../src/analyzers/swift.ts';
 
 describe('Swift route extraction (Vapor)', () => {
   it('extracts app.get with single segment', () => {
@@ -308,5 +309,109 @@ describe('Swift infrastructure flow detection', () => {
     const content = `import Redis\nlet client = RedisConnection.make(configuration: .init(hostname: "localhost"))`;
     expect(/import\s+Redis/.test(content)).toBe(true);
   });
-});
 
+  it('detects iOS Keychain and UserDefaults storage', () => {
+    const content = `
+      import Foundation
+      import Security
+
+      public class SettingsGeneralCD {
+        public func setLanguage(_ value: String) {
+          UserDefaults.standard.set(value, forKey: Self.k_language)
+        }
+
+        public func saveEnrollInfoToKeychain(_ enrollInfo: EnrollInfo) {
+          let success = KeychainHelper.save(data: data, service: "svc", account: "EnrollInfo")
+          print(success)
+        }
+      }
+    `;
+    const facts = analyzeSwift(content, 'SettingsGeneralCD.swift', 'ConfigurationSettings');
+    expect(facts.some(f => f.to === 'secure_storage' && f.confidence === 'definite')).toBe(true);
+    expect(facts.some(f => f.to === 'local_preferences' && f.confidence === 'definite')).toBe(true);
+  });
+
+  it('detects strict MVVM ViewModelBlueprint Input/Output with Combine', () => {
+    const content = `
+      import Combine
+      import CommonModule
+
+      final public class StartMainScreenViewModel: ViewModel, ViewModelBlueprint {
+        public struct Input {
+          let viewWillAppearIn: AnyPublisher<Void, Never>
+          let settingsButtonIn: AnyPublisher<Void, Never>
+        }
+
+        public struct Output {
+          let viewWillAppearOut: AnyPublisher<Void, Never>
+          let settingsButtonOut: AnyPublisher<Void, Never>
+        }
+
+        public func convert(input: Input) -> Output {
+          return Output(
+            viewWillAppearOut: input.viewWillAppearIn.eraseToAnyPublisher(),
+            settingsButtonOut: input.settingsButtonIn.eraseToAnyPublisher()
+          )
+        }
+      }
+    `;
+    const facts = analyzeSwift(content, 'StartMainScreenViewModel.swift', 'MainModule');
+    expect(facts.some(f => f.to === 'mvvm_viewmodel')).toBe(true);
+    expect(facts.some(f => f.to === 'reactive_stream')).toBe(true);
+  });
+
+  it('detects ViewController to ViewModel convert(input:) binding', () => {
+    const content = `
+      import UIKit
+      import Combine
+
+      public class StartMainScreenViewController: MainModuleViewController<StartMainScreenViewModel> {
+        private func bindViewModel() {
+          let input = StartMainScreenViewModel.Input(
+            viewWillAppearIn: viewWillAppearPublisher.eraseToAnyPublisher(),
+            settingsButtonIn: tapSettingsPublisher.eraseToAnyPublisher()
+          )
+          let output = viewModel.convert(input: input)
+          output.settingsButtonOut.sink { }.store(in: &cancellables)
+        }
+      }
+    `;
+    const facts = analyzeSwift(content, 'StartMainScreenViewController.swift', 'MainModule');
+    expect(facts.some(f => f.to === 'mvvm_viewcontroller')).toBe(true);
+  });
+
+  it('emits a definite external_api flow for direct ViewController networking', () => {
+    const content = `
+      import UIKit
+
+      public class BadViewController: UIViewController {
+        func load() {
+          URLSession.shared.dataTask(with: URL(string: "https://api.example.com")!)
+        }
+      }
+    `;
+    const facts = analyzeSwift(content, 'BadViewController.swift', 'Presentation');
+    expect(facts.some(f =>
+      f.to === 'external_api' &&
+      f.confidence === 'definite' &&
+      f.evidence.includes('ViewController performs direct networking')
+    )).toBe(true);
+  });
+
+  it('detects Swift package modular imports to mapped components', () => {
+    const content = `
+      import Foundation
+      import ConfigurationSettings
+      import CommonModule
+
+      final class DeviceScanScreenViewModel: ViewModel {}
+    `;
+    const facts = analyzeSwift(content, 'DeviceScanScreenViewModel.swift', 'PairingModule', {
+      PairingModule: 'Packages/PairingModule/**',
+      ConfigurationSettings: 'Packages/mobile-ios-configuration-spm/**',
+      CommonModule: 'Packages/mobile-ios-commonmodule-spm/**',
+    });
+    expect(facts.some(f => f.to === 'ConfigurationSettings')).toBe(true);
+    expect(facts.some(f => f.to === 'CommonModule')).toBe(true);
+  });
+});

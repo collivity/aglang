@@ -1,7 +1,7 @@
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
 import type { Confidence, FlowFact, GraphFact } from '../analyzers/plugin.ts';
 import { isBlocking } from '../analyzers/plugin.ts';
-import { resolveCategoryToNodes } from '../analyzers/node-resolver.ts';
+import { resolveCategoryToTargets } from '../analyzers/node-resolver.ts';
 
 export interface GraphProjectionWarning {
   graphFactId: string;
@@ -76,6 +76,7 @@ function targetsForGraphFact(
   );
   const declaredNodes = new Set([
     ...(artifact.nodes ?? []).map(n => n.name),
+    ...(artifact.resources ?? []).map(r => r.name),
     ...[...declaredEntities].filter(name => !(name in (artifact.mappings ?? {}))),
   ]);
   const declaredComponents = new Set(Object.keys(artifact.mappings ?? {}));
@@ -88,7 +89,7 @@ function targetsForGraphFact(
     if (declaredNodes.has(technology) || declaredComponents.has(technology)) {
       return { targets: [technology] };
     }
-    const resolved = resolveCategoryToNodes(technology, artifact.nodes ?? []);
+    const resolved = resolveCategoryToTargets(technology, artifact);
     const unresolved = resolved.length === 1 && resolved[0] === technology && !declaredNodes.has(technology)
       ? technology
       : undefined;
@@ -106,7 +107,7 @@ function targetsForGraphFact(
     return { targets: [target] };
   }
 
-  const resolved = resolveCategoryToNodes(target, artifact.nodes ?? []);
+  const resolved = resolveCategoryToTargets(target, artifact);
   const unresolved = resolved.length === 1 && resolved[0] === target && !declaredNodes.has(target)
     ? target
     : undefined;

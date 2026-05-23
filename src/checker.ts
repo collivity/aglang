@@ -1,6 +1,6 @@
 // Type checker — validates the AST against the stdlib ontology (multi-pass)
-import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, StateMachineDecl, PermissionDecl, ContractDecl, WorkflowPolicyDecl, ChangePolicyDecl } from './ast.ts';
-import { VALID_NODE_TYPES, VALID_TRUST_VALUES, VALID_CONNECTIVITY_VALUES, VALID_PROTOCOL_VALUES, VALID_AUTH_VALUES } from './stdlib/topology.ts';
+import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, StateMachineDecl, PermissionDecl, ContractDecl, WorkflowPolicyDecl, ChangePolicyDecl, ResourceDecl, InvariantEndpoint } from './ast.ts';
+import { VALID_NODE_TYPES, VALID_RESOURCE_TYPES, VALID_COMPONENT_ROLES, VALID_TRUST_VALUES, VALID_CONNECTIVITY_VALUES, VALID_PROTOCOL_VALUES, VALID_AUTH_VALUES } from './stdlib/topology.ts';
 
 export interface CheckError {
   message: string;
@@ -55,6 +55,7 @@ export function check(program: Program): CheckError[] {
 
   // Pass 1: collect all declared names (nodes, components, enums, data types, state machines)
   const declaredNodes = new Map<string, NodeDecl>();
+  const declaredResources = new Map<string, ResourceDecl>();
   const declaredComponents = new Map<string, ComponentDecl>();
   const declaredInvariants = new Map<string, InvariantDecl>();
   const declaredEnums = new Map<string, EnumDecl>();
@@ -70,6 +71,10 @@ export function check(program: Program): CheckError[] {
       case 'NodeDecl':
         if (declaredNodes.has(decl.name)) errors.push({ message: `Duplicate node name '${decl.name}'` });
         else declaredNodes.set(decl.name, decl);
+        break;
+      case 'ResourceDecl':
+        if (declaredResources.has(decl.name)) errors.push({ message: `Duplicate resource name '${decl.name}'` });
+        else declaredResources.set(decl.name, decl);
         break;
       case 'ComponentDecl':
         if (declaredComponents.has(decl.name)) errors.push({ message: `Duplicate component name '${decl.name}'` });
@@ -124,7 +129,48 @@ export function check(program: Program): CheckError[] {
   // All user-defined type names (enums + data structs)
   const userTypes = new Set<string>([...declaredEnums.keys(), ...declaredData.keys()]);
   // All valid flow endpoints (components + nodes)
-  const validFlowEndpoints = new Set<string>([...declaredNodes.keys(), ...declaredComponents.keys()]);
+  const validFlowEndpoints = new Set<string>([...declaredNodes.keys(), ...declaredResources.keys(), ...declaredComponents.keys()]);
+  const declaredRoles = new Set(
+    [...declaredComponents.values()]
+      .map(c => c.role)
+      .filter((role): role is string => Boolean(role)),
+  );
+  const declaredLayers = new Set(
+    [...declaredComponents.values()]
+      .map(c => c.layer)
+      .filter((layer): layer is string => Boolean(layer)),
+  );
+
+  function resourceMatches(name: string): boolean {
+    if (declaredResources.has(name)) return true;
+    return [...declaredResources.values()].some(r => r.resourceType.name === name);
+  }
+
+  function validateInvariantEndpoint(invName: string, endpoint: InvariantEndpoint | undefined, fallback: string, label: string): void {
+    if (!endpoint || endpoint.kind === 'entity') {
+      if (!validFlowEndpoints.has(fallback)) {
+        errors.push({ message: `Invariant '${invName}': unknown ${label} '${fallback}'` });
+      }
+      return;
+    }
+    if (endpoint.kind === 'role') {
+      if (!VALID_COMPONENT_ROLES.has(endpoint.name)) {
+        errors.push({ message: `Invariant '${invName}': unknown role selector '${endpoint.name}'. Valid roles: ${[...VALID_COMPONENT_ROLES].join(', ')}` });
+      } else if (!declaredRoles.has(endpoint.name)) {
+        errors.push({ message: `Invariant '${invName}': role selector '${endpoint.name}' matches no components` });
+      }
+    }
+    if (endpoint.kind === 'layer' && !declaredLayers.has(endpoint.name)) {
+      errors.push({ message: `Invariant '${invName}': layer selector '${endpoint.name}' matches no components` });
+    }
+    if (endpoint.kind === 'resource') {
+      if (!VALID_RESOURCE_TYPES.has(endpoint.name) && !declaredResources.has(endpoint.name)) {
+        errors.push({ message: `Invariant '${invName}': unknown resource selector '${endpoint.name}'. Use a resource name or valid resource type: ${[...VALID_RESOURCE_TYPES].join(', ')}` });
+      } else if (!resourceMatches(endpoint.name)) {
+        errors.push({ message: `Invariant '${invName}': resource selector '${endpoint.name}' matches no resources` });
+      }
+    }
+  }
 
   // Pass 2: validate each declaration
   for (const decl of program.declarations) {
@@ -146,6 +192,25 @@ export function check(program: Program): CheckError[] {
         }
         if (prop.key === 'auth' && !VALID_AUTH_VALUES.has(val ?? '')) {
           errors.push({ message: `Invalid auth value '${val}' in node '${decl.name}'. Valid: ${[...VALID_AUTH_VALUES].join(', ')}` });
+        }
+      }
+    }
+
+    if (decl.kind === 'ResourceDecl') {
+      const typeName = decl.resourceType.name;
+      if (!VALID_RESOURCE_TYPES.has(typeName)) {
+        errors.push({ message: `Unknown resource type '${typeName}' in resource '${decl.name}'. Valid types: ${[...VALID_RESOURCE_TYPES].join(', ')}` });
+      }
+      for (const prop of decl.props) {
+        const val = Array.isArray(prop.value) ? prop.value[0] : prop.value;
+        if (prop.key === 'trust' && !VALID_TRUST_VALUES.has(val ?? '')) {
+          errors.push({ message: `Invalid trust value '${val}' in resource '${decl.name}'. Valid: ${[...VALID_TRUST_VALUES].join(', ')}` });
+        }
+        if (prop.key === 'protocol' && !VALID_PROTOCOL_VALUES.has(val ?? '')) {
+          errors.push({ message: `Invalid protocol value '${val}' in resource '${decl.name}'. Valid: ${[...VALID_PROTOCOL_VALUES].join(', ')}` });
+        }
+        if (prop.key === 'auth' && !VALID_AUTH_VALUES.has(val ?? '')) {
+          errors.push({ message: `Invalid auth value '${val}' in resource '${decl.name}'. Valid: ${[...VALID_AUTH_VALUES].join(', ')}` });
         }
       }
     }
@@ -176,6 +241,9 @@ export function check(program: Program): CheckError[] {
       if (decl.repo && !declaredRepos.has(decl.repo)) {
         errors.push({ message: `Component '${decl.name}' references undeclared repo '${decl.repo}'. Declare it with: repo ${decl.repo} "github.com/your-org/your-repo"` });
       }
+      if (decl.role && !VALID_COMPONENT_ROLES.has(decl.role)) {
+        errors.push({ message: `Component '${decl.name}' has invalid role '${decl.role}'. Valid roles: ${[...VALID_COMPONENT_ROLES].join(', ')}` });
+      }
       for (const contractName of (decl.implements ?? [])) {
         if (!declaredContracts.has(contractName)) {
           errors.push({ message: `Component '${decl.name}' implements unknown contract '${contractName}'` });
@@ -203,12 +271,8 @@ export function check(program: Program): CheckError[] {
             errors.push({ message: `Invariant '${decl.name}': unknown dataflow target '${rule.to}'` });
           }
         } else {
-          if (!validFlowEndpoints.has(rule.from)) {
-            errors.push({ message: `Invariant '${decl.name}': unknown source '${rule.from}'` });
-          }
-          if (!validFlowEndpoints.has(rule.to)) {
-            errors.push({ message: `Invariant '${decl.name}': unknown target '${rule.to}'` });
-          }
+          validateInvariantEndpoint(decl.name, rule.fromEndpoint, rule.from, 'source');
+          validateInvariantEndpoint(decl.name, rule.toEndpoint, rule.to, 'target');
         }
       }
     }

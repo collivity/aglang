@@ -52,4 +52,10 @@ describe('lexer', () => {
     expect(kinds[0]).toBe('KEYWORD');
     expect(tokens[0]!.value).toBe('contract');
   });
+
+  it('tokenizes architecture semantic keywords', () => {
+    const tokens = tokenize('resource role layer');
+    const values = tokens.filter(t => t.kind === 'KEYWORD').map(t => t.value);
+    expect(values).toEqual(['resource', 'role', 'layer']);
+  });
 });
