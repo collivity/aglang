@@ -20,7 +20,7 @@ const CATEGORY_TYPE_MAP: Record<string, string[]> = {
   cache:          ['redis', 'elasticache', 'cache', 'memcached'],
   message_queue:  ['message_queue', 'event_stream', 'queue'],
   object_store:   ['s3_bucket', 'blob_storage', 'object_store'],
-  external_api:   ['rest_api', 'api_gateway', 'grpc_service', 'graphql_api'],
+  external_api:   ['external_api', 'rest_api', 'api_gateway', 'grpc_service', 'graphql_api'],
   elasticsearch:  ['elasticsearch', 'opensearch'],
   cassandra:      ['cassandra'],
   neo4j:          ['neo4j', 'neptune', 'graph_db'],
@@ -31,6 +31,14 @@ const CATEGORY_TYPE_MAP: Record<string, string[]> = {
   local_store:    ['local_store', 'coredata', 'realm', 'sqlite', 'shared_preferences'],
   graphql_api:    ['graphql_api', 'graphql_server', 'hasura', 'appsync'],
   grpc_api:       ['grpc_service', 'grpc_api'],
+  secure_storage: ['secure_storage'],
+  local_preferences: ['local_preferences'],
+  local_database: ['local_database', 'local_store', 'sqlite', 'coredata', 'realm'],
+  reactive_stream: ['reactive_stream'],
+  message_bus: ['message_bus', 'message_queue', 'event_stream', 'queue'],
+  file_system: ['file_system'],
+  sensor: ['sensor'],
+  device_hardware: ['device_hardware', 'ble'],
 };
 
 /**
@@ -48,6 +56,22 @@ export function resolveCategoryToNodes(
     .filter(n => matchingTypes.includes(n.type))
     .map(n => n.name);
   return matched.length > 0 ? matched : [category];
+}
+
+export function resolveCategoryToTargets(
+  category: string,
+  artifact: Pick<ArchitectureArtifact, 'nodes' | 'resources'>,
+): string[] {
+  const matchingTypes = CATEGORY_TYPE_MAP[category] ?? [category];
+  const matchedResources = (artifact.resources ?? [])
+    .filter(r => r.name === category || matchingTypes.includes(r.type))
+    .map(r => r.name);
+  if (matchedResources.length > 0) return matchedResources;
+
+  const matchedNodes = (artifact.nodes ?? [])
+    .filter(n => n.name === category || matchingTypes.includes(n.type))
+    .map(n => n.name);
+  return matchedNodes.length > 0 ? matchedNodes : [category];
 }
 
 /**

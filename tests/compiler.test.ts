@@ -4,6 +4,7 @@ import { loadAndMerge, ImportError } from '../src/importer.ts';
 import { tokenize } from '../src/lexer.ts';
 import { parse } from '../src/parser.ts';
 import { check } from '../src/checker.ts';
+import { emitArtifact } from '../src/emitters/artifact.ts';
 
 const FIXTURES = resolve(import.meta.dirname, 'fixtures');
 
@@ -60,6 +61,41 @@ describe('parser', () => {
     const program = parse(tokens);
     const comp = program.declarations.find(d => d.kind === 'ComponentDecl');
     expect(comp).toBeDefined();
+  });
+
+  it('parses resource declarations and component role/layer metadata', () => {
+    const tokens = tokenize(`
+      node ios : edge_mobile { trust: semi_trusted }
+      resource SecureStorage : secure_storage { trust: trusted }
+      component HomeScreen {
+        runs_on: ios
+        paths: "Sources/Home/**/*.swift"
+        role: presentation
+        layer: Presentation
+      }
+    `);
+    const program = parse(tokens);
+    expect(program.declarations.some(d => d.kind === 'ResourceDecl')).toBe(true);
+    const comp = program.declarations.find(d => d.kind === 'ComponentDecl');
+    expect(comp).toMatchObject({ role: 'presentation', layer: 'Presentation' });
+  });
+
+  it('parses selector-style invariant endpoints', () => {
+    const tokens = tokenize(`
+      invariant StrictBoundaries {
+        deny flow role presentation -> resource secure_storage
+      }
+    `);
+    const program = parse(tokens);
+    const inv = program.declarations[0]!;
+    expect(inv.kind).toBe('InvariantDecl');
+    if (inv.kind === 'InvariantDecl') {
+      expect(inv.rules[0]).toMatchObject({
+        kind: 'DenyFlow',
+        fromEndpoint: { kind: 'role', name: 'presentation' },
+        toEndpoint: { kind: 'resource', name: 'secure_storage' },
+      });
+    }
   });
 });
 
@@ -137,6 +173,72 @@ describe('checker', () => {
     const program = parse(tokens);
     const errors = check(program);
     expect(errors.some(e => e.message.includes('NonExistentContract'))).toBe(true);
+  });
+
+  it('accepts valid resource and role selector invariants', () => {
+    const tokens = tokenize(`
+      node ios : edge_mobile { trust: semi_trusted }
+      resource SecureStorage : secure_storage { trust: trusted }
+      component HomeScreen {
+        runs_on: ios
+        paths: "Sources/Home/**/*.swift"
+        role: presentation
+      }
+      invariant StrictBoundaries {
+        deny flow role presentation -> resource secure_storage
+      }
+    `);
+    const program = parse(tokens);
+    const errors = check(program);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('rejects invalid component roles', () => {
+    const tokens = tokenize(`
+      node n : server { trust: trusted }
+      component Weird { runs_on: n paths: "**/*.ts" role: screen_controller }
+    `);
+    const errors = check(parse(tokens));
+    expect(errors.some(e => e.message.includes("invalid role 'screen_controller'"))).toBe(true);
+  });
+
+  it('rejects resource selectors that match no declared resource', () => {
+    const tokens = tokenize(`
+      node ios : edge_mobile { trust: semi_trusted }
+      component HomeScreen {
+        runs_on: ios
+        paths: "Sources/Home/**/*.swift"
+        role: presentation
+      }
+      invariant StrictBoundaries {
+        deny flow role presentation -> resource secure_storage
+      }
+    `);
+    const errors = check(parse(tokens));
+    expect(errors.some(e => e.message.includes("resource selector 'secure_storage' matches no resources"))).toBe(true);
+  });
+
+  it('emits resources and expands selector invariants in the artifact', () => {
+    const program = parse(tokenize(`
+      node ios : edge_mobile { trust: semi_trusted }
+      resource SecureStorage : secure_storage { trust: trusted }
+      component HomeScreen {
+        runs_on: ios
+        paths: "Sources/Home/**/*.swift"
+        role: presentation
+      }
+      invariant StrictBoundaries {
+        deny flow role presentation -> resource secure_storage
+      }
+    `));
+    const artifact = emitArtifact(program, 'test.ag');
+    expect(artifact.resources).toEqual([
+      { name: 'SecureStorage', type: 'secure_storage', trust: 'trusted', protocol: undefined, auth: undefined },
+    ]);
+    expect(artifact.invariants[0]!.rules).toEqual([
+      { kind: 'DenyFlow', from: 'HomeScreen', to: 'SecureStorage' },
+    ]);
+    expect(artifact.constraints).toContain('(assert (=> (Flow HomeScreen SecureStorage) false))');
   });
 });
 

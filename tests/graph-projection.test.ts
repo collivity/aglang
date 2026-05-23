@@ -86,6 +86,67 @@ describe('graph to flow projection', () => {
     expect(result.smtAssertions).toContain('(assert (Flow ApiControllers postgres_db))');
   });
 
+  it('resolves technology facts to declared resources before nodes', () => {
+    const artifact = compileSpec(`
+      node ios : edge_mobile { trust: semi_trusted }
+      resource SecureStorage : secure_storage { trust: trusted }
+      component HomeScreen {
+        runs_on: ios
+        paths: "**/*.swift"
+        role: presentation
+      }
+    `);
+
+    const result = projectGraphToFlows([
+      graphFact({ subject: 'HomeScreen', technology: 'secure_storage', evidence: { file: 'Home.swift', message: 'Keychain access' } }),
+    ], artifact);
+
+    expect(result.flowFacts).toHaveLength(1);
+    expect(result.flowFacts[0]!.to).toBe('SecureStorage');
+  });
+
+  it('blocks selector-expanded role to resource invariants', async () => {
+    const artifact = compileSpec(`
+      node ios : edge_mobile { trust: semi_trusted }
+      resource SecureStorage : secure_storage { trust: trusted }
+      component HomeScreen {
+        runs_on: ios
+        paths: "**/*.swift"
+        role: presentation
+      }
+      invariant StrictBoundaries {
+        deny flow role presentation -> resource secure_storage
+      }
+    `);
+    const fact = graphFact({
+      subject: 'HomeScreen',
+      technology: 'secure_storage',
+      evidence: { extractor: 'swift', file: 'HomeViewController.swift', message: 'Keychain access' },
+    });
+    const projection = projectGraphToFlows([fact], artifact);
+    const verdict = await runGate(artifact, {
+      facts: projection.flowFacts,
+      graphFacts: [fact],
+      blockingFacts: projection.blockingFacts,
+      warningFacts: projection.warningFacts,
+      smtAssertions: projection.smtAssertions,
+      factSmtMap: projection.factSmtMap,
+      graphReport: {
+        facts: [fact],
+        projections: { flow: projection.flowFacts },
+        smt: { assertions: projection.smtAssertions },
+        unresolvedTargets: projection.unresolvedTargets,
+        warnings: projection.warnings,
+      },
+      unresolvedTargets: projection.unresolvedTargets,
+      graphWarnings: projection.warnings,
+      cacheHits: 0,
+    });
+
+    expect(verdict.passed).toBe(false);
+    expect(verdict.violations[0]!.detected).toMatchObject({ from: 'HomeScreen', to: 'SecureStorage' });
+  });
+
   it('preserves graph evidence in flow violation diagnostics', async () => {
     const artifact = compileSpec(`
       node postgres_db : postgres { trust: trusted }

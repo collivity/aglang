@@ -105,6 +105,28 @@ export const VALID_NODE_TYPES = new Set([
   'fine_tune_job', 'eval_harness',
 ]);
 
+export const VALID_RESOURCE_TYPES = new Set([
+  'secure_storage',
+  'local_preferences',
+  'external_api',
+  'local_database',
+  'reactive_stream',
+  'message_bus',
+  'file_system',
+  'sensor',
+  'device_hardware',
+]);
+
+export const VALID_COMPONENT_ROLES = new Set([
+  'presentation',
+  'application',
+  'domain',
+  'data_access',
+  'infrastructure',
+  'integration',
+  'test',
+]);
+
 export const VALID_TRUST_VALUES = new Set(['trusted', 'untrusted', 'semi_trusted']);
 export const VALID_CONNECTIVITY_VALUES = new Set(['always_on', 'intermittent', 'offline_first']);
 
@@ -131,4 +153,5 @@ export const BASE_SMT_DECLARATIONS: string[] = [
   '(declare-fun Trusted   (Entity) Bool)',
   '(declare-fun IsNode    (Entity) Bool)',
   '(declare-fun IsComp    (Entity) Bool)',
+  '(declare-fun IsResource (Entity) Bool)',
 ];

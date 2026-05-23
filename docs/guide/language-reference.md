@@ -48,6 +48,8 @@ Declares a logical code component and maps it to source files.
 component <Name> {
   runs_on: <node_name>
   paths: "<glob>"
+  role: presentation | application | domain | data_access | infrastructure | integration | test // optional
+  layer: <LayerName>        // optional
   implements: <ContractName> // optional, comma-separated
   consumes: <ContractName>   // optional, comma-separated
   handles: <DataType>        // optional, comma-separated
@@ -65,6 +67,28 @@ component PublicApi {
 }
 ```
 
+## Resource
+
+Declares an architectural capability that components may access, such as secure storage, local preferences, platform hardware, or external APIs.
+
+```ag
+resource <name> : <resource_type> {
+  trust: trusted | untrusted | semi_trusted
+  protocol: https | grpc | ws          // optional
+  auth: none | jwt | oauth2 | api_key  // optional
+}
+```
+
+Built-in resource types include `secure_storage`, `local_preferences`, `external_api`, `local_database`, `reactive_stream`, `message_bus`, `file_system`, `sensor`, and `device_hardware`.
+
+Example:
+
+```ag
+resource SecureStorage : secure_storage { trust: trusted }
+resource LocalPreferences : local_preferences { trust: semi_trusted }
+resource ExternalNetwork : external_api { trust: untrusted protocol: https }
+```
+
 ## Invariant
 
 Flow invariants declare component or node relationships that must not be violated.
@@ -72,6 +96,8 @@ Flow invariants declare component or node relationships that must not be violate
 ```ag
 invariant <Name> {
   deny flow <ComponentOrNode> -> <ComponentOrNode>
+  deny flow role <RoleName> -> resource <ResourceNameOrType>
+  deny flow layer <LayerName> -> resource <ResourceNameOrType>
   deny dataflow <DataType> -> <ComponentOrNode>
   require encryption on flow <ComponentOrNode> -> <ComponentOrNode>
 }
@@ -82,6 +108,7 @@ Example:
 ```ag
 invariant Layering {
   deny flow PublicApi -> ledger_db
+  deny flow role presentation -> resource secure_storage
 }
 ```
 

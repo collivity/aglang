@@ -380,6 +380,24 @@ describe('Swift infrastructure flow detection', () => {
     expect(facts.some(f => f.to === 'mvvm_viewcontroller')).toBe(true);
   });
 
+  it('emits a definite external_api flow for direct ViewController networking', () => {
+    const content = `
+      import UIKit
+
+      public class BadViewController: UIViewController {
+        func load() {
+          URLSession.shared.dataTask(with: URL(string: "https://api.example.com")!)
+        }
+      }
+    `;
+    const facts = analyzeSwift(content, 'BadViewController.swift', 'Presentation');
+    expect(facts.some(f =>
+      f.to === 'external_api' &&
+      f.confidence === 'definite' &&
+      f.evidence.includes('ViewController performs direct networking')
+    )).toBe(true);
+  });
+
   it('detects Swift package modular imports to mapped components', () => {
     const content = `
       import Foundation

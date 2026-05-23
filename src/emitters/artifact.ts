@@ -1,6 +1,7 @@
 // Emits the compiled architecture.o artifact
 import type { Program } from '../ast.ts';
 import { translate } from '../smt/translator.ts';
+import { expandInvariantRules } from '../invariant-selectors.ts';
 import { writeFileSync } from 'fs';
 
 export type ArtifactEndpoint =
@@ -31,6 +32,7 @@ export interface ArchitectureArtifact {
   invariants: Array<{ name: string; rules: ArtifactInvariantRule[] }>;
   // Nodes and components for context emission
   nodes: Array<{ name: string; type: string; trust?: string; protocol?: string; auth?: string }>;
+  resources: Array<{ name: string; type: string; trust?: string; protocol?: string; auth?: string }>;
   // Enum declarations for context and agent use
   enums: Array<{ name: string; values: string[] }>;
   // Data type declarations for context emission
@@ -68,6 +70,11 @@ export interface ArchitectureArtifact {
   componentData: Array<{
     component: string;
     handles: string[];
+  }>;
+  componentMeta: Array<{
+    component: string;
+    role?: string;
+    layer?: string;
   }>;
   // External extractor plugin package names declared in the spec
   plugins: string[];
@@ -120,6 +127,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   const mappings: Record<string, string> = {};
   const invariants: ArchitectureArtifact['invariants'] = [];
   const nodes: ArchitectureArtifact['nodes'] = [];
+  const resources: ArchitectureArtifact['resources'] = [];
   const enums: ArchitectureArtifact['enums'] = [];
   const dataTypes: ArchitectureArtifact['dataTypes'] = [];
   const stateMachines: ArchitectureArtifact['stateMachines'] = [];
@@ -127,6 +135,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   const contracts: ArchitectureArtifact['contracts'] = [];
   const componentContracts: ArchitectureArtifact['componentContracts'] = [];
   const componentData: ArchitectureArtifact['componentData'] = [];
+  const componentMeta: ArchitectureArtifact['componentMeta'] = [];
   const plugins: string[] = [];
   const repos: ArchitectureArtifact['repos'] = [];
   const componentRepos: Record<string, string> = {};
@@ -136,6 +145,13 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   for (const decl of program.declarations) {
     if (decl.kind === 'ComponentDecl') {
       mappings[decl.name] = decl.paths;
+      if (decl.role || decl.layer) {
+        componentMeta.push({
+          component: decl.name,
+          ...(decl.role ? { role: decl.role } : {}),
+          ...(decl.layer ? { layer: decl.layer } : {}),
+        });
+      }
       if (decl.repo) {
         componentRepos[decl.name] = decl.repo;
       }
@@ -154,12 +170,12 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
       }
     }
     if (decl.kind === 'InvariantDecl') {
-      invariants.push({
-        name: decl.name,
-        rules: decl.rules.map<ArtifactInvariantRule>(r => r.kind === 'DenyDataFlow'
-          ? ({ kind: r.kind, data: r.data, to: r.to })
-          : ({ kind: r.kind, from: r.from, to: r.to })),
-      });
+      const rules = expandInvariantRules(program)
+        .filter(expanded => expanded.invariant === decl.name)
+        .map<ArtifactInvariantRule>(({ rule }) => rule.kind === 'DenyDataFlow'
+          ? ({ kind: rule.kind, data: rule.data, to: rule.to })
+          : ({ kind: rule.kind, from: rule.from, to: rule.to }));
+      invariants.push({ name: decl.name, rules });
     }
     if (decl.kind === 'NodeDecl') {
       const trust = decl.props.find(p => p.key === 'trust');
@@ -170,6 +186,20 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
         type: decl.nodeType.kind === 'parameterized'
           ? `${decl.nodeType.name}(${decl.nodeType.param})`
           : decl.nodeType.name,
+        trust: Array.isArray(trust?.value) ? trust!.value[0] : trust?.value,
+        protocol: Array.isArray(protocol?.value) ? protocol!.value[0] : protocol?.value,
+        auth: Array.isArray(auth?.value) ? auth!.value[0] : auth?.value,
+      });
+    }
+    if (decl.kind === 'ResourceDecl') {
+      const trust = decl.props.find(p => p.key === 'trust');
+      const protocol = decl.props.find(p => p.key === 'protocol');
+      const auth = decl.props.find(p => p.key === 'auth');
+      resources.push({
+        name: decl.name,
+        type: decl.resourceType.kind === 'parameterized'
+          ? `${decl.resourceType.name}(${decl.resourceType.param})`
+          : decl.resourceType.name,
         trust: Array.isArray(trust?.value) ? trust!.value[0] : trust?.value,
         protocol: Array.isArray(protocol?.value) ? protocol!.value[0] : protocol?.value,
         auth: Array.isArray(auth?.value) ? auth!.value[0] : auth?.value,
@@ -243,7 +273,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   }
 
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     sourcePath,
     enforcement: [
       {
@@ -291,6 +321,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
     mappings,
     invariants,
     nodes,
+    resources,
     enums,
     dataTypes,
     stateMachines,
@@ -298,6 +329,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
     contracts,
     componentContracts,
     componentData,
+    componentMeta,
     plugins,
     repos,
     componentRepos,

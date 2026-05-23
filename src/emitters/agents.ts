@@ -51,6 +51,17 @@ export function emitAgentsMarkdown(artifact: ArchitectureArtifact): string {
     lines.push('');
   }
 
+  if ((artifact.resources ?? []).length > 0) {
+    lines.push(`## Architecture Resources`);
+    lines.push('');
+    lines.push(`| Name | Type | Trust | Protocol | Auth |`);
+    lines.push(`|------|------|-------|----------|------|`);
+    for (const r of artifact.resources) {
+      lines.push(`| \`${r.name}\` | \`${r.type}\` | ${r.trust ?? '—'} | ${r.protocol ?? '—'} | ${r.auth ?? '—'} |`);
+    }
+    lines.push('');
+  }
+
   // Component → file mapping
   const componentNames = Object.keys(artifact.mappings);
   if (componentNames.length > 0) {
@@ -59,8 +70,11 @@ export function emitAgentsMarkdown(artifact: ArchitectureArtifact): string {
     lines.push(`These logical components map your code files to the architecture nodes above.`);
     lines.push('');
     for (const comp of componentNames) {
+      const meta = (artifact.componentMeta ?? []).find(m => m.component === comp);
       lines.push(`### \`${comp}\``);
       lines.push(`- **File glob**: \`${artifact.mappings[comp]}\``);
+      if (meta?.role) lines.push(`- **Role**: \`${meta.role}\``);
+      if (meta?.layer) lines.push(`- **Layer**: \`${meta.layer}\``);
       const relatedRules = artifact.invariants.flatMap(inv =>
         inv.rules
           .filter(r => r.kind === 'DenyDataFlow' ? r.to === comp : r.from === comp || r.to === comp)

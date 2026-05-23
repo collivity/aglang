@@ -357,6 +357,18 @@ function analyzeFile(content: string, filePath: string, componentName: string): 
       strategy: 'regex',
     });
   }
+  const directControllerNetwork = source.match(/URLSession\.|AF\.request|Alamofire\.request|Session\.default\.request/);
+  if (isViewController && directControllerNetwork) {
+    facts.push({
+      from: componentName,
+      to: 'external_api',
+      confidence: 'definite',
+      evidence: 'ViewController performs direct networking instead of routing through an application component',
+      file: filePath,
+      line: lineOf(source, directControllerNetwork.index ?? 0),
+      strategy: 'regex',
+    });
+  }
 
   // ── Swift Package Manager modularity ─────────────────────────────────────
   if (/import\s+PackageDescription/.test(source) && /let\s+package\s*=\s*Package\s*\(/.test(source)) {
