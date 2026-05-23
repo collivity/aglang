@@ -15,7 +15,7 @@ export interface CaptureMatch {
  */
 export function queryCaptures(
   tree: Parser.Tree,
-  language: Parser.Language,
+  language: any,
   querySource: string,
 ): CaptureMatch[] {
   try {
@@ -39,7 +39,7 @@ export function queryCaptures(
  */
 export function parseAndQuery(
   parser: Parser,
-  language: Parser.Language,
+  language: any,
   content: string,
   querySource: string,
 ): CaptureMatch[] {

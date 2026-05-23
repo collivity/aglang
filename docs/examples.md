@@ -95,3 +95,120 @@ That produces `DataFlow(CustomerProfile, GdprService)`, which does not violate `
 This proves a precise architecture property: data classified by the spec as `CustomerProfile`, when carried by the load balancer, cannot be routed to the explicitly denied target.
 
 It does not automatically infer legal compliance from prose. You still declare the compliance boundary in `.ag`, and extractors must be able to see the routing fact in code or config.
+
+## C# MVVM dependency injection boundaries
+
+This example models a C# desktop or mobile app that uses dependency injection:
+
+- Views must not inject infrastructure services directly.
+- ViewModels must not depend on repositories or database contexts directly.
+- Singleton services must not depend on scoped services.
+- Application code must not use `IServiceProvider` as a service locator.
+
+```ag
+node app_runtime : edge_desktop {
+  trust: trusted
+}
+
+component Views {
+  runs_on: app_runtime
+  paths: "src/**/Views/**/*.xaml.cs"
+}
+
+component ViewModels {
+  runs_on: app_runtime
+  paths: "src/**/ViewModels/**/*.cs"
+}
+
+component BleManager {
+  runs_on: app_runtime
+  paths: "src/**/Infrastructure/Bluetooth/**/*.cs"
+}
+
+component Repositories {
+  runs_on: app_runtime
+  paths: "src/**/Infrastructure/Persistence/**/*.cs"
+}
+
+component DbContexts {
+  runs_on: app_runtime
+  paths: "src/**/Infrastructure/Persistence/**/*DbContext.cs"
+}
+
+component Application {
+  runs_on: app_runtime
+  paths: "src/**/Application/**/*.cs"
+}
+
+di_policy DependencyInjection {
+  deny inject Views -> BleManager
+  deny inject ViewModels -> Repositories
+  deny inject ViewModels -> DbContexts
+  deny lifetime singleton -> scoped
+  deny resolve IServiceProvider from Application
+}
+```
+
+Now suppose a view directly injects Bluetooth infrastructure:
+
+```csharp
+public partial class DevicePage
+{
+    public DevicePage(BleManager bleManager)
+    {
+    }
+}
+```
+
+The C# extractor maps `DevicePage` to `Views`, maps `BleManager` to the `BleManager` component, and emits:
+
+```smt2
+(assert (Injects Views BleManager))
+```
+
+The policy compiled from `.ag` contains:
+
+```smt2
+(assert (=> (Injects Views BleManager) false))
+```
+
+Together those assertions are unsatisfiable, so `aglc check` fails with a `di_violation`.
+
+Lifetime checks work the same way. Given registrations:
+
+```csharp
+services.AddSingleton<IBleManager, BleManager>();
+services.AddScoped<IOrderRepository, OrderRepository>();
+```
+
+and this constructor:
+
+```csharp
+public sealed class BleManager
+{
+    public BleManager(IOrderRepository orders)
+    {
+    }
+}
+```
+
+aglang emits:
+
+```smt2
+(assert (LifetimeDepends Lifetime__singleton Lifetime__scoped))
+```
+
+That contradicts `deny lifetime singleton -> scoped`, so the check blocks before the invalid DI graph lands.
+
+Service-locator rules are also explicit:
+
+```csharp
+public sealed class SyncHandler
+{
+    public SyncHandler(IServiceProvider services)
+    {
+    }
+}
+```
+
+With `deny resolve IServiceProvider from Application`, this emits `(assert (Resolves Application IServiceProvider))` and fails in Z3.

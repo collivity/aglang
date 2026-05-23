@@ -27,14 +27,14 @@ Designed as an **agent-first guardrail**: agents read `AGENTS.md`, validate focu
   Z3 SMT solver           ← evaluates spec constraints against delta facts
          │
     ┌────┴────┐
-  UNSAT      SAT
+   SAT      UNSAT
     │          │
   Allow      Reject + structured JSON proof
 ```
 
 1. **Architecture build** — `aglc compile spec.ag` produces `architecture.o` (a JSON artifact with SMT-LIB2 constraints + component→path mappings).
 2. **Work-in-progress validation** — agents run `aglc check-file --json` while editing and `aglc check --all --json` before finishing.
-3. **Commit enforcement** — the pre-commit hook runs `aglc check`, extracts flow facts from staged files (8 languages supported), feeds them with the compiled constraints to Z3, and blocks the commit if any invariant is violated.
+3. **Commit enforcement** — the pre-commit hook runs `aglc check`, extracts flow, dataflow, dependency-injection, workflow, and contract facts, feeds formal facts with the compiled constraints to Z3, and blocks the commit if any hard rule is violated.
 4. **Agent bootstrap** — `aglc add` can create a starter `.ag` spec, compiled artifact, hook, and agent files for engineer review.
 
 
@@ -174,6 +174,7 @@ Commit aborted.
 | **Contracts** | ✅ | Declare REST/GraphQL API endpoint shapes; enforce implements + consumes at commit time |
 | **GitHub Actions policies** | ✅ | Model workflows as components and block unsafe publish/deploy/release permissions |
 | **Change policies** | ✅ | Require related components, docs, skills, or package metadata to change together |
+| **Dependency injection policies** | ✅ | Block illegal constructor injection, singleton-to-scoped dependencies, and service-locator usage with Z3 |
 | **State machines** | ✅ | Model entity lifecycle states and allowed transitions |
 | **Permissions** | ✅ | Declare role-based access rules per state |
 | **Data & enums** | ✅ | Define domain types for documentation |
@@ -198,7 +199,7 @@ Not every declaration is enforced the same way:
 
 | Level | Declarations | Behavior |
 |---|---|---|
-| `formal_z3` | `invariant deny flow`, `invariant deny dataflow`, `change_policy` | Facts are asserted into SMT and checked by Z3. |
+| `formal_z3` | `invariant deny flow`, `invariant deny dataflow`, `di_policy`, `change_policy` | Facts are asserted into SMT and checked by Z3. |
 | `deterministic_policy` | `contract`, `workflow_policy` | Extracted route/workflow facts are checked by deterministic gates. |
 | `advisory` | `machine`, `permission`, `require encryption` | Emitted to docs and agent context; not blocking until an extractor/gate enforces them. |
 
@@ -293,6 +294,37 @@ The gate emits Z3-backed `change_violations[]` when the trigger component change
 
 ---
 
+## Dependency injection policies
+
+Model implementation-level DI hazards as formal architecture rules:
+
+```ag
+component Views {
+  runs_on: app_runtime
+  paths: "src/**/Views/**/*.xaml.cs"
+}
+
+component BleManager {
+  runs_on: app_runtime
+  paths: "src/**/Infrastructure/Bluetooth/**/*.cs"
+}
+
+component Application {
+  runs_on: app_runtime
+  paths: "src/**/Application/**/*.cs"
+}
+
+di_policy DependencyInjection {
+  deny inject Views -> BleManager
+  deny lifetime singleton -> scoped
+  deny resolve IServiceProvider from Application
+}
+```
+
+The C# extractor turns constructor dependencies, `AddSingleton` / `AddScoped` / `AddTransient` registrations, and `IServiceProvider` usage into SMT assertions such as `(assert (Injects Views BleManager))`. Matching `di_policy` rules return `di_violation` entries with Z3 proof details.
+
+---
+
 ## .ag language reference
 
 ### Node types (stdlib)
@@ -335,6 +367,13 @@ invariant <name> {
 // Change policy
 change_policy <name> {
   require touched <RequiredComponent> when touched <TriggerComponent>
+}
+
+// Dependency injection policy
+di_policy <name> {
+  deny inject <Component> -> <Component>
+  deny lifetime singleton -> scoped
+  deny resolve IServiceProvider from <Component>
 }
 
 // API contract

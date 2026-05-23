@@ -79,6 +79,7 @@ Check commands return schema version 2. Important fields:
 - `passed`: overall result.
 - `violations`: architecture flow violations with Z3 proof details.
 - `dataflow_violation`: a violation type inside `violations[]` for classified data flowing to a denied component or node.
+- `di_violation`: a violation type inside `violations[]` for `di_policy` failures such as forbidden constructor injection, singleton-to-scoped lifetime dependency, or denied service-locator access.
 - `contract_violations`: API contract mismatches.
 - `workflow_violations`: GitHub Actions policy violations.
 - `change_violations`: required companion changes, such as docs or skill updates, missing from the checked diff.

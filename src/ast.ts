@@ -191,6 +191,19 @@ export interface WorkflowPolicyDecl {
   rules: WorkflowPolicyRule[];
 }
 
+export type DiLifetime = 'singleton' | 'scoped' | 'transient';
+
+export type DiPolicyRule =
+  | { kind: 'DenyInject'; from: string; to: string }
+  | { kind: 'DenyLifetime'; from: DiLifetime; to: DiLifetime }
+  | { kind: 'DenyResolve'; service: string; from: string };
+
+export interface DiPolicyDecl {
+  kind: 'DiPolicyDecl';
+  name: string;
+  rules: DiPolicyRule[];
+}
+
 export interface ChangePolicyRule {
   kind: 'RequireTouched';
   required: string;
@@ -216,6 +229,7 @@ export type Declaration =
   | ContractDecl
   | PluginDecl
   | WorkflowPolicyDecl
+  | DiPolicyDecl
   | ChangePolicyDecl
   | RepoDecl
   | TestDecl;

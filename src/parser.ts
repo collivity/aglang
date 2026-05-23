@@ -8,7 +8,7 @@ import type {
   StateMachineDecl, TransitionRule, PermissionDecl, PermissionRule,
   ContractDecl, ContractEndpoint, PluginDecl, RepoDecl,
   WorkflowPolicyDecl, WorkflowPolicyRule, WorkflowCondition, WorkflowPolicyAction,
-  ChangePolicyDecl, ChangePolicyRule,
+  ChangePolicyDecl, ChangePolicyRule, DiLifetime, DiPolicyDecl, DiPolicyRule,
 } from './ast.ts';
 
 export class ParseError extends Error {
@@ -616,6 +616,59 @@ export function parse(tokens: Token[]): Program {
     return { kind: 'WorkflowPolicyDecl', name, rules };
   }
 
+  function parseDiLifetime(): DiLifetime {
+    const t = advance();
+    if (t.value === 'singleton' || t.value === 'scoped' || t.value === 'transient') {
+      return t.value;
+    }
+    throw new ParseError(`expected DI lifetime 'singleton', 'scoped', or 'transient'`, t);
+  }
+
+  function parseDiPolicyDecl(): DiPolicyDecl {
+    expect('KEYWORD', 'di_policy');
+    const name = expect('IDENT').value;
+    const rules: DiPolicyRule[] = [];
+    expect('LBRACE');
+    while (!match('RBRACE') && !eof()) {
+      const action = advance();
+      if (action.value !== 'deny') {
+        throw new ParseError(`expected 'deny' in di_policy block`, action);
+      }
+
+      const ruleKind = advance();
+      if (ruleKind.value === 'inject') {
+        const from = expect('IDENT').value;
+        expect('ARROW');
+        const to = expect('IDENT').value;
+        consume('SEMICOLON');
+        rules.push({ kind: 'DenyInject', from, to });
+        continue;
+      }
+
+      if (ruleKind.value === 'lifetime') {
+        const from = parseDiLifetime();
+        expect('ARROW');
+        const to = parseDiLifetime();
+        consume('SEMICOLON');
+        rules.push({ kind: 'DenyLifetime', from, to });
+        continue;
+      }
+
+      if (ruleKind.value === 'resolve') {
+        const service = expectIdent().value;
+        expect('KEYWORD', 'from');
+        const from = expect('IDENT').value;
+        consume('SEMICOLON');
+        rules.push({ kind: 'DenyResolve', service, from });
+        continue;
+      }
+
+      throw new ParseError(`expected 'inject', 'lifetime', or 'resolve' after deny`, ruleKind);
+    }
+    expect('RBRACE');
+    return { kind: 'DiPolicyDecl', name, rules };
+  }
+
   function parseChangePolicyDecl(): ChangePolicyDecl {
     expect('KEYWORD', 'change_policy');
     const name = expect('IDENT').value;
@@ -667,6 +720,7 @@ export function parse(tokens: Token[]): Program {
         case 'contract':   declarations.push(parseContractDecl()); break;
         case 'plugin':     declarations.push(parsePluginDecl()); break;
         case 'workflow_policy': declarations.push(parseWorkflowPolicyDecl()); break;
+        case 'di_policy': declarations.push(parseDiPolicyDecl()); break;
         case 'change_policy': declarations.push(parseChangePolicyDecl()); break;
         case 'repo':       declarations.push(parseRepoDecl()); break;
         case 'test':       declarations.push(parseTestDecl()); break;

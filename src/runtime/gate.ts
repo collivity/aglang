@@ -1,8 +1,9 @@
 // Z3 Gate — loads architecture.o + delta assertions → SAT/UNSAT verdict
 import { checkConstraints } from '../smt/solver.ts';
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
-import type { ArtifactInvariantRule } from '../emitters/artifact.ts';
+import type { ArtifactInvariantRule, ArtifactDiPolicyRule } from '../emitters/artifact.ts';
 import type { DeltaResult } from './delta-assert.ts';
+import type { DiFact } from '../analyzers/csharp.ts';
 import type { ContractViolation } from './contract-gate.ts';
 import type { WorkflowViolation } from './workflow-gate.ts';
 import type { ChangeViolation } from './change-gate.ts';
@@ -17,9 +18,9 @@ export interface Z3Proof {
 }
 
 export interface GateViolation {
-  type: 'flow_violation' | 'dataflow_violation';
+  type: 'flow_violation' | 'dataflow_violation' | 'di_violation';
   invariant: string;
-  rule: ArtifactInvariantRule;
+  rule: ArtifactInvariantRule | ArtifactDiPolicyRule;
   detected: {
     from: string;
     to: string;
@@ -74,6 +75,26 @@ function buildDataPermanentConstraint(rule: { kind: 'DenyDataFlow'; data: string
   return `(assert (=> (DataFlow ${smtId(rule.data)} ${smtId(rule.to)}) false))`;
 }
 
+function buildDiPermanentConstraint(rule: ArtifactDiPolicyRule): string {
+  if (rule.kind === 'DenyInject') {
+    return `(assert (=> (Injects ${smtId(rule.from)} ${smtId(rule.to)}) false))`;
+  }
+  if (rule.kind === 'DenyLifetime') {
+    return `(assert (=> (LifetimeDepends Lifetime__${rule.from} Lifetime__${rule.to}) false))`;
+  }
+  return `(assert (=> (Resolves ${smtId(rule.from)} ${smtId(rule.service)}) false))`;
+}
+
+function buildDiDeltaAssertion(fact: DiFact): string {
+  if (fact.kind === 'inject') {
+    return `(assert (Injects ${smtId(fact.from)} ${smtId(fact.to)}))`;
+  }
+  if (fact.kind === 'lifetime_dependency') {
+    return `(assert (LifetimeDepends Lifetime__${fact.fromLifetime} Lifetime__${fact.toLifetime}))`;
+  }
+  return `(assert (Resolves ${smtId(fact.from)} ${smtId(fact.service)}))`;
+}
+
 export async function runGate(
   artifact: ArchitectureArtifact,
   delta: DeltaResult,
@@ -83,8 +104,9 @@ export async function runGate(
   }));
 
   const blockingDataFlowFacts = delta.blockingDataFlowFacts ?? [];
+  const blockingDiFacts = delta.blockingDiFacts ?? [];
 
-  if (delta.blockingFacts.length === 0 && blockingDataFlowFacts.length === 0) {
+  if (delta.blockingFacts.length === 0 && blockingDataFlowFacts.length === 0 && blockingDiFacts.length === 0) {
     return { passed: true, violations: [], warnings };
   }
 
@@ -153,7 +175,7 @@ export async function runGate(
       }
     }
     // Generic violation only when no dataflow rule could explain UNSAT.
-    if (!matched && blockingDataFlowFacts.length === 0) {
+    if (!matched && blockingDataFlowFacts.length === 0 && blockingDiFacts.length === 0) {
       violations.push({
         type: 'flow_violation',
         invariant: 'unknown',
@@ -230,6 +252,77 @@ export async function runGate(
           permanent_constraint: `(assert (=> (DataFlow ${smtId(fact.data)} ${smtId(fact.to)}) false))`,
           delta_assertion: deltaAssertion,
           explanation: `Z3 returned UNSAT: a deny-dataflow constraint for '${fact.data}→${fact.to}' contradicts the detected dataflow in ${fact.file}.`,
+        },
+      });
+    }
+  }
+
+  for (const fact of blockingDiFacts) {
+    let matched = false;
+    for (const policy of artifact.diPolicies ?? []) {
+      for (const rule of policy.rules) {
+        const matches =
+          (fact.kind === 'inject' && rule.kind === 'DenyInject' && fact.from === rule.from && fact.to === rule.to) ||
+          (fact.kind === 'lifetime_dependency' && rule.kind === 'DenyLifetime' && fact.fromLifetime === rule.from && fact.toLifetime === rule.to) ||
+          (fact.kind === 'resolve' && rule.kind === 'DenyResolve' && fact.from === rule.from && fact.service === rule.service);
+        if (!matches) continue;
+
+        const permanentConstraint = buildDiPermanentConstraint(rule);
+        const deltaAssertion = fact.kind === 'resolve'
+          ? delta.diFactSmtMap.get(`${fact.kind}:${fact.from}::${fact.service}`) ?? buildDiDeltaAssertion(fact)
+          : fact.kind === 'inject'
+            ? delta.diFactSmtMap.get(`${fact.kind}:${fact.from}::${fact.to}`) ?? buildDiDeltaAssertion(fact)
+            : delta.diFactSmtMap.get(`${fact.kind}:${fact.fromLifetime}::${fact.toLifetime}:${fact.from}::${fact.to}`) ?? buildDiDeltaAssertion(fact);
+        const target = fact.kind === 'resolve' ? fact.service : fact.to;
+        violations.push({
+          type: 'di_violation',
+          invariant: policy.name,
+          rule,
+          detected: {
+            from: fact.from,
+            to: target,
+            confidence: fact.confidence,
+            evidence: fact.evidence,
+            file: fact.file,
+          },
+          message: fact.kind === 'lifetime_dependency'
+            ? `DI lifetime '${fact.fromLifetime}' must NOT depend on '${fact.toLifetime}' (policy: ${policy.name})`
+            : fact.kind === 'resolve'
+              ? `Component '${fact.from}' must NOT resolve '${fact.service}' via service locator (policy: ${policy.name})`
+              : `Component '${fact.from}' must NOT inject '${fact.to}' (policy: ${policy.name})`,
+          z3_proof: {
+            permanent_constraint: permanentConstraint,
+            delta_assertion: deltaAssertion,
+            explanation:
+              `Z3 returned UNSAT because '${permanentConstraint}' (from di_policy '${policy.name}') ` +
+              `contradicts '${deltaAssertion}' (derived from C# DI evidence in ${fact.file}).`,
+          },
+        });
+        matched = true;
+      }
+    }
+
+    if (!matched) {
+      violations.push({
+        type: 'di_violation',
+        invariant: 'unknown',
+        rule: fact.kind === 'lifetime_dependency'
+          ? { kind: 'DenyLifetime', from: fact.fromLifetime, to: fact.toLifetime }
+          : fact.kind === 'resolve'
+            ? { kind: 'DenyResolve', service: fact.service, from: fact.from }
+            : { kind: 'DenyInject', from: fact.from, to: fact.to },
+        detected: {
+          from: fact.from,
+          to: fact.kind === 'resolve' ? fact.service : fact.to,
+          confidence: fact.confidence,
+          evidence: fact.evidence,
+          file: fact.file,
+        },
+        message: `Dependency injection fact violates architectural constraints`,
+        z3_proof: {
+          permanent_constraint: '(di_policy constraint)',
+          delta_assertion: buildDiDeltaAssertion(fact),
+          explanation: `Z3 returned UNSAT for a dependency injection policy fact derived from ${fact.file}.`,
         },
       });
     }

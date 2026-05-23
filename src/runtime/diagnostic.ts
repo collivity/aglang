@@ -11,6 +11,32 @@ const GREEN  = '\x1b[32m';
 const MAGENTA = '\x1b[35m';
 
 function formatViolationBlock(v: GateViolation): string[] {
+  if (v.type === 'di_violation') {
+    return [
+      '',
+      `${RED}${BOLD}╔══════════════════════════════════════════════════════════╗${RESET}`,
+      `${RED}${BOLD}║        aglang Dependency Injection Violation             ║${RESET}`,
+      `${RED}${BOLD}╚══════════════════════════════════════════════════════════╝${RESET}`,
+      '',
+      `${BOLD}Policy Violated:${RESET}  ${YELLOW}${v.invariant}${RESET}`,
+      `${BOLD}Rule:${RESET}             ${(v.rule as { kind: string }).kind}`,
+      '',
+      `${BOLD}Detected in file:${RESET}`,
+      `  ${v.detected.file}`,
+      '',
+      `${BOLD}Evidence:${RESET} [confidence: ${v.detected.confidence}]`,
+      `  ${v.detected.evidence}`,
+      '',
+      `${BOLD}Explanation:${RESET}`,
+      `  ${v.message}`,
+      '',
+      `${BOLD}Z3 Proof (conflicting assertions):${RESET}`,
+      `  ${CYAN}Permanent rule:${RESET} ${v.z3_proof.permanent_constraint}`,
+      `  ${CYAN}Delta (your code):${RESET} ${v.z3_proof.delta_assertion}`,
+      `  These two assertions are mutually UNSAT — formal proof of violation.`,
+    ];
+  }
+
   if (v.type === 'dataflow_violation') {
     return [
       '',
@@ -195,7 +221,7 @@ export function formatVerdictJson(verdict: GateVerdict, artifactPath: string): s
     agent_context: overallPassed
       ? 'Architecture check passed. No violations detected.'
       : `${totalViolations} violation(s) detected. See violations[] and contract_violations[]. ` +
-        `Flow violations include z3_proof with conflicting SMT assertions. ` +
+        `Flow, dataflow, and DI violations include z3_proof with conflicting SMT assertions. ` +
         `Contract violations include proof with the contract assertion vs extracted code. ` +
         `Change violations include z3_proof with touched-component assertions. ` +
         `Read AGENTS.md for full architectural rules and fix your code accordingly.`,

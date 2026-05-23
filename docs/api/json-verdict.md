@@ -64,6 +64,27 @@ interface Verdict {
 
 Flow violations may also have `"type": "dataflow_violation"` when a `deny dataflow` invariant is violated. These include the denied data type in `detected.data` and the component that carried it in `detected.via`.
 
+Dependency-injection policy failures appear in the same `violations[]` array with `"type": "di_violation"`. They include the violated `di_policy` name, the detected constructor/lifetime/service-locator evidence, and a Z3 proof.
+
+```json
+{
+  "type": "di_violation",
+  "invariant": "DependencyInjection",
+  "rule": { "kind": "DenyLifetime", "from": "singleton", "to": "scoped" },
+  "detected": {
+    "from": "BleManager",
+    "to": "Repositories",
+    "confidence": "definite",
+    "evidence": "BleManager (singleton) constructor-injects Repositories (scoped)",
+    "file": "src/Infrastructure/Bluetooth/BleManager.cs"
+  },
+  "z3_proof": {
+    "permanent_constraint": "(assert (=> (LifetimeDepends Lifetime__singleton Lifetime__scoped) false))",
+    "delta_assertion": "(assert (LifetimeDepends Lifetime__singleton Lifetime__scoped))"
+  }
+}
+```
+
 ### Change policy violation
 
 ```json

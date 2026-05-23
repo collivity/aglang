@@ -8,6 +8,7 @@ When an AI agent refactors code, it may:
 - Introduce a direct connection between tiers that should be isolated
 - Add a database call in a public-facing handler
 - Bypass an auth layer "for simplicity"
+- Inject infrastructure into UI code, create singleton-to-scoped DI bugs, or use `IServiceProvider` as a service locator
 
 Traditional code review catches these eventually. aglang catches them while the agent is still coding, then enforces the same rules at commit time with mathematical proof of the violation.
 
@@ -60,8 +61,8 @@ Agent reads AGENTS.md → edits code → aglc check-file --json
                                   → aglc check --all --json
                                   → git commit hook runs same gate
                                                         │
-                                          Z3 UNSAT → pass ✓
-                                          Z3 SAT   → fix reported code ✗
+                                          Z3 SAT   → pass ✓
+                                          Z3 UNSAT → fix reported code ✗
 ```
 
 ## JSON mode for programmatic integration
@@ -93,6 +94,8 @@ Agents can parse this JSON and decide how to fix the violation rather than readi
 3. **Agent validates while coding** — run `aglc check-file --json` for focused edits.
 4. **Agent validates before finishing** — run `aglc check --all --json` for the guarded project.
 5. **Architecture evolves deliberately** — agents ask before changing `.ag`, `architecture.o`, `AGENTS.md`, or `skill.json`.
+
+When `di_violation` entries appear in `violations[]`, fix the implementation dependency graph. Do not work around the gate by editing `.ag` unless the engineer explicitly asks to change the intended architecture.
 
 When `change_violations[]` appear, update the required companion component in the same change. For example, a CLI or package metadata change may require README, CLI reference, or agent skill updates.
 

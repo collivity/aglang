@@ -36,6 +36,9 @@ const KEYWORDS = new Set([
   'workflow_policy', 'publish', 'deploy', 'release', 'before', 'branch', 'tag',
   'pull_request', 'contents', 'packages', 'pages', 'id_token', 'actions',
   'checks', 'deployments', 'issues', 'metadata', 'security_events',
+  // Dependency injection and lifetime policies
+  'di_policy', 'inject', 'lifetime', 'singleton', 'scoped', 'transient',
+  'resolve', 'from',
   // Change coupling policies
   'change_policy', 'touched',
 ]);

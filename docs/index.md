@@ -31,6 +31,10 @@ features:
     title: Work-in-progress Validation
     details: Agents can run check-file during focused edits and check --all before finishing, long before a pre-commit hook fires.
 
+  - icon: 🧩
+    title: DI and Lifetime Policies
+    details: Model constructor injection, singleton-to-scoped lifetime hazards, and service-locator bans as Z3-backed architecture rules.
+
   - icon: 🏗️
     title: Architecture as Code
     details: Write human-readable .ag files with explicit enforcement levels for formal Z3 rules, deterministic policies, and advisory guidance.
@@ -99,7 +103,7 @@ Your .ag spec                 Your codebase (file or project)
       │                                   │
       └─────────────── Z3 Solver ─────────┘
                              │
-                    UNSAT → pass ✓  │  SAT → reject with proof ✗
+                    SAT → pass ✓  │  UNSAT → reject with proof ✗
 ```
 
 Agents use the same interface while code is still in progress; pre-commit hooks and CI use it as the final enforcement point. Z3 is deterministic math — no LLM guesses. [Full pipeline walkthrough →](./how-it-works)

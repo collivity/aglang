@@ -1,7 +1,7 @@
 // AGENTS.md emitter — generates structured context for AI coding agents
 // Output: AGENTS.md committed to the repository root for agents to load
 import type { ArchitectureArtifact } from './artifact.ts';
-import type { ArtifactInvariantRule } from './artifact.ts';
+import type { ArtifactInvariantRule, ArtifactDiPolicyRule } from './artifact.ts';
 
 function ruleDescription(rule: ArtifactInvariantRule): string {
   if (rule.kind === 'DenyFlow') {
@@ -14,6 +14,16 @@ function ruleDescription(rule: ArtifactInvariantRule): string {
     return `**REQUIRED**: All flows from \`${rule.from}\` to \`${rule.to}\` must be encrypted`;
   }
   return `${(rule as { kind: string }).kind}: ${JSON.stringify(rule)}`;
+}
+
+function diRuleDescription(rule: ArtifactDiPolicyRule): string {
+  if (rule.kind === 'DenyInject') {
+    return `**FORBIDDEN**: \`${rule.from}\` must NOT constructor-inject \`${rule.to}\``;
+  }
+  if (rule.kind === 'DenyLifetime') {
+    return `**FORBIDDEN**: \`${rule.from}\` services must NOT depend on \`${rule.to}\` services`;
+  }
+  return `**FORBIDDEN**: \`${rule.from}\` must NOT resolve \`${rule.service}\` via service locator`;
 }
 
 export function emitAgentsMarkdown(artifact: ArchitectureArtifact): string {
@@ -80,10 +90,21 @@ export function emitAgentsMarkdown(artifact: ArchitectureArtifact): string {
           .filter(r => r.kind === 'DenyDataFlow' ? r.to === comp : r.from === comp || r.to === comp)
           .map(r => ({ invName: inv.name, rule: r }))
       );
+      const relatedDiRules = (artifact.diPolicies ?? []).flatMap(policy =>
+        policy.rules
+          .filter(r => r.kind === 'DenyLifetime' || r.from === comp || (r.kind === 'DenyInject' && r.to === comp))
+          .map(r => ({ policyName: policy.name, rule: r }))
+      );
       if (relatedRules.length > 0) {
         lines.push(`- **Rules affecting this component:**`);
         for (const { invName, rule } of relatedRules) {
           lines.push(`  - [${invName}] ${ruleDescription(rule)}`);
+        }
+      }
+      if (relatedDiRules.length > 0) {
+        lines.push(`- **DI policies affecting this component:**`);
+        for (const { policyName, rule } of relatedDiRules) {
+          lines.push(`  - [${policyName}] ${diRuleDescription(rule)}`);
         }
       }
       lines.push('');
@@ -100,6 +121,20 @@ export function emitAgentsMarkdown(artifact: ArchitectureArtifact): string {
       lines.push(`### \`${inv.name}\``);
       for (const rule of inv.rules) {
         lines.push(`- ${ruleDescription(rule)}`);
+      }
+      lines.push('');
+    }
+  }
+
+  if ((artifact.diPolicies ?? []).length > 0) {
+    lines.push(`## Dependency Injection Policies`);
+    lines.push('');
+    lines.push(`> **Enforced at commit time** — constructor injection, service lifetimes, and service-locator usage are checked when extractors can prove definite DI facts.`);
+    lines.push('');
+    for (const policy of artifact.diPolicies ?? []) {
+      lines.push(`### \`${policy.name}\``);
+      for (const rule of policy.rules) {
+        lines.push(`- ${diRuleDescription(rule)}`);
       }
       lines.push('');
     }

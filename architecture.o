@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 9,
+  "schemaVersion": 11,
   "sourcePath": "C:\\Users\\pante\\Codespaces\\aglang\\architecture.ag",
   "enforcement": [
     {
@@ -16,6 +16,11 @@
       "declaration": "change_policy",
       "level": "formal_z3",
       "mechanism": "Touched-component facts are asserted against SMT-LIB implication rules."
+    },
+    {
+      "declaration": "di_policy",
+      "level": "formal_z3",
+      "mechanism": "Constructor-injection, lifetime, and service-locator facts are asserted against SMT-LIB constraints."
     },
     {
       "declaration": "contract",
@@ -47,12 +52,18 @@
     "; === aglang base sorts ===",
     "(declare-sort Entity 0)",
     "(declare-sort DataType 0)",
+    "(declare-sort ServiceType 0)",
+    "(declare-datatype Lifetime ((Lifetime__singleton) (Lifetime__scoped) (Lifetime__transient)))",
     "(declare-fun Flow      (Entity Entity) Bool)",
     "(declare-fun DataFlow  (DataType Entity) Bool)",
+    "(declare-fun Injects   (Entity Entity) Bool)",
+    "(declare-fun LifetimeDepends (Lifetime Lifetime) Bool)",
+    "(declare-fun Resolves  (Entity ServiceType) Bool)",
     "(declare-fun Encrypted (Entity Entity) Bool)",
     "(declare-fun Trusted   (Entity) Bool)",
     "(declare-fun IsNode    (Entity) Bool)",
     "(declare-fun IsComp    (Entity) Bool)",
+    "(declare-fun IsResource (Entity) Bool)",
     "",
     "; === node declarations ===",
     "(declare-const node_runtime Entity)",
@@ -114,27 +125,41 @@
     "; === invariant rules ===",
     "; --- CompilerEntrypointBoundary ---",
     "(assert (=> (Flow LanguageFrontend CliCompiler) false))",
+    "; --- CompilerEntrypointBoundary ---",
     "(assert (=> (Flow SmtBackend CliCompiler) false))",
+    "; --- CompilerEntrypointBoundary ---",
     "(assert (=> (Flow RuntimeGate CliCompiler) false))",
+    "; --- CompilerEntrypointBoundary ---",
     "(assert (=> (Flow ExtractorAnalyzers CliCompiler) false))",
+    "; --- CompilerEntrypointBoundary ---",
     "(assert (=> (Flow GraphProjection CliCompiler) false))",
+    "; --- CompilerEntrypointBoundary ---",
     "(assert (=> (Flow Emitters CliCompiler) false))",
+    "; --- CompilerEntrypointBoundary ---",
     "(assert (=> (Flow SpecGenerator CliCompiler) false))",
     "; --- SmtBackendIsolation ---",
     "(assert (=> (Flow SmtBackend RuntimeGate) false))",
+    "; --- SmtBackendIsolation ---",
     "(assert (=> (Flow SmtBackend ExtractorAnalyzers) false))",
+    "; --- SmtBackendIsolation ---",
     "(assert (=> (Flow SmtBackend GraphProjection) false))",
     "; --- LanguageFrontendPurity ---",
     "(assert (=> (Flow LanguageFrontend RuntimeGate) false))",
+    "; --- LanguageFrontendPurity ---",
     "(assert (=> (Flow LanguageFrontend GraphProjection) false))",
+    "; --- LanguageFrontendPurity ---",
     "(assert (=> (Flow LanguageFrontend Emitters) false))",
     "; --- ExtractorAnalyzerBoundary ---",
     "(assert (=> (Flow ExtractorAnalyzers CliCompiler) false))",
+    "; --- ExtractorAnalyzerBoundary ---",
     "(assert (=> (Flow ExtractorAnalyzers Emitters) false))",
     "; --- VscodeApiBoundary ---",
     "(assert (=> (Flow VscodeExtension RuntimeGate) false))",
+    "; --- VscodeApiBoundary ---",
     "(assert (=> (Flow VscodeExtension ExtractorAnalyzers) false))",
+    "; --- VscodeApiBoundary ---",
     "(assert (=> (Flow VscodeExtension SmtBackend) false))",
+    "; --- VscodeApiBoundary ---",
     "(assert (=> (Flow VscodeExtension GraphProjection) false))",
     ""
   ],
@@ -311,6 +336,7 @@
       "auth": "oauth2"
     }
   ],
+  "resources": [],
   "enums": [],
   "dataTypes": [],
   "stateMachines": [],
@@ -318,6 +344,7 @@
   "contracts": [],
   "componentContracts": [],
   "componentData": [],
+  "componentMeta": [],
   "plugins": [],
   "repos": [],
   "componentRepos": {},
@@ -431,6 +458,7 @@
       ]
     }
   ],
+  "diPolicies": [],
   "changePolicies": [
     {
       "name": "DocsFreshness",

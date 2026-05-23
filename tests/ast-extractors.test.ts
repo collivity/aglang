@@ -475,6 +475,17 @@ describe.skipIf(!csharpAstAvailable)('AST-only: C# generic type parameter and us
     expect(facts.some(f => f.to === 'relational_db')).toBe(true);
   });
 
+  it('detects cache via auto-property setter', () => {
+    const content = `
+      using StackExchange.Redis;
+      public class CacheController : ControllerBase {
+        public IConnectionMultiplexer Redis { get; set; }
+      }
+    `;
+    const facts = extractFacts(csharpPlugin, '.cs', content);
+    expect(facts.some(f => f.to === 'cache')).toBe(true);
+  });
+
   it('detects cache via StackExchange.Redis using directive (IConnectionMultiplexer)', () => {
     const content = `
       using StackExchange.Redis;

@@ -6,16 +6,17 @@ import { createRequire } from 'module';
 import type { default as Parser } from 'tree-sitter';
 
 type ParserConstructor = typeof Parser;
+type TreeSitterLanguage = any;
 
 interface LoadedParsers {
   Parser: ParserConstructor;
-  typescript?: Parser.Language;
-  javascript?: Parser.Language;
-  python?: Parser.Language;
-  csharp?: Parser.Language;
-  golang?: Parser.Language;
-  rust?: Parser.Language;
-  java?: Parser.Language;
+  typescript?: TreeSitterLanguage;
+  javascript?: TreeSitterLanguage;
+  python?: TreeSitterLanguage;
+  csharp?: TreeSitterLanguage;
+  golang?: TreeSitterLanguage;
+  rust?: TreeSitterLanguage;
+  java?: TreeSitterLanguage;
 }
 
 const require = createRequire(import.meta.url);
@@ -29,7 +30,7 @@ function warnOnce(key: string, msg: string): void {
   }
 }
 
-function tryLoadLanguage(name: string, loader: () => Parser.Language): Parser.Language | undefined {
+function tryLoadLanguage(name: string, loader: () => TreeSitterLanguage): TreeSitterLanguage | undefined {
   try {
     return loader();
   } catch (err) {
@@ -48,13 +49,13 @@ export function getTreeSitter(): LoadedParsers | null {
 
     cached = {
       Parser: ParserCtor,
-      typescript: tryLoadLanguage('typescript', () => require('tree-sitter-typescript').typescript as Parser.Language),
-      javascript: tryLoadLanguage('javascript', () => require('tree-sitter-javascript') as Parser.Language),
-      python: tryLoadLanguage('python', () => require('tree-sitter-python') as Parser.Language),
-      csharp: tryLoadLanguage('csharp', () => require('tree-sitter-c-sharp') as Parser.Language),
-      golang: tryLoadLanguage('golang', () => require('tree-sitter-go') as Parser.Language),
-      rust: tryLoadLanguage('rust', () => require('tree-sitter-rust') as Parser.Language),
-      java: tryLoadLanguage('java', () => require('tree-sitter-java') as Parser.Language),
+      typescript: tryLoadLanguage('typescript', () => require('tree-sitter-typescript').typescript as TreeSitterLanguage),
+      javascript: tryLoadLanguage('javascript', () => require('tree-sitter-javascript') as TreeSitterLanguage),
+      python: tryLoadLanguage('python', () => require('tree-sitter-python') as TreeSitterLanguage),
+      csharp: tryLoadLanguage('csharp', () => require('tree-sitter-c-sharp') as TreeSitterLanguage),
+      golang: tryLoadLanguage('golang', () => require('tree-sitter-go') as TreeSitterLanguage),
+      rust: tryLoadLanguage('rust', () => require('tree-sitter-rust') as TreeSitterLanguage),
+      java: tryLoadLanguage('java', () => require('tree-sitter-java') as TreeSitterLanguage),
     };
     return cached;
   } catch (err) {

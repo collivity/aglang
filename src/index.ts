@@ -297,6 +297,7 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
 
   if (
     delta.blockingFacts.length === 0 &&
+    delta.blockingDiFacts.length === 0 &&
     delta.warningFacts.length === 0 &&
     contractResult.violations.length === 0 &&
     workflowResult.violations.length === 0 &&
@@ -431,7 +432,7 @@ async function checkFile(archPath: string, filePath: string) {
     log(`[aglc] Contract check: ${contractResult.violations.length} violation(s), ${contractResult.warnings.length} warning(s)`);
   }
 
-  if (delta.facts.length === 0 && contractResult.violations.length === 0 && workflowResult.violations.length === 0) {
+  if (delta.facts.length === 0 && delta.diFacts.length === 0 && contractResult.violations.length === 0 && workflowResult.violations.length === 0) {
     if (contractResult.warnings.length > 0) {
       // Pass but show warnings
     } else {
@@ -462,6 +463,14 @@ async function checkFile(archPath: string, filePath: string) {
     for (const f of delta.facts) {
       const tag = f.confidence === 'definite' ? '🔴' : f.confidence === 'probable' ? '🟡' : '⚪';
       log(`  ${tag} [${f.confidence}] ${f.from} → ${f.to}: ${f.evidence}`);
+    }
+  }
+
+  if (delta.diFacts.length > 0) {
+    log(`[aglc] Detected dependency injection facts:`);
+    for (const f of delta.diFacts) {
+      const target = f.kind === 'resolve' ? f.service : f.to;
+      log(`  🔴 [${f.confidence}] ${f.kind} ${f.from} → ${target}: ${f.evidence}`);
     }
   }
 
@@ -513,6 +522,7 @@ function installAgentSkill(outDir: string) {
     logErr(`Reinstall @collivity/aglang or run from a complete package.`);
     process.exit(1);
   }
+
   const target = resolve(outDir, 'aglang');
   mkdirSync(outDir, { recursive: true });
   cpSync(source, target, { recursive: true, force: true });

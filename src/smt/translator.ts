@@ -1,5 +1,5 @@
 // SMT-LIB 2.6 translator — converts checked AST to formula strings
-import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, ResourceDecl } from '../ast.ts';
+import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, ResourceDecl, DiPolicyDecl } from '../ast.ts';
 import { BASE_SMT_DECLARATIONS } from '../stdlib/topology.ts';
 import { expandInvariantRules } from '../invariant-selectors.ts';
 
@@ -14,6 +14,7 @@ export function translate(program: Program): string[] {
   const resources: ResourceDecl[] = [];
   const components: ComponentDecl[] = [];
   const invariants: InvariantDecl[] = [];
+  const diPolicies: DiPolicyDecl[] = [];
   const enums: EnumDecl[] = [];
   const dataTypes: DataDecl[] = [];
 
@@ -22,6 +23,7 @@ export function translate(program: Program): string[] {
     else if (d.kind === 'ResourceDecl') resources.push(d);
     else if (d.kind === 'ComponentDecl') components.push(d);
     else if (d.kind === 'InvariantDecl') invariants.push(d);
+    else if (d.kind === 'DiPolicyDecl') diPolicies.push(d);
     else if (d.kind === 'EnumDecl') enums.push(d);
     else if (d.kind === 'DataDecl') dataTypes.push(d);
   }
@@ -111,6 +113,34 @@ export function translate(program: Program): string[] {
       // no extractor currently produces Encrypted=false evidence.
       // These rules are documented in AGENTS.md as advisory invariants.
       // Future: network config / TLS certificate extractors could enable enforcement.
+    }
+    stmts.push('');
+  }
+
+  if (diPolicies.length > 0) {
+    stmts.push('; === dependency injection policy rules ===');
+    const services = new Set<string>();
+    for (const policy of diPolicies) {
+      for (const rule of policy.rules) {
+        if (rule.kind === 'DenyResolve') {
+          services.add(rule.service);
+        }
+      }
+    }
+    for (const service of services) {
+      stmts.push(`(declare-const ${smtId(service)} ServiceType)`);
+    }
+    for (const policy of diPolicies) {
+      stmts.push(`; --- ${policy.name} ---`);
+      for (const rule of policy.rules) {
+        if (rule.kind === 'DenyInject') {
+          stmts.push(`(assert (=> (Injects ${smtId(rule.from)} ${smtId(rule.to)}) false))`);
+        } else if (rule.kind === 'DenyLifetime') {
+          stmts.push(`(assert (=> (LifetimeDepends Lifetime__${rule.from} Lifetime__${rule.to}) false))`);
+        } else if (rule.kind === 'DenyResolve') {
+          stmts.push(`(assert (=> (Resolves ${smtId(rule.from)} ${smtId(rule.service)}) false))`);
+        }
+      }
     }
     stmts.push('');
   }

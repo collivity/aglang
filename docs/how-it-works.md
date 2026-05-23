@@ -90,7 +90,7 @@ This is what happens the moment an agent or human types `git commit`. The Arch r
               │
         ┌─────┴──────┐
         ▼            ▼
-     UNSAT           SAT
+       SAT          UNSAT
   (no violation)  (violation found)
         │            │
         ▼            ▼
@@ -101,7 +101,7 @@ This is what happens the moment an agent or human types `git commit`. The Arch r
 
 | Level | Used for | Meaning |
 |---|---|---|
-| `formal_z3` | `deny flow`, `deny dataflow`, `change_policy` | Facts are asserted into SMT and checked by Z3. |
+| `formal_z3` | `deny flow`, `deny dataflow`, `di_policy`, `change_policy` | Facts are asserted into SMT and checked by Z3. |
 | `deterministic_policy` | `contract`, `workflow_policy` | Extracted facts are checked by deterministic code paths with exact diagnostics. |
 | `advisory` | `machine`, `permission`, `require encryption` | Rules are emitted to docs/agent context, but do not block yet. |
 
@@ -119,7 +119,7 @@ Each changed file is passed through a lightweight **language-specific extractor*
 |---|---|
 | **TypeScript / JS** | `mongoose`, `pg`, `kafkajs`, `ioredis`, `@aws-sdk/client-s3`, Express/NestJS routes |
 | **Python** | `psycopg2`, `pymongo`, `redis`, `sqlalchemy`, `boto3`, FastAPI/Flask routes |
-| **C#** | `MongoClient`, `DbContext`, `IConnectionMultiplexer`, ASP.NET MVC routes |
+| **C#** | Constructor injection, DI lifetimes, `IServiceProvider`, `MongoClient`, `DbContext`, `IConnectionMultiplexer`, ASP.NET MVC routes |
 | **Go** | `lib/pq`, `mongo-driver`, `go-redis`, Gin/chi/Fiber routes |
 | **Rust** | `sqlx`, `mongodb`, `redis`, `rdkafka`, Actix-web/Axum routes |
 | **Java** | `JpaRepository`, `MongoRepository`, `KafkaTemplate`, Spring MVC routes |
@@ -140,6 +140,14 @@ Each `FlowFact` is serialised into a dynamic SMT-LIB assertion:
 (assert (Flow PublicGateway LedgerDatabase))
 ```
 
+For dependency-injection policies, C# constructor/lifetime/service-locator facts are serialized into predicates such as:
+
+```smt2
+(assert (Injects Views BleManager))
+(assert (LifetimeDepends Lifetime__singleton Lifetime__scoped))
+(assert (Resolves Application IServiceProvider))
+```
+
 ### Step 4 — Z3 Checks the Combined State
 
 The Arch runtime opens an in-memory Z3 context and loads **two things**:
@@ -149,8 +157,8 @@ The Arch runtime opens an in-memory Z3 context and loads **two things**:
 
 Then it runs `solver.check()`:
 
-- **UNSAT** — the assertions _cannot_ logically produce a violation. The commit passes (`exit 0`).
-- **SAT** — a violation _is_ mathematically possible. The commit is blocked.
+- **SAT** — the extracted facts do not contradict any hard rule. The check passes (`exit 0`).
+- **UNSAT** — at least one extracted fact contradicts a hard rule. The check is blocked with the conflicting assertions as proof.
 
 ### Step 5 — Human-Readable Diagnostics
 

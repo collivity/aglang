@@ -8,7 +8,7 @@ import type { ChangedComponent } from './diff-parser.ts';
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
 import type { ExtractionStrategy, ExtractorPlugin, FlowFact, GraphFact } from '../analyzers/plugin.ts';
 import { discoverPlugins } from '../analyzers/plugin.ts';
-import { csharpPlugin } from '../analyzers/csharp.ts';
+import { csharpPlugin, extractDiFactsFromCSharp, type DiFact } from '../analyzers/csharp.ts';
 import { kotlinPlugin } from '../analyzers/kotlin.ts';
 import { pythonPlugin } from '../analyzers/python.ts';
 import { goPlugin } from '../analyzers/golang.ts';
@@ -67,10 +67,13 @@ export interface DeltaResult {
   graphFacts: GraphFact[];
   blockingFacts: FlowFact[];   // confidence=definite (or probable in strict mode)
   blockingDataFlowFacts: DataFlowFact[];
+  diFacts: DiFact[];
+  blockingDiFacts: DiFact[];
   warningFacts: FlowFact[];    // confidence=probable (non-strict)
   smtAssertions: string[];     // only for blocking facts
   // Maps "from::to" → the exact SMT assertion string fed to Z3
   factSmtMap: Map<string, string>;
+  diFactSmtMap: Map<string, string>;
   graphReport: GraphReport;
   unresolvedTargets: string[];
   graphWarnings: Array<{ graphFactId: string; message: string }>;
@@ -80,6 +83,31 @@ export interface DeltaResult {
 
 function smtId(name: string): string {
   return name.replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
+function diFactMatchesPolicy(fact: DiFact, artifact: ArchitectureArtifact): boolean {
+  return (artifact.diPolicies ?? []).some(policy => policy.rules.some(rule => {
+    if (fact.kind === 'inject' && rule.kind === 'DenyInject') {
+      return rule.from === fact.from && rule.to === fact.to;
+    }
+    if (fact.kind === 'lifetime_dependency' && rule.kind === 'DenyLifetime') {
+      return rule.from === fact.fromLifetime && rule.to === fact.toLifetime;
+    }
+    if (fact.kind === 'resolve' && rule.kind === 'DenyResolve') {
+      return rule.from === fact.from && rule.service === fact.service;
+    }
+    return false;
+  }));
+}
+
+function buildDiAssertion(fact: DiFact): string {
+  if (fact.kind === 'inject') {
+    return `(assert (Injects ${smtId(fact.from)} ${smtId(fact.to)}))`;
+  }
+  if (fact.kind === 'lifetime_dependency') {
+    return `(assert (LifetimeDepends Lifetime__${fact.fromLifetime} Lifetime__${fact.toLifetime}))`;
+  }
+  return `(assert (Resolves ${smtId(fact.from)} ${smtId(fact.service)}))`;
 }
 
 function inferDataFlowFacts(flowFacts: FlowFact[], artifact: ArchitectureArtifact): DataFlowFact[] {
@@ -139,6 +167,7 @@ export async function generateDeltaAssertions(
     : null;
 
   const allGraphFacts: GraphFact[] = [];
+  const csharpInputs: Array<{ componentName: string; files: string[] }> = [];
   let cacheHits = 0;
   const concurrency = cpus().length || 4;
   let graphFactSequence = 0;
@@ -153,6 +182,10 @@ export async function generateDeltaAssertions(
         bucket.push(f);
         byExt.set(ext, bucket);
       }
+    }
+    const csFiles = files.filter(f => ['.cs', '.csx'].includes(extname(f).toLowerCase()));
+    if (csFiles.length > 0) {
+      csharpInputs.push({ componentName, files: csFiles });
     }
 
     await Promise.all(
@@ -213,6 +246,20 @@ export async function generateDeltaAssertions(
     )),
   );
   const dataFlowAssertions = blockingDataFlowFacts.map(f => `(assert (DataFlow ${smtId(f.data)} ${smtId(f.to)}))`);
+  const diFacts = extractDiFactsFromCSharp(csharpInputs, artifact.mappings);
+  const blockingDiFacts = diFacts.filter(f => diFactMatchesPolicy(f, artifact));
+  const diFactSmtMap = new Map<string, string>();
+  const diAssertions = blockingDiFacts.map(f => {
+    const assertion = buildDiAssertion(f);
+    if (f.kind === 'resolve') {
+      diFactSmtMap.set(`${f.kind}:${f.from}::${f.service}`, assertion);
+    } else if (f.kind === 'inject') {
+      diFactSmtMap.set(`${f.kind}:${f.from}::${f.to}`, assertion);
+    } else {
+      diFactSmtMap.set(`${f.kind}:${f.fromLifetime}::${f.toLifetime}:${f.from}::${f.to}`, assertion);
+    }
+    return assertion;
+  });
 
   return {
     facts: projection.flowFacts,
@@ -220,9 +267,12 @@ export async function generateDeltaAssertions(
     graphFacts: uniqueGraphFacts,
     blockingFacts: projection.blockingFacts,
     blockingDataFlowFacts,
+    diFacts,
+    blockingDiFacts,
     warningFacts: projection.warningFacts,
-    smtAssertions: [...projection.smtAssertions, ...dataFlowAssertions],
+    smtAssertions: [...projection.smtAssertions, ...dataFlowAssertions, ...diAssertions],
     factSmtMap: projection.factSmtMap,
+    diFactSmtMap,
     graphReport,
     unresolvedTargets: projection.unresolvedTargets,
     graphWarnings: projection.warnings,

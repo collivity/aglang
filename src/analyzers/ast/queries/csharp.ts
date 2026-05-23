@@ -1,5 +1,5 @@
 // Tree-sitter S-expression queries for C# (.cs) files.
-// Covers: attribute annotations, constructor parameters, field declarations, using directives.
+// Covers: attribute annotations, constructor parameters, field/property declarations, using directives.
 
 // ── Using directives ──────────────────────────────────────────────────────────
 // using MongoDB.Driver;  using Microsoft.EntityFrameworkCore;
@@ -49,6 +49,18 @@ export const FIELD_QUERY = `
       (generic_name name: (identifier) @field_type)
       (nullable_type type: (identifier) @field_type)
     ]))
+` as const;
+
+// ── Auto-properties ──────────────────────────────────────────────────────────
+// public DbSet<User> Users { get; set; }
+export const PROPERTY_QUERY = `
+(property_declaration
+  type: [
+    (identifier) @property_type
+    (generic_name name: (identifier) @property_type)
+    (nullable_type type: (identifier) @property_type)
+    (qualified_name right: (identifier) @property_type)
+  ])
 ` as const;
 
 // ── Object creation expressions ───────────────────────────────────────────────

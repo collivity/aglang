@@ -11,6 +11,7 @@ aglang declarations have explicit enforcement levels:
 | `invariant deny flow` | `formal_z3` | Extracted flow facts are checked against SMT-LIB constraints in Z3. |
 | `invariant deny dataflow` | `formal_z3` | Dataflow facts inferred from handled data and extracted flows are checked in Z3. |
 | `change_policy` | `formal_z3` | Touched-component facts are checked against SMT-LIB implication rules in Z3. |
+| `di_policy` | `formal_z3` | Definite constructor-injection, lifetime, and service-locator facts are checked in Z3. |
 | `contract` | `deterministic_policy` | Route facts are compared against declared implements/consumes contracts. |
 | `workflow_policy` | `deterministic_policy` | GitHub Actions facts are checked for release, deploy, publish, permission, and step-order rules. |
 | `invariant require encryption` | `advisory` | Reported as a warning because static extraction does not yet prove encryption. |
@@ -171,6 +172,52 @@ change_policy DocsFreshness {
 Semantics: if any staged file maps to the trigger component, at least one staged file must map to the required component. The gate emits Z3-backed `change_violations[]` when the implication cannot be satisfied.
 
 Change policies prove that declared surfaces changed together; they do not prove that prose is semantically complete.
+
+## Dependency Injection Policy
+
+`di_policy` blocks enforce dependency injection boundaries when the runtime can extract definite DI facts. The built-in C# extractor currently detects constructor injection, `AddSingleton` / `AddScoped` / `AddTransient` registrations, and `IServiceProvider` / `GetRequiredService<T>` service-locator usage.
+
+```ag
+component Views {
+  runs_on: app_runtime
+  paths: "src/**/Views/**/*.xaml.cs"
+}
+
+component ViewModels {
+  runs_on: app_runtime
+  paths: "src/**/ViewModels/**/*.cs"
+}
+
+component BleManager {
+  runs_on: app_runtime
+  paths: "src/**/Infrastructure/Bluetooth/**/*.cs"
+}
+
+component Repositories {
+  runs_on: app_runtime
+  paths: "src/**/Infrastructure/Persistence/**/*.cs"
+}
+
+component Application {
+  runs_on: app_runtime
+  paths: "src/**/Application/**/*.cs"
+}
+
+di_policy DependencyInjection {
+  deny inject Views -> BleManager
+  deny inject ViewModels -> Repositories
+  deny lifetime singleton -> scoped
+  deny resolve IServiceProvider from Application
+}
+```
+
+Semantics:
+
+- `deny inject A -> B` blocks a constructor dependency from component `A` to component `B`.
+- `deny lifetime singleton -> scoped` blocks a singleton-registered service depending on a scoped-registered service.
+- `deny resolve IServiceProvider from Application` blocks service-locator access from `Application`.
+
+Each blocking DI fact becomes an SMT assertion such as `(assert (Injects Views BleManager))` or `(assert (LifetimeDepends Lifetime__singleton Lifetime__scoped))`. The compiled `di_policy` contributes the opposite implication, so Z3 returns UNSAT and the JSON verdict reports a `di_violation`.
 
 ## State Machine
 

@@ -1,5 +1,5 @@
 // Type checker — validates the AST against the stdlib ontology (multi-pass)
-import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, StateMachineDecl, PermissionDecl, ContractDecl, WorkflowPolicyDecl, ChangePolicyDecl, ResourceDecl, InvariantEndpoint } from './ast.ts';
+import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, StateMachineDecl, PermissionDecl, ContractDecl, WorkflowPolicyDecl, ChangePolicyDecl, ResourceDecl, InvariantEndpoint, DiPolicyDecl } from './ast.ts';
 import { VALID_NODE_TYPES, VALID_RESOURCE_TYPES, VALID_COMPONENT_ROLES, VALID_TRUST_VALUES, VALID_CONNECTIVITY_VALUES, VALID_PROTOCOL_VALUES, VALID_AUTH_VALUES } from './stdlib/topology.ts';
 
 export interface CheckError {
@@ -64,6 +64,7 @@ export function check(program: Program): CheckError[] {
   const declaredPermissions = new Map<string, PermissionDecl>();
   const declaredContracts = new Map<string, ContractDecl>();
   const declaredWorkflowPolicies = new Map<string, WorkflowPolicyDecl>();
+  const declaredDiPolicies = new Map<string, DiPolicyDecl>();
   const declaredChangePolicies = new Map<string, ChangePolicyDecl>();
 
   for (const decl of program.declarations) {
@@ -110,6 +111,10 @@ export function check(program: Program): CheckError[] {
       case 'WorkflowPolicyDecl':
         if (declaredWorkflowPolicies.has(decl.name)) errors.push({ message: `Duplicate workflow policy name '${decl.name}'` });
         else declaredWorkflowPolicies.set(decl.name, decl);
+        break;
+      case 'DiPolicyDecl':
+        if (declaredDiPolicies.has(decl.name)) errors.push({ message: `Duplicate di_policy name '${decl.name}'` });
+        else declaredDiPolicies.set(decl.name, decl);
         break;
       case 'ChangePolicyDecl':
         if (declaredChangePolicies.has(decl.name)) errors.push({ message: `Duplicate change policy name '${decl.name}'` });
@@ -366,6 +371,22 @@ export function check(program: Program): CheckError[] {
         }
         if (rule.kind === 'BeforeRule' && !declaredComponents.has(rule.workflow)) {
           errors.push({ message: `workflow_policy '${decl.name}': unknown workflow component '${rule.workflow}'` });
+        }
+      }
+    }
+
+    if (decl.kind === 'DiPolicyDecl') {
+      for (const rule of decl.rules) {
+        if (rule.kind === 'DenyInject') {
+          if (!declaredComponents.has(rule.from)) {
+            errors.push({ message: `di_policy '${decl.name}': unknown source component '${rule.from}'` });
+          }
+          if (!declaredComponents.has(rule.to)) {
+            errors.push({ message: `di_policy '${decl.name}': unknown target component '${rule.to}'` });
+          }
+        }
+        if (rule.kind === 'DenyResolve' && !declaredComponents.has(rule.from)) {
+          errors.push({ message: `di_policy '${decl.name}': unknown source component '${rule.from}'` });
         }
       }
     }

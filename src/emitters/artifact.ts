@@ -16,6 +16,11 @@ export type ArtifactInvariantRule =
   | { kind: 'RequireEncryption'; from: string; to: string }
   | { kind: 'DenyDataFlow'; data: string; to: string };
 
+export type ArtifactDiPolicyRule =
+  | { kind: 'DenyInject'; from: string; to: string }
+  | { kind: 'DenyLifetime'; from: 'singleton' | 'scoped' | 'transient'; to: 'singleton' | 'scoped' | 'transient' }
+  | { kind: 'DenyResolve'; service: string; from: string };
+
 export interface ArchitectureArtifact {
   schemaVersion: number;
   sourcePath: string;
@@ -110,6 +115,11 @@ export interface ArchitectureArtifact {
         }
     >;
   }>;
+  // Dependency injection policies (Z3-backed when extractor emits definite DI facts)
+  diPolicies: Array<{
+    name: string;
+    rules: ArtifactDiPolicyRule[];
+  }>;
   // Change coupling policies (evaluated by the change gate)
   changePolicies: Array<{
     name: string;
@@ -140,6 +150,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   const repos: ArchitectureArtifact['repos'] = [];
   const componentRepos: Record<string, string> = {};
   const workflowPolicies: ArchitectureArtifact['workflowPolicies'] = [];
+  const diPolicies: ArchitectureArtifact['diPolicies'] = [];
   const changePolicies: ArchitectureArtifact['changePolicies'] = [];
 
   for (const decl of program.declarations) {
@@ -264,6 +275,12 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
         rules: decl.rules.map(rule => ({ ...rule })),
       });
     }
+    if (decl.kind === 'DiPolicyDecl') {
+      diPolicies.push({
+        name: decl.name,
+        rules: decl.rules.map(rule => ({ ...rule })),
+      });
+    }
     if (decl.kind === 'ChangePolicyDecl') {
       changePolicies.push({
         name: decl.name,
@@ -273,7 +290,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   }
 
   return {
-    schemaVersion: 10,
+    schemaVersion: 11,
     sourcePath,
     enforcement: [
       {
@@ -290,6 +307,11 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
         declaration: 'change_policy',
         level: 'formal_z3',
         mechanism: 'Touched-component facts are asserted against SMT-LIB implication rules.',
+      },
+      {
+        declaration: 'di_policy',
+        level: 'formal_z3',
+        mechanism: 'Constructor-injection, lifetime, and service-locator facts are asserted against SMT-LIB constraints.',
       },
       {
         declaration: 'contract',
@@ -334,6 +356,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
     repos,
     componentRepos,
     workflowPolicies,
+    diPolicies,
     changePolicies,
   };
 }
