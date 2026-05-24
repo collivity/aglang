@@ -585,15 +585,20 @@ node build/aglc.js emit-context --arch examples/architecture.o
 
 ---
 
-## What's left before publishing
+## Protocol roadmap
 
-The codebase is production-grade in design but still a pre-release (`0.1.0`). What to do before `npm publish`:
+The next step for aglang is not more syntax. It is turning the tool into a stable protocol that agents, subagents, editors, and CI systems can all consume the same way.
 
-1. **Set a GitHub remote** — `git remote add origin https://github.com/your-org/aglang`
-2. **Add `"repository"` to `package.json`** — required by npm
-3. **Benchmark extraction accuracy** — measure false-positive rate against real codebases
-4. **LSP / VS Code extension** — `.ag` syntax highlighting and autocomplete
-5. **Semantic extraction** (stretch goal) — replace regex with Roslyn (C#) / tsc API (TS) for deeper accuracy
+- **`v0.3` - Stable machine interfaces**
+  Freeze the JSON verdict schema, formalize `architecture.o`, add capability discovery, tighten TS/JS extraction, and publish the default agent behavior contract.
+- **`v0.4` - Multi-agent integration**
+  Ship an official MCP server, add protocol-style operations such as `check_file` and `explain_violation`, and improve shared task context for subagents.
+- **`v0.5` - Easier policy authoring**
+  Add better starter generation, stack-specific templates, stronger diagnostics, and better editor support.
+- **`v1.0` - Protocol status**
+  Publish a standalone protocol spec, guarantee compatibility for artifacts and verdict schemas, add reference integrations, and ship conformance tests.
+
+The detailed milestone plan lives in [docs/roadmap.md](docs/roadmap.md). The repository also includes an issue template for turning milestone items into tracked epics.
 
 ---
 

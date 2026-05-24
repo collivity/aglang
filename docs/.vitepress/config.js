@@ -1,6 +1,6 @@
 module.exports = {
   title: 'aglang',
-  description: 'Architecture Ground Language — agent-facing architecture validation for continuous coding feedback and Z3-backed enforcement.',
+  description: 'Architecture guardrails for coding agents, with stable machine-readable artifacts and solver-backed enforcement.',
   base: '/aglang/',
 
   themeConfig: {
@@ -10,6 +10,7 @@ module.exports = {
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'How it works', link: '/how-it-works' },
+      { text: 'Roadmap', link: '/roadmap' },
       { text: 'Examples', link: '/examples' },
       { text: 'CLI Reference', link: '/cli/reference' },
       { text: 'Extractors', link: '/extractors' },
@@ -23,6 +24,7 @@ module.exports = {
         items: [
           { text: 'What is aglang?', link: '/guide/getting-started' },
           { text: 'Quick Setup (aglc add)', link: '/guide/generate' },
+          { text: 'Roadmap', link: '/roadmap' },
           { text: 'Examples', link: '/examples' },
           { text: 'How it works ->', link: '/how-it-works' },
         ]
@@ -57,7 +59,7 @@ module.exports = {
     ],
 
     footer: {
-      message: 'Released under the ISC License.',
+      message: 'Released under the Apache-2.0 License.',
       copyright: 'Copyright © 2026 Collivity'
     },
 
@@ -74,7 +76,7 @@ module.exports = {
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/aglang/logo.svg' }],
     ['meta', { name: 'og:type', content: 'website' }],
-    ['meta', { name: 'og:title', content: 'aglang — Architecture Validation for Coding Agents' }],
-    ['meta', { name: 'og:description', content: 'Give agents a live interface to architecture rules with continuous validation and Z3-backed enforcement.' }],
+    ['meta', { name: 'og:title', content: 'aglang — Architecture Guardrails for Coding Agents' }],
+    ['meta', { name: 'og:description', content: 'Give agents a live interface to architecture rules with stable machine-readable artifacts and solver-backed enforcement.' }],
   ]
 };
