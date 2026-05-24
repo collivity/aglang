@@ -599,4 +599,4 @@ The codebase is production-grade in design but still a pre-release (`0.1.0`). Wh
 
 ## License
 
-ISC — see [LICENSE](https://github.com/collivity/aglang/blob/master/LICENSE).
+Apache-2.0 — see [LICENSE](https://github.com/collivity/aglang/blob/master/LICENSE).

@@ -101,7 +101,7 @@ Ask before changing architecture intent, including component boundaries, file gl
 
 Before release or package metadata changes:
 
-1. Keep `LICENSE`, root `package.json`, README license text, and extension package metadata consistent.
+1. Keep `LICENSE`, root `package.json`, README license text, and extension package metadata consistent. For this repo, the root license is `Apache-2.0`.
 2. Verify package contents with `npm pack --dry-run --json`.
 3. Run `npm run typecheck`, `npm run build`, `npm test`, and `npm run arch:check`.
 4. For docs changes, run `npm run docs:build`.

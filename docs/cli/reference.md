@@ -39,7 +39,7 @@ Scan a project directory and auto-generate a starter `.ag` spec.
 aglc generate [projectRoot] [--out <file.ag>] [--name <n>]
 ```
 
-Detects: `package.json`, `.csproj`, `go.mod`, `Cargo.toml`, `build.gradle`, `Podfile`, `Package.swift`, `pyproject.toml`, `requirements.txt`
+Detects: `package.json`, `.csproj`, `go.mod`, `Cargo.toml`, `build.gradle`, `Podfile`, `Package.swift`, `pyproject.toml`, `requirements.txt`, and package metadata such as the declared license
 
 ---
 
