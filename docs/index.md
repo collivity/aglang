@@ -4,7 +4,7 @@ layout: home
 hero:
   name: aglang
   text: Checked Architecture For Agents
-  tagline: Write architecture intent once in a `.ag` spec, then let agents, subagents, and git hooks check real code against it while work is still in progress.
+  tagline: "Write architecture intent once in a `.ag` spec, then let agents, subagents, and git hooks check real code against it while work is still in progress."
   image:
     src: /hero.svg
     alt: aglang architecture pipeline diagram
@@ -25,27 +25,27 @@ hero:
 features:
   - icon: ✅
     title: Checks Real Code
-    details: aglang compiles a reviewed `.ag` spec into `architecture.o`, extracts facts from the codebase, and checks those facts against declared rules.
+    details: "aglang compiles a reviewed `.ag` spec into `architecture.o`, extracts facts from the codebase, and checks those facts against declared rules."
 
   - icon: 🤖
     title: Useful For Agents And Subagents
-    details: The spec becomes shared truth across workers, which reduces architectural drift when parent agents and subagents operate with partial context.
+    details: "The spec becomes shared truth across workers, which reduces architectural drift when parent agents and subagents operate with partial context."
 
   - icon: 🔁
     title: Works During Coding
-    details: Agents can run `aglc check-file` during focused edits and `aglc check --all` before finishing, instead of waiting until commit time.
+    details: "Agents can run `aglc check-file` during focused edits and `aglc check --all` before finishing, instead of waiting until commit time."
 
   - icon: 🧩
     title: Enforces Boundaries
-    details: Today the strongest built-in checks are flow, reachability, dataflow, trust, DI, contracts, workflow policies, and change policies.
+    details: "Today the strongest built-in checks are flow, reachability, dataflow, trust, DI, contracts, workflow policies, and change policies."
 
   - icon: 📦
     title: Bootstraps Existing Repos
-    details: `aglc add` and `aglc generate` can create a starter spec, but the best results usually come from reviewing and refining that draft with a human or agent.
+    details: "`aglc add` and `aglc generate` can create a starter spec, but the best results usually come from reviewing and refining that draft with a human or agent."
 
   - icon: 🔌
     title: Extraction Is Extensible
-    details: Built-in extractors cover multiple languages now, and the plugin protocol lets teams add stronger repo-specific extraction over time.
+    details: "Built-in extractors cover multiple languages now, and the plugin protocol lets teams add stronger repo-specific extraction over time."
 ---
 
 ## What aglang is
