@@ -72,13 +72,13 @@ Your codebase                   Your .ag spec
      │                               │
      └──────────── Z3 Solver ────────┘
                         │
-               UNSAT → commit passes ✓
-               SAT   → commit rejected with proof ✗
+               SAT   → commit passes ✓
+               UNSAT → commit rejected with proof ✗
 ```
 
 1. **You write** an `architecture.ag` file describing components and invariants
 2. **`aglc compile`** translates it to SMT-LIB and emits `architecture.o`
-3. **A pre-commit hook** runs Z3 against every staged diff — violations are blocked before they land
+3. **A pre-commit hook** checks extracted code facts against the compiled rules — `SAT` means the facts are consistent with the architecture, and `UNSAT` means a violation was proven
 
 ---
 
