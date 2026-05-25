@@ -4,7 +4,7 @@ layout: home
 hero:
   name: aglang
   text: Architecture Guardrails for Coding Agents
-  tagline: Give agents a live interface to your architecture rules, so they can validate work in progress while coding and still get solver-backed enforcement before commits land.
+  tagline: Give agents and subagents a live interface to your architecture rules, so they can validate work in progress while coding, reduce architectural drift, and still get solver-backed enforcement before commits land.
   image:
     src: /hero.svg
     alt: aglang architecture pipeline diagram
@@ -13,19 +13,20 @@ hero:
       text: Get Started →
       link: /guide/getting-started
     - theme: alt
-      text: How it works
-      link: /how-it-works
-    - theme: alt
-      text: Agent protocol
-      link: /protocol
-    - theme: alt
       text: Examples
       link: /examples
+    - theme: alt
+      text: How it works
+      link: /how-it-works
     - theme: alt
       text: View on GitHub
       link: https://github.com/collivity/aglang
 
 features:
+  - icon: 🧭
+    title: Anti-drift Shared Truth
+    details: Encode architecture intent once in a checked .ag spec so parent agents and subagents can stay aligned without carrying the full system structure in prompt memory.
+
   - icon: 🤖
     title: Packaged Agent Skill
     details: Install the aglang Codex skill so agents know when to read AGENTS.md, run aglc checks, and treat architecture verdicts as coding feedback.
@@ -111,4 +112,4 @@ Your .ag spec                 Your codebase (file or project)
 
 Agents use the same interface while code is still in progress; pre-commit hooks and CI use it as the final enforcement point. The solver is deterministic math — no LLM guesses. [Full pipeline walkthrough →](./how-it-works)
 
-If you want aglang to become a shared service for parent agents and subagents, the current protocol draft is in [protocol.md](./protocol.md).
+If you want aglang to become a shared service for parent agents and subagents, the current protocol draft is in [protocol.md](./protocol.md). The roadmap remains available for project direction, but examples should be the primary entry point for evaluating real usage.

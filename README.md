@@ -4,6 +4,8 @@
 
 Designed as an **agent-first guardrail**: agents read `AGENTS.md`, validate focused edits with `aglc check-file --json`, validate the full guarded project with `aglc check --all --json`, and ask before changing `.ag` architecture source. Under the hood, hard rules are compiled into solver-backed constraints so violations come with precise proof details instead of vague warnings.
 
+aglang is also an anti-drift layer for parent agents and subagents: once architecture intent is encoded in a checked `.ag` spec, workers do not need to keep the whole system in prompt memory to stay aligned with the same boundaries.
+
 ---
 
 ## How it works
@@ -107,11 +109,12 @@ For broad query health against a real repo, run `npx tsx scripts/tree-sitter-cor
 ### Option A — Agent bootstrap (recommended for existing codebases)
 
 ```bash
-# 1. Scan your project and generate a starter spec (one-shot setup)
+# 1. Scan your project and generate a deep starter spec (one-shot setup)
 npx @collivity/aglang add ./my-project --name MyProject
 
-# The add command runs: generate → compile → install git hook → emit skill.json
-# Review my-project/architecture.ag and add invariant rules, then re-run:
+# The add command runs: deep generate → compile → install git hook → emit skill.json
+# Use a planning/design session to review the generated architecture,
+# refine invariants, then compile the approved change:
 aglc compile my-project/architecture.ag
 ```
 
@@ -183,7 +186,7 @@ Commit aborted.
 | **Permissions** | ✅ | Declare role-based access rules per state |
 | **Data & enums** | ✅ | Define domain types for documentation |
 | **Multi-file specs** | ✅ | Split large specs with `import "other.ag"` — shared DAG imports are deduplicated |
-| **`aglc generate`** | ✅ | Scan any codebase and auto-emit a starter `.ag` spec (agent bootstrap) |
+| **`aglc generate`** | ✅ | Scan any codebase and auto-emit a deep starter `.ag` spec with imported sub-specs when needed |
 | **Import OpenAPI** | ✅ | `aglc import-openapi swagger.json` → `.ag` contract blocks |
 | **Import Terraform** | ✅ | `aglc import-tf main.tf` → `.ag` node declarations |
 | **Plugin protocol** | ✅ | Extend extraction via npm packages implementing the `aglc-plugin` protocol |
@@ -437,7 +440,7 @@ import "relative/path/other.ag"
 | Command | Description |
 |---|---|
 | `aglc compile <file.ag>` | Compile spec → `architecture.o` |
-| `aglc generate [dir] [--out <file.ag>] [--name <n>]` | Scan codebase → starter `.ag` spec |
+| `aglc generate [dir] [--out <file.ag>] [--name <n>] [--max-depth <n>] [--single-file]` | Scan codebase → deep starter `.ag` spec |
 | `aglc check --arch <arch.o> --project <dir>` | Check staged git diff (used by hook) |
 | `aglc check-file --arch <arch.o> --file <path>` | Check a single file (dev/debug) |
 | `aglc emit-context --arch <arch.o> [--out <path>]` | Write `AGENTS.md` (agent context brief) |

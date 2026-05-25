@@ -2,7 +2,7 @@
 // aglc — Architecture Ground Language Compiler CLI
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, cpSync } from 'fs';
-import { resolve, dirname, basename } from 'path';
+import { resolve, dirname, basename, join } from 'path';
 import { fileURLToPath } from 'url';
 import { check } from './checker.ts';
 import { emitArtifact, writeArtifact, loadArtifact } from './emitters/artifact.ts';
@@ -36,9 +36,9 @@ function usage() {
 aglc — Architecture Ground Language Compiler
 
 Commands:
-  aglc add [projectRoot] [--name <n>] [--out <file.ag>]     One-shot agent setup: generate → compile → hook → skill.json
+  aglc add [projectRoot] [--name <n>] [--out <file.ag>] [--max-depth <n>] [--single-file]     One-shot agent setup: generate → compile → hook → skill.json
   aglc compile <file.ag> [--out <arch.o>]                    Compile .ag spec → architecture.o
-  aglc generate [projectRoot] [--out <file.ag>]             Scan codebase → auto-generate starter .ag spec
+  aglc generate [projectRoot] [--out <file.ag>] [--max-depth <n>] [--single-file]  Scan codebase → auto-generate starter .ag spec
   aglc emit-context --arch <arch.o> [--out <path>]          Emit AGENTS.md for AI agents
   aglc emit-skill   --arch <arch.o> [--out <path>]          Emit skill.json manifest for AI agents
   aglc install-agent-skill [--path <skills-dir>]            Install packaged aglang Codex skill for local agents
@@ -51,6 +51,8 @@ Commands:
 
 Flags:
   --json      Output machine-readable JSON to stdout; progress logs go to stderr
+  --max-depth       Maximum recursive component synthesis depth for generate/add (default: 3)
+  --single-file     Inline generated components instead of emitting imported sub-specs
   --debug-extractors   Include extractor trace output and fallback reasons
   --require-ast        Fail when an AST-capable extractor falls back to regex for a detected fact
   --dump-smt           Write the full SMT-LIB script fed to Z3 → examples/debug.smt2
@@ -713,15 +715,20 @@ async function addProject(projectRoot: string, opts: { name?: string; out?: stri
   const skillOut = resolve(absProject, 'skill.json');
 
   // 1. Generate starter .ag spec
-  log(`[aglc add] Scanning ${absProject} for project manifests...`);
-  const result = await generateSpec(absProject, { projectName: opts.name });
+  log(`[aglc add] Scanning ${absProject} for source roots and extractor facts...`);
+  const result = await generateSpec(absProject, {
+    projectName: opts.name,
+    maxDepth: getNumberArg('--max-depth') ?? 3,
+    singleFile: args.includes('--single-file'),
+  });
 
   if (result.warnings.length > 0) {
     for (const w of result.warnings) log(`  ⚠ ${w}`);
   }
 
-  writeFileSync(agOut, result.ag, 'utf8');
+  writeGeneratedSpecFiles(dirname(agOut), basename(agOut), result.files);
   log(`  ✓ Generated spec → ${agOut}`);
+  if (result.files.length > 1) log(`    Imported sub-specs: ${result.files.length - 1}`);
   log(`    Components: ${result.components} | Infra nodes: ${result.infrastructureNodes} | Contracts: ${result.contracts}`);
 
   // 2. Compile → architecture.o
@@ -770,11 +777,12 @@ async function addProject(projectRoot: string, opts: { name?: string; out?: stri
 ║  Skill:      ${skillOut.padEnd(43)} ║
 ╠══════════════════════════════════════════════════════════╣
 ║  Next steps:                                             ║
-║  1. Open ${agOut.padEnd(47)} ║
-║     Add 'invariant' blocks to enforce architectural rules ║
-║  2. Re-compile after editing:                            ║
+║  1. Use plan mode to review ${agOut.padEnd(31)} ║
+║     and refine architecture intent with the agent        ║
+║  2. Add or adjust invariants through that guided session ║
+║  3. Re-compile approved changes:                         ║
 ║     aglc compile ${agOut.padEnd(39)} ║
-║  3. Every git commit is now checked automatically        ║
+║  4. Every git commit is now checked automatically        ║
 ╚══════════════════════════════════════════════════════════╝`);
 }
 
@@ -782,6 +790,23 @@ async function addProject(projectRoot: string, opts: { name?: string; out?: stri
 function getArg(flag: string): string | undefined {
   const idx = args.indexOf(flag);
   return idx >= 0 ? args[idx + 1] : undefined;
+}
+
+function getNumberArg(flag: string): number | undefined {
+  const value = getArg(flag);
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function writeGeneratedSpecFiles(outDir: string, rootFileName: string, files: Array<{ path: string; content: string }>) {
+  for (const file of files) {
+    const target = file.path === rootFileName
+      ? join(outDir, rootFileName)
+      : join(outDir, file.path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, file.content, 'utf8');
+  }
 }
 
 (async () => {
@@ -848,11 +873,16 @@ function getArg(flag: string): string | undefined {
     const projectRoot = resolve(args[1] ?? '.');
     const outPath = getArg('--out');
     const projectName = getArg('--name');
-    const result = await generateSpec(projectRoot, { projectName });
+    const result = await generateSpec(projectRoot, {
+      projectName,
+      maxDepth: getNumberArg('--max-depth') ?? 3,
+      singleFile: args.includes('--single-file') || !outPath,
+      rootFileName: outPath ? basename(outPath) : 'architecture.ag',
+    });
     if (outPath) {
-      const { writeFileSync } = await import('fs');
-      writeFileSync(outPath, result.ag, 'utf8');
+      writeGeneratedSpecFiles(dirname(outPath), basename(outPath), result.files);
       log(`✓ Generated ${outPath}`);
+      if (result.files.length > 1) log(`  Imported sub-specs: ${result.files.length - 1}`);
     } else {
       process.stdout.write(result.ag + '\n');
     }

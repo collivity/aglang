@@ -5,7 +5,7 @@
 One-shot agent bootstrap: generate → compile → hook → skill.json.
 
 ```bash
-aglc add [projectRoot] [--name <ProjectName>] [--out <file.ag>]
+aglc add [projectRoot] [--name <ProjectName>] [--out <file.ag>] [--max-depth <n>] [--single-file]
 ```
 
 | Flag | Description | Default |
@@ -13,6 +13,8 @@ aglc add [projectRoot] [--name <ProjectName>] [--out <file.ag>]
 | `projectRoot` | Directory to scan | `.` (current directory) |
 | `--name` | Override the project name in the generated spec | Inferred from manifests |
 | `--out` | Output path for the `.ag` file | `<projectRoot>/architecture.ag` |
+| `--max-depth` | Maximum recursive component-synthesis depth | `3` |
+| `--single-file` | Inline all generated components instead of writing imported sub-specs | `false` |
 
 ---
 
@@ -39,13 +41,19 @@ plugin "@collivity/aglc-roslyn"
 
 ## `aglc generate`
 
-Scan a project directory and auto-generate a starter `.ag` spec.
+Scan a project directory and auto-generate a deep starter `.ag` spec.
 
 ```bash
-aglc generate [projectRoot] [--out <file.ag>] [--name <n>]
+aglc generate [projectRoot] [--out <file.ag>] [--name <n>] [--max-depth <n>] [--single-file]
 ```
 
-Detects: `package.json`, `.csproj`, `go.mod`, `Cargo.toml`, `build.gradle`, `Podfile`, `Package.swift`, `pyproject.toml`, `requirements.txt`, and package metadata such as the declared license
+By default, generation is extractor-guided and deep:
+
+- keeps mixed-language roots instead of collapsing to a single manifest
+- splits oversized areas into imported `.ag` sub-specs
+- uses manifests as hints, but synthesizes components from real source layout and extracted facts
+
+Use `--single-file` when you need stdout-friendly output or want one flat starter file.
 
 ---
 
