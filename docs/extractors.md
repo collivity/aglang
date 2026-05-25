@@ -29,35 +29,31 @@ aglang ships with built-in extractors for 8 language ecosystems. Each extractor 
 
 ## Plugin protocol
 
-You can add custom extractors without forking aglang. A plugin is a Node.js module that exports:
+You can add custom extractors without forking aglang. Declare plugin packages directly in the `.ag` spec:
 
-```typescript
-export interface ExtractorPlugin {
-  /** File globs this plugin handles */
-  match: string[]
+```ag
+plugin "@collivity/aglc-roslyn"
+plugin "aglc-plugin-my-extractor"
+```
 
-  /**
-   * Run against a single source file.
-   * Return extracted routes and dependency names.
-   */
-  extract(filePath: string, source: string): Promise<{
-    routes: string[]
-    deps: string[]
-  }>
+Each package is discovered by npm package name and must implement the subprocess contract:
+
+```bash
+plugin-package --info
+plugin-package --component Api --mappings "{\"Api\":\"src/**/*.cs\"}" --files src/OrdersController.cs
+```
+
+`--info` returns JSON such as:
+
+```json
+{
+  "name": "@collivity/aglc-roslyn",
+  "extensions": [".cs", ".csx"],
+  "version": "0.1.0"
 }
 ```
 
-**Register a plugin:**
-
-```typescript
-// aglang.config.ts
-import type { ExtractorPlugin } from '@collivity/aglang'
-import { myExtractor } from './my-extractor'
-
-export const plugins: ExtractorPlugin[] = [myExtractor]
-```
-
-Then run `aglc generate` with `--config aglang.config.ts`.
+Extraction prints normalized `FlowFact[]` JSON. aglang preserves extractor provenance in graph output and prefers plugin facts over duplicate local extractor edges when they describe the same effective flow.
 
 ## OpenAPI import
 

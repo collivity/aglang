@@ -96,6 +96,10 @@ The npm package also attempts that skill installation during `postinstall`. Set 
 4. Ask before creating, editing, regenerating, or compiling `.ag` architecture specs or generated architecture artifacts.
 5. Use planning/design sessions for architecture authoring so engineers can review intended spec changes.
 
+When extractor behavior needs investigation, run `aglc check-file --json --debug-extractors`. The JSON verdict includes `extractor_debug[]` with parser availability, AST query counts, and regex fallback reasons. Add `--require-ast` to fail immediately when an AST-capable extractor drops to regex for a detected fact.
+
+For broad query health against a real repo, run `npx tsx scripts/tree-sitter-corpus-probe.ts C:\Users\pante\Codespaces\collivity`. The report summarizes files scanned, files with captures, total captures, sample files, and up to three query errors per language/query pair without making that external checkout a CI dependency.
+
 ---
 
 ## Quick start
@@ -559,10 +563,20 @@ Third-party extractors can be loaded as npm packages:
 
 ```ag
 // In your .ag spec file
+plugin "@collivity/aglc-roslyn"
 plugin "aglc-plugin-my-extractor"
 ```
 
-Any npm package that exports `{ info(), extract(input) }` and responds to `--info` / `--extract` CLI flags qualifies. Run `npx aglc` — the plugin is auto-discovered and invoked for each file batch matching its declared extensions.
+Each package is discovered by npm package name and must implement the subprocess protocol:
+
+```bash
+<plugin> --info
+<plugin> --component <ComponentName> --mappings <json> --files <file1> <file2> ...
+```
+
+`--info` returns JSON with `name`, `extensions`, and optional `version`. Extraction prints normalized `FlowFact[]` JSON. aglang preserves extractor provenance in graph output and lets higher-precedence plugin facts win when they describe the same effective edge as a local extractor.
+
+This repository self-hosts with `plugin "@collivity/aglc-roslyn"` in [architecture.ag](architecture.ag). The repo includes a bundled development copy under [plugins/aglc-roslyn](plugins/aglc-roslyn/package.json); external projects should install the published package or use `npm link @collivity/aglc-roslyn` before running `aglc check`.
 
 ---
 

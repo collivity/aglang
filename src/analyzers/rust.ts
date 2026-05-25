@@ -6,7 +6,7 @@ import { readFileSync } from 'fs';
 import type { ExtractorPlugin, ExtractorInput, FlowFact, ExtractionStrategy } from './plugin.ts';
 import { normalizeRoute } from './typescript.ts';
 import { makeParser, getTreeSitter } from './ast/loader.ts';
-import { parseAndQuery } from './ast/walker.ts';
+import { groupByRow, parseAndQuery } from './ast/walker.ts';
 import { USE_QUERY, ROUTE_ATTR_QUERY, CALL_QUERY } from './ast/queries/rust.ts';
 
 export interface RouteFact {
@@ -66,15 +66,13 @@ function extractRoutesAst(content: string, filePath: string): RouteFact[] {
   const routes: RouteFact[] = [];
 
   const captures = parseAndQuery(parser, language, content, ROUTE_ATTR_QUERY);
-  for (let i = 0; i < captures.length; i++) {
-    const attrName = captures[i];
-    const routePath = captures[i + 1];
-    if (attrName?.name === 'attr_name' && routePath?.name === 'route_path') {
-      const method = attrName.text.toUpperCase();
-      const rawPath = routePath.text.replace(/^"|"$/g, '');
-      routes.push({ method, path: rawPath, normalized: normalizeRoute(rawPath), file: filePath, line: attrName.startRow + 1 });
-      i++;
-    }
+  for (const rowCaptures of groupByRow(captures).values()) {
+    const attrName = rowCaptures.find(c => c.name === 'attr_name');
+    const routePath = rowCaptures.find(c => c.name === 'route_path');
+    if (!attrName || !routePath) continue;
+    const httpMethod = rowCaptures.find(c => c.name === 'http_method')?.text ?? attrName.text;
+    const method = httpMethod.toUpperCase();
+    routes.push({ method, path: routePath.text, normalized: normalizeRoute(routePath.text), file: filePath, line: attrName.startRow + 1 });
   }
   return routes;
 }

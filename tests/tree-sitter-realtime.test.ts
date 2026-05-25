@@ -89,9 +89,9 @@ describe('tree-sitter realtime indexing pipeline', () => {
 
     writeFileSync(apiFile, `export const noop = 1;\n`, 'utf8');
 
-    const initialGraph = runCli(['graph', '--arch', archFile, '--file', apiFile, '--json'], dir);
+    const initialGraph = runCli(['graph', '--arch', archFile, '--file', apiFile, '--json', '--debug-extractors'], dir);
     const initialGraphJson = JSON.parse(initialGraph.stdout);
-    const initialCheck = runCli(['check-file', '--arch', archFile, '--file', apiFile, '--json'], dir);
+    const initialCheck = runCli(['check-file', '--arch', archFile, '--file', apiFile, '--json', '--debug-extractors'], dir);
     const initialCheckJson = JSON.parse(initialCheck.stdout);
 
     logStage('initial.graph.stderr', initialGraph.stderr);
@@ -102,6 +102,7 @@ describe('tree-sitter realtime indexing pipeline', () => {
     expect(initialGraph.status).toBe(0);
     expect(initialGraphJson.facts).toHaveLength(0);
     expect(initialGraphJson.projections.flow).toHaveLength(0);
+    expect(Array.isArray(initialGraphJson.extractor_debug)).toBe(true);
     expect(initialCheck.status).toBe(0);
     expect(initialCheckJson.passed).toBe(true);
     expect(initialCheckJson.violations).toHaveLength(0);
@@ -118,11 +119,15 @@ describe('tree-sitter realtime indexing pipeline', () => {
       'utf8',
     );
 
-    const updatedGraph = runCli(['graph', '--arch', archFile, '--file', apiFile, '--json'], dir);
+    const updatedGraph = runCli(['graph', '--arch', archFile, '--file', apiFile, '--json', '--debug-extractors'], dir);
     const updatedGraphJson = JSON.parse(updatedGraph.stdout);
-    const updatedCheck = runCli(['check-file', '--arch', archFile, '--file', apiFile, '--json'], dir);
+    const updatedCheck = runCli(['check-file', '--arch', archFile, '--file', apiFile, '--json', '--debug-extractors'], dir);
     const updatedCheckJson = JSON.parse(updatedCheck.stdout);
     const extractionStrategy = updatedGraphJson.facts[0]!.evidence.strategy;
+    const astCaptureEvent = updatedGraphJson.extractor_debug.find(
+      (event: { stage: string; message: string }) =>
+        event.stage === 'ast_capture_summary' && event.message.includes('Collected 3 AST capture'),
+    );
 
     logStage('updated.graph.stderr', updatedGraph.stderr);
     logStage('updated.graph.stdout', updatedGraphJson);
@@ -131,7 +136,8 @@ describe('tree-sitter realtime indexing pipeline', () => {
     logStage('updated.strategy', { extractionStrategy });
 
     expect(updatedGraphJson.facts).toHaveLength(1);
-    expect(['ast', 'regex']).toContain(extractionStrategy);
+    expect(extractionStrategy).toBe('ast');
+    expect(astCaptureEvent).toBeTruthy();
     expect(updatedGraphJson.projections.flow[0]!).toMatchObject({
       from: 'Api',
       to: 'Data',
@@ -154,5 +160,15 @@ describe('tree-sitter realtime indexing pipeline', () => {
         strategy: extractionStrategy,
       },
     });
+
+    const strictCheck = runCli(['check-file', '--arch', archFile, '--file', apiFile, '--json', '--debug-extractors', '--require-ast'], dir);
+    const strictCheckJson = JSON.parse(strictCheck.stdout);
+    logStage('strict.check.stderr', strictCheck.stderr);
+    logStage('strict.check.stdout', strictCheckJson);
+
+    expect(strictCheck.status).toBe(1);
+    expect(strictCheckJson.passed).toBe(false);
+    expect(strictCheckJson.extractor_error).toBeUndefined();
+    expect(strictCheckJson.violations[0]!.graph_evidence.strategy).toBe('ast');
   });
 });

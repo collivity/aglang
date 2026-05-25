@@ -234,11 +234,13 @@ function analyzeFileAst(content: string, filePath: string, componentName: string
     /class\s+\w+Controller/.test(content) || filePath.includes('Controller');
 
   const usingCaptures = parseAndQuery(parser, language, content, USING_QUERY);
-  const usingText = usingCaptures.map(c => c.text).join('.');
-  for (const [pattern, infraNode] of USING_TO_INFRA) {
-    if (pattern.test(usingText) && !emitted.has(infraNode)) {
-      facts.push({ from: componentName, to: infraNode, confidence: 'probable', evidence: `Using directive indicates ${infraNode} dependency`, file: filePath });
-      emitted.add(infraNode);
+  for (const capture of usingCaptures) {
+    if (capture.name !== 'namespace_name') continue;
+    for (const [pattern, infraNode] of USING_TO_INFRA) {
+      if (pattern.test(capture.text) && !emitted.has(infraNode)) {
+        facts.push({ from: componentName, to: infraNode, confidence: 'probable', evidence: `Using directive '${capture.text}' indicates ${infraNode} dependency`, file: filePath });
+        emitted.add(infraNode);
+      }
     }
   }
 

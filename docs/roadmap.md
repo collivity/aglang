@@ -92,6 +92,64 @@ Focus: reduce the cost of adoption for teams that are not architecture-language 
 - New specs start from credible templates instead of blank files.
 - Policy errors are precise enough to fix quickly.
 
+## `v0.6` - Agent protocol and remediation
+
+Focus: make aglang a usable coordination layer for parent agents and subagents, not only a checker.
+
+### Scope
+
+- Publish the first protocol draft for:
+  - repository refs
+  - normalized facts
+  - stable fact and violation IDs
+  - scope-aware check operations
+  - remediation hints
+- Expose protocol operations over a machine interface:
+  - `check_file`
+  - `check_scope`
+  - `check_repo`
+  - `graph_component`
+  - `trace_violation`
+  - `find_related_files`
+  - `suggest_fix_targets`
+  - `recheck_scope`
+- Add fix metadata to violations:
+  - suggested files
+  - suggested components
+  - safe fix class
+  - architecture-approval requirement
+- Add bounded recheck so subagents can verify only the slice they changed.
+
+### Exit criteria
+
+- Parent agents can assign violations to subagents using stable IDs.
+- Subagents can recheck their own scope without forcing a full repo rerun.
+- Violation payloads are strong enough to support automated repair loops.
+
+## `v0.7` - Cross-repo compliance graph
+
+Focus: connect multiple repos into one architecture and drift surface.
+
+### Scope
+
+- Add repo registry and repo identity model.
+- Add persistent multi-repo graph:
+  - components
+  - contracts
+  - dependencies
+  - extracted facts
+- Add cross-repo operations:
+  - `list_contract_consumers`
+  - `list_drift`
+  - impact traces across repos
+- Add waiver and baseline lifecycle for real environments.
+
+### Exit criteria
+
+- A provider or consumer change can be traced across repos.
+- Parent agents can coordinate multi-repo repair tasks from one protocol surface.
+- Existing accepted drift can be separated from newly introduced drift.
+
 ## `v1.0` - Protocol status
 
 Focus: standardize the interface and make third-party integrations realistic.
@@ -134,6 +192,8 @@ Use this roadmap as the top-level epic set:
 - `Epic: v0.3 stable machine interfaces`
 - `Epic: v0.4 multi-agent integration`
 - `Epic: v0.5 policy authoring ergonomics`
+- `Epic: v0.6 agent protocol and remediation`
+- `Epic: v0.7 cross-repo compliance graph`
 - `Epic: v1.0 protocol standardization`
 
 Then split each epic into bounded delivery issues with one implementation surface each:

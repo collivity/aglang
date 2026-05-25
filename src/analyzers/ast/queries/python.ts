@@ -56,7 +56,11 @@ export const DJANGO_PATH_QUERY = `
   function: (identifier) @fn_name
   (#match? @fn_name "^(path|re_path)$")
   arguments: (argument_list
-    (string (string_content) @route_path) .))
+    (string
+      (string_start)
+      (string_content) @route_path
+      (string_end))
+    (_) @route_view))
 ` as const;
 
 // ── Infrastructure call expressions ──────────────────────────────────────────

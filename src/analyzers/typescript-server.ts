@@ -5,10 +5,10 @@
 import { existsSync, readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 import micromatch from 'micromatch';
-import type { ExtractorPlugin, ExtractorInput, FlowFact, ExtractionStrategy } from './plugin.ts';
+import type { ExtractorPlugin, ExtractorInput, FlowFact, ExtractionStrategy, ExtractorDebugSession } from './plugin.ts';
 import { normalizeRoute } from './typescript.ts';
-import { makeParser, getTreeSitter } from './ast/loader.ts';
-import { parseAndQuery } from './ast/walker.ts';
+import { makeParser, getTreeSitter, describeTreeSitterAvailability } from './ast/loader.ts';
+import { groupByRow, parseAndQuery } from './ast/walker.ts';
 import {
   IMPORT_QUERY, IMPORT_NAMED_QUERY, EXPRESS_ROUTE_QUERY,
   NESTJS_CONTROLLER_QUERY, NESTJS_METHOD_QUERY, NEW_EXPR_QUERY, REQUIRE_QUERY,
@@ -26,8 +26,29 @@ function lineOf(content: string, index: number): number {
   return content.slice(0, index).split('\n').length;
 }
 
+function looksLikeServerRouteReceiver(receiver: string): boolean {
+  return /^(app|router|server|fastify)$/.test(receiver)
+    || /(Router|Routes|App|Server|Group)$/.test(receiver);
+}
+
 function withStrategy(facts: FlowFact[], strategy: ExtractionStrategy): FlowFact[] {
   return facts.map(f => ({ ...f, strategy: f.strategy ?? strategy }));
+}
+
+function debugLog(
+  debug: ExtractorDebugSession | undefined,
+  stage: string,
+  message: string,
+  file?: string,
+  details?: Record<string, unknown>,
+): void {
+  debug?.log({
+    extractor: typescriptServerPlugin.name,
+    stage,
+    message,
+    file,
+    details,
+  });
 }
 
 function componentForPath(mappings: Record<string, string>, absPath: string): string | undefined {
@@ -63,9 +84,14 @@ function analyzeInternalImportsAst(
   filePath: string,
   componentName: string,
   mappings: Record<string, string>,
+  debug?: ExtractorDebugSession,
 ): FlowFact[] {
   const lang: 'typescript' | 'javascript' = filePath.endsWith('.js') || filePath.endsWith('.mjs') || filePath.endsWith('.cjs')
     ? 'javascript' : 'typescript';
+  const availability = describeTreeSitterAvailability(lang);
+  debugLog(debug, 'ast_availability', availability.grammarLoaded
+    ? `tree-sitter ${lang} parser available`
+    : `tree-sitter ${lang} parser unavailable`, filePath, availability);
   const parser = makeParser(lang);
   if (!parser) return [];
   const ts = getTreeSitter()!;
@@ -75,10 +101,14 @@ function analyzeInternalImportsAst(
   const facts: FlowFact[] = [];
   const emitted = new Set<string>();
   const captures = [
-    ...parseAndQuery(parser, language, content, IMPORT_QUERY),
-    ...parseAndQuery(parser, language, content, IMPORT_NAMED_QUERY),
-    ...parseAndQuery(parser, language, content, REQUIRE_QUERY),
+    ...parseAndQuery(parser, language, content, IMPORT_QUERY, { debug, extractor: typescriptServerPlugin.name, queryName: 'IMPORT_QUERY', file: filePath }),
+    ...parseAndQuery(parser, language, content, IMPORT_NAMED_QUERY, { debug, extractor: typescriptServerPlugin.name, queryName: 'IMPORT_NAMED_QUERY', file: filePath }),
+    ...parseAndQuery(parser, language, content, REQUIRE_QUERY, { debug, extractor: typescriptServerPlugin.name, queryName: 'REQUIRE_QUERY', file: filePath }),
   ];
+  debugLog(debug, 'ast_capture_summary', `Collected ${captures.length} AST capture(s) for import analysis`, filePath, {
+    captures: captures.length,
+    component: componentName,
+  });
 
   for (const c of captures) {
     if (c.name !== 'module_specifier') continue;
@@ -102,6 +132,11 @@ function analyzeInternalImportsAst(
     });
   }
 
+  debugLog(debug, 'ast_fact_summary', `AST import analysis emitted ${facts.length} fact(s)`, filePath, {
+    facts: facts.length,
+    component: componentName,
+  });
+
   return facts;
 }
 
@@ -110,6 +145,7 @@ function analyzeInternalImportsRegex(
   filePath: string,
   componentName: string,
   mappings: Record<string, string>,
+  debug?: ExtractorDebugSession,
 ): FlowFact[] {
   const facts: FlowFact[] = [];
   const emitted = new Set<string>();
@@ -139,6 +175,10 @@ function analyzeInternalImportsRegex(
       strategy: 'regex',
     });
   }
+  debugLog(debug, 'regex_fact_summary', `Regex import analysis emitted ${facts.length} fact(s)`, filePath, {
+    facts: facts.length,
+    component: componentName,
+  });
   return facts;
 }
 
@@ -191,15 +231,15 @@ function extractRoutesAst(content: string, filePath: string, lang: 'typescript' 
 
   // Express-style: app.get('/path', ...)
   const expressCaptures = parseAndQuery(parser, language, content, EXPRESS_ROUTE_QUERY);
-  for (let i = 0; i < expressCaptures.length - 1; i++) {
-    const methodCap = expressCaptures[i];
-    const pathCap = expressCaptures[i + 1];
-    if (methodCap?.name === 'method' && pathCap?.name === 'route_path') {
-      const method = methodCap.text.toUpperCase();
-      const path = pathCap.text;
-      routes.push({ method, path, normalized: normalizeRoute(path), file: filePath, line: methodCap.startRow + 1 });
-      i++; // skip pathCap
-    }
+  for (const captures of groupByRow(expressCaptures).values()) {
+    const receiverCap = captures.find(c => c.name === 'receiver');
+    const methodCap = captures.find(c => c.name === 'method');
+    const pathCap = captures.find(c => c.name === 'route_path');
+    if (!receiverCap || !methodCap || !pathCap) continue;
+    if (!looksLikeServerRouteReceiver(receiverCap.text)) continue;
+    const method = methodCap.text.toUpperCase();
+    const path = pathCap.text;
+    routes.push({ method, path, normalized: normalizeRoute(path), file: filePath, line: methodCap.startRow + 1 });
   }
 
   // NestJS: gather controller prefix then method decorators
@@ -260,9 +300,13 @@ export function extractServerRoutesFromTypeScript(content: string, filePath: str
 
 // ── AST-based infrastructure detection ───────────────────────────────────────
 
-function analyzeFileAst(content: string, filePath: string, componentName: string): FlowFact[] {
+function analyzeFileAst(content: string, filePath: string, componentName: string, debug?: ExtractorDebugSession): FlowFact[] {
   const lang: 'typescript' | 'javascript' = filePath.endsWith('.js') || filePath.endsWith('.mjs') || filePath.endsWith('.cjs')
     ? 'javascript' : 'typescript';
+  const availability = describeTreeSitterAvailability(lang);
+  debugLog(debug, 'ast_availability', availability.grammarLoaded
+    ? `tree-sitter ${lang} parser available`
+    : `tree-sitter ${lang} parser unavailable`, filePath, availability);
   const parser = makeParser(lang);
   if (!parser) return [];
   const ts = getTreeSitter()!;
@@ -274,7 +318,7 @@ function analyzeFileAst(content: string, filePath: string, componentName: string
   const importedPkgs = new Set<string>();
 
   // Named imports: import { MongoClient } from 'mongodb'
-  const namedCaptures = parseAndQuery(parser, language, content, IMPORT_NAMED_QUERY);
+  const namedCaptures = parseAndQuery(parser, language, content, IMPORT_NAMED_QUERY, { debug, extractor: typescriptServerPlugin.name, queryName: 'IMPORT_NAMED_QUERY', file: filePath });
   for (let i = 0; i < namedCaptures.length; i++) {
     const c = namedCaptures[i]!;
     if (c.name === 'import_name') {
@@ -289,19 +333,19 @@ function analyzeFileAst(content: string, filePath: string, componentName: string
   }
 
   // All imports (including default + namespace)
-  const importCaptures = parseAndQuery(parser, language, content, IMPORT_QUERY);
+  const importCaptures = parseAndQuery(parser, language, content, IMPORT_QUERY, { debug, extractor: typescriptServerPlugin.name, queryName: 'IMPORT_QUERY', file: filePath });
   for (const c of importCaptures) {
     if (c.name === 'module_specifier') importedPkgs.add(c.text);
   }
 
   // require() calls
-  const requireCaptures = parseAndQuery(parser, language, content, REQUIRE_QUERY);
+  const requireCaptures = parseAndQuery(parser, language, content, REQUIRE_QUERY, { debug, extractor: typescriptServerPlugin.name, queryName: 'REQUIRE_QUERY', file: filePath });
   for (const c of requireCaptures) {
     if (c.name === 'module_specifier') importedPkgs.add(c.text);
   }
 
   // new expressions: new MongoClient(...)
-  const newCaptures = parseAndQuery(parser, language, content, NEW_EXPR_QUERY);
+  const newCaptures = parseAndQuery(parser, language, content, NEW_EXPR_QUERY, { debug, extractor: typescriptServerPlugin.name, queryName: 'NEW_EXPR_QUERY', file: filePath });
   const instantiatedClasses = new Set(newCaptures.filter(c => c.name === 'class_name').map(c => c.text));
 
   const facts: FlowFact[] = [];
@@ -332,12 +376,18 @@ function analyzeFileAst(content: string, filePath: string, componentName: string
     }
   }
 
+  debugLog(debug, 'ast_fact_summary', `AST infrastructure analysis emitted ${facts.length} fact(s)`, filePath, {
+    facts: facts.length,
+    component: componentName,
+    importedPackages: [...importedPkgs],
+  });
+
   return facts;
 }
 
 // ── Regex-based infrastructure detection (fallback) ───────────────────────────
 
-function analyzeFileRegex(content: string, filePath: string, componentName: string): FlowFact[] {
+function analyzeFileRegex(content: string, filePath: string, componentName: string, debug?: ExtractorDebugSession): FlowFact[] {
   const facts: FlowFact[] = [];
   const searchable = content
     .split('\n')
@@ -386,15 +436,30 @@ function analyzeFileRegex(content: string, filePath: string, componentName: stri
   const hasGot = /from\s+['"]got['"]|from\s+['"]node-fetch['"]|from\s+['"]undici['"]/.test(searchable);
   if (hasAxios || hasGot) facts.push({ from: componentName, to: 'external_api', confidence: 'possible', evidence: 'Uses axios/got/node-fetch — outgoing HTTP calls (target unknown)', file: filePath });
 
+  debugLog(debug, 'regex_fact_summary', `Regex infrastructure analysis emitted ${facts.length} fact(s)`, filePath, {
+    facts: facts.length,
+    component: componentName,
+  });
+
   return facts;
 }
 
 // ── Unified infrastructure analysis ──────────────────────────────────────────
 
-function analyzeFile(content: string, filePath: string, componentName: string): FlowFact[] {
-  const astFacts = analyzeFileAst(content, filePath, componentName);
+function analyzeFile(content: string, filePath: string, componentName: string, debug?: ExtractorDebugSession, requireAst = false): FlowFact[] {
+  const astFacts = analyzeFileAst(content, filePath, componentName, debug);
   if (astFacts.length > 0) return withStrategy(astFacts, 'ast');
-  return withStrategy(analyzeFileRegex(content, filePath, componentName), 'regex');
+  const regexFacts = analyzeFileRegex(content, filePath, componentName, debug);
+  if (requireAst && regexFacts.length > 0) {
+    throw new Error(`AST extraction emitted 0 facts for ${filePath}, but regex emitted ${regexFacts.length} fact(s)`);
+  }
+  if (regexFacts.length > 0) {
+    debugLog(debug, 'fallback', `Falling back to regex infrastructure extraction because AST emitted 0 facts`, filePath, {
+      regexFacts: regexFacts.length,
+      requireAst,
+    });
+  }
+  return withStrategy(regexFacts, 'regex');
 }
 
 export const typescriptServerPlugin: ExtractorPlugin = {
@@ -405,11 +470,23 @@ export const typescriptServerPlugin: ExtractorPlugin = {
     for (const filePath of input.files) {
       let content: string;
       try { content = readFileSync(filePath, 'utf8'); } catch { continue; }
-      facts.push(...analyzeFile(content, filePath, input.componentName));
-      const astImports = analyzeInternalImportsAst(content, filePath, input.componentName, input.mappings);
-      facts.push(...(astImports.length > 0
-        ? astImports
-        : analyzeInternalImportsRegex(content, filePath, input.componentName, input.mappings)));
+      facts.push(...analyzeFile(content, filePath, input.componentName, input.debug, input.requireAst));
+      const astImports = analyzeInternalImportsAst(content, filePath, input.componentName, input.mappings, input.debug);
+      if (astImports.length > 0) {
+        facts.push(...astImports);
+        continue;
+      }
+      const regexImports = analyzeInternalImportsRegex(content, filePath, input.componentName, input.mappings, input.debug);
+      if (input.requireAst && regexImports.length > 0) {
+        throw new Error(`AST import extraction emitted 0 facts for ${filePath}, but regex emitted ${regexImports.length} fact(s)`);
+      }
+      if (regexImports.length > 0) {
+        debugLog(input.debug, 'fallback', `Falling back to regex import extraction because AST emitted 0 facts`, filePath, {
+          regexFacts: regexImports.length,
+          requireAst: input.requireAst ?? false,
+        });
+      }
+      facts.push(...regexImports);
     }
     return facts;
   },

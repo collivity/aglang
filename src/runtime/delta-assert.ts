@@ -6,8 +6,9 @@ import { cpus } from 'os';
 import { extname } from 'path';
 import type { ChangedComponent } from './diff-parser.ts';
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
-import type { ExtractionStrategy, ExtractorPlugin, FlowFact, GraphFact } from '../analyzers/plugin.ts';
+import type { ExtractionStrategy, ExtractorPlugin, FlowFact, GraphFact, ExtractorDebugEvent } from '../analyzers/plugin.ts';
 import { discoverPlugins } from '../analyzers/plugin.ts';
+import { createExtractorDebugSession } from '../analyzers/plugin.ts';
 import { csharpPlugin, extractAuthFactsFromCSharp, extractDiFactsFromCSharp, type AuthFact, type DiFact } from '../analyzers/csharp.ts';
 import { kotlinPlugin } from '../analyzers/kotlin.ts';
 import { pythonPlugin } from '../analyzers/python.ts';
@@ -92,11 +93,13 @@ const BUILT_IN_PLUGINS: ExtractorPlugin[] = [
   loadBalancerConfigPlugin,
 ];
 
-function buildExtensionMap(plugins: ExtractorPlugin[]): Map<string, ExtractorPlugin> {
-  const map = new Map<string, ExtractorPlugin>();
+function buildExtensionMap(plugins: ExtractorPlugin[]): Map<string, ExtractorPlugin[]> {
+  const map = new Map<string, ExtractorPlugin[]>();
   for (const plugin of plugins) {
     for (const ext of plugin.extensions) {
-      map.set(ext, plugin);
+      const bucket = map.get(ext) ?? [];
+      bucket.push(plugin);
+      map.set(ext, bucket);
     }
   }
   return map;
@@ -125,6 +128,7 @@ export interface DeltaResult {
   graphWarnings: Array<{ graphFactId: string; message: string }>;
   /** Number of files whose extraction result came from cache */
   cacheHits: number;
+  extractorDebug: ExtractorDebugEvent[];
 }
 
 function smtId(name: string): string {
@@ -454,13 +458,14 @@ async function runConcurrent<T>(
 export async function generateDeltaAssertions(
   changed: ChangedComponent[],
   artifact: ArchitectureArtifact,
-  options: { strict?: boolean; plugins?: ExtractorPlugin[]; projectRoot?: string } = {},
+  options: { strict?: boolean; plugins?: ExtractorPlugin[]; projectRoot?: string; debugExtractors?: boolean; requireAst?: boolean } = {},
 ): Promise<DeltaResult> {
   // Discover external plugins declared in the artifact, then merge with built-ins and caller-supplied
   const externalPlugins = discoverPlugins(artifact.plugins ?? []);
   const plugins = [...BUILT_IN_PLUGINS, ...externalPlugins, ...(options.plugins ?? [])];
   const extensionMap = buildExtensionMap(plugins);
   const strict = options.strict ?? false;
+  const debugSession = createExtractorDebugSession(options.debugExtractors ?? false, options.requireAst ?? false);
 
   // Set up extraction cache (keyed by sha256 of architecture.o to auto-invalidate on recompile)
   const artifactHash = hashArtifact(JSON.stringify(artifact));
@@ -492,31 +497,31 @@ export async function generateDeltaAssertions(
 
     await Promise.all(
       Array.from(byExt.entries()).map(async ([ext, batch]) => {
-        const plugin = extensionMap.get(ext)!;
-        if (plugin.extractGraph) {
-          const facts = await plugin.extractGraph({ componentName, files: batch, mappings: artifact.mappings });
-          allGraphFacts.push(...facts.map(f => ({
-            ...f,
-            evidence: {
-              ...f.evidence,
-              extractor: f.evidence.extractor ?? plugin.name,
-              strategy: f.evidence.strategy ?? 'graph',
-            },
-          })));
-        } else {
-          const facts = await extractWithCache(cache, batch, (uncached) =>
-            plugin.extract({ componentName, files: uncached, mappings: artifact.mappings }),
-          );
-          allGraphFacts.push(...facts.map(f =>
-            flowFactToGraphFact(
-              f.strategy ? f : { ...f, strategy: defaultStrategyForPlugin(plugin) },
-              graphFactSequence++,
-              plugin.name,
-            )
-          ));
-        }
-        // Track cache hits: files not run through plugin = batch.length - uncached files
-        // (approximated as: total returned facts coming from cache)
+        const pluginsForExt = extensionMap.get(ext)!;
+        await Promise.all(pluginsForExt.map(async (plugin) => {
+          if (plugin.extractGraph) {
+            const facts = await plugin.extractGraph({ componentName, files: batch, mappings: artifact.mappings, debug: debugSession, requireAst: options.requireAst });
+            allGraphFacts.push(...facts.map(f => ({
+              ...f,
+              evidence: {
+                ...f.evidence,
+                extractor: f.evidence.extractor ?? plugin.name,
+                strategy: f.evidence.strategy ?? 'graph',
+              },
+            })));
+          } else {
+            const facts = await extractWithCache(cache, batch, (uncached) =>
+              plugin.extract({ componentName, files: uncached, mappings: artifact.mappings, debug: debugSession, requireAst: options.requireAst }),
+            );
+            allGraphFacts.push(...facts.map(f =>
+              flowFactToGraphFact(
+                f.strategy ? f : { ...f, strategy: defaultStrategyForPlugin(plugin) },
+                graphFactSequence++,
+                plugin.name,
+              )
+            ));
+          }
+        }));
       }),
     );
 
@@ -596,5 +601,6 @@ export async function generateDeltaAssertions(
     unresolvedTargets: projection.unresolvedTargets,
     graphWarnings: projection.warnings,
     cacheHits,
+    extractorDebug: debugSession.events,
   };
 }

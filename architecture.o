@@ -396,7 +396,9 @@
     "VscodeExtension": "node_runtime",
     "Tests": "node_runtime"
   },
-  "plugins": [],
+  "plugins": [
+    "@collivity/aglc-roslyn"
+  ],
   "repos": [],
   "componentRepos": {},
   "workflowPolicies": [

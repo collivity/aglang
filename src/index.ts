@@ -22,6 +22,8 @@ import { generateSpec } from './generate.ts';
 const args = process.argv.slice(2);
 const command = args[0];
 const jsonMode = args.includes('--json');
+const debugExtractors = args.includes('--debug-extractors');
+const requireAst = args.includes('--require-ast');
 
 // In JSON mode, progress logs go to stderr so stdout stays machine-parseable
 const log = jsonMode
@@ -41,19 +43,39 @@ Commands:
   aglc emit-skill   --arch <arch.o> [--out <path>]          Emit skill.json manifest for AI agents
   aglc install-agent-skill [--path <skills-dir>]            Install packaged aglang Codex skill for local agents
   aglc install [--project <dir>] [--arch <arch.o>]          Install pre-commit git hook
-  aglc check --arch <arch.o> --project <dir> [--repo-filter <Name>] [--all] [--json]  Check staged git diff or whole project vs architecture
-  aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt] [--workflow-z3] [--dump-workflow-smt]  Analyze a specific file
-  aglc graph --arch <arch.o> [--file <f> | --project <dir>] [--json]  Emit graph facts and Z3 flow projections
+  aglc check --arch <arch.o> --project <dir> [--repo-filter <Name>] [--all] [--json] [--debug-extractors] [--require-ast]  Check staged git diff or whole project vs architecture
+  aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt] [--workflow-z3] [--dump-workflow-smt] [--debug-extractors] [--require-ast]  Analyze a specific file
+  aglc graph --arch <arch.o> [--file <f> | --project <dir>] [--json] [--debug-extractors] [--require-ast]  Emit graph facts and Z3 flow projections
   aglc import-openapi <swagger.json> [--out <file.ag>]       Import OpenAPI 3.x spec → .ag contracts
   aglc import-tf <main.tf> [--out <file.ag>]                Import Terraform → .ag node declarations
 
 Flags:
   --json      Output machine-readable JSON to stdout; progress logs go to stderr
+  --debug-extractors   Include extractor trace output and fallback reasons
+  --require-ast        Fail when an AST-capable extractor falls back to regex for a detected fact
   --dump-smt           Write the full SMT-LIB script fed to Z3 → examples/debug.smt2
   --workflow-z3        Include workflow policy SMT debug snippets in verdicts
   --dump-workflow-smt  Write workflow policy SMT debug snippets → workflow-debug.smt2
 `);
   process.exit(1);
+}
+
+function extractorErrorJson(archPath: string, message: string): string {
+  return JSON.stringify({
+    schema_version: 2,
+    passed: false,
+    timestamp: new Date().toISOString(),
+    artifact: archPath,
+    violations: [],
+    contract_violations: [],
+    workflow_violations: [],
+    change_violations: [],
+    warnings: [],
+    contract_warnings: [],
+    workflow_warnings: [],
+    extractor_error: message,
+    agent_context: `Extractor failure: ${message}`,
+  }, null, 2);
 }
 
 async function componentForFile(artifact: ArchitectureArtifact, absFile: string): Promise<string | undefined> {
@@ -280,7 +302,18 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
 
   log(`[aglc] Changed components: ${changed.map(c => c.componentName).join(', ')}`);
   log(`[aglc] Generating delta assertions...`);
-  const delta = await generateDeltaAssertions(changed, artifact);
+  let delta;
+  try {
+    delta = await generateDeltaAssertions(changed, artifact, { debugExtractors, requireAst });
+  } catch (error) {
+    const message = (error as Error).message;
+    if (jsonMode) {
+      process.stdout.write(extractorErrorJson(archPath, message) + '\n');
+    } else {
+      logErr(`[aglc] Extractor failure: ${message}`);
+    }
+    process.exit(1);
+  }
 
   // Run contract gate for all changed files (with completeness check since we have projectRoot)
   const allChangedFiles = changed.flatMap(c => c.files);
@@ -321,6 +354,7 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
         workflow_warnings: workflowResult.warnings,
         timestamp: new Date().toISOString(),
         artifact: archPath,
+        ...(debugExtractors ? { extractor_debug: delta.extractorDebug } : {}),
         agent_context: msg,
       }, null, 2) + '\n');
     } else {
@@ -347,7 +381,9 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
   verdict.passed = verdict.passed && contractResult.violations.length === 0 && workflowResult.violations.length === 0 && changeResult.violations.length === 0;
 
   if (jsonMode) {
-    process.stdout.write(formatVerdictJson(verdict, archPath) + '\n');
+    const payload = JSON.parse(formatVerdictJson(verdict, archPath)) as Record<string, unknown>;
+    if (debugExtractors) payload.extractor_debug = delta.extractorDebug;
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
   } else {
     console.log(formatVerdict(verdict));
   }
@@ -421,10 +457,22 @@ async function checkFile(archPath: string, filePath: string) {
   log(`[aglc] Analyzing ${absFile}`);
   log(`[aglc] Component: ${componentName}`);
 
-  const delta = await generateDeltaAssertions(
-    [{ componentName, files: [absFile] }],
-    artifact,
-  );
+  let delta;
+  try {
+    delta = await generateDeltaAssertions(
+      [{ componentName, files: [absFile] }],
+      artifact,
+      { debugExtractors, requireAst },
+    );
+  } catch (error) {
+    const message = (error as Error).message;
+    if (jsonMode) {
+      process.stdout.write(extractorErrorJson(archPath, message) + '\n');
+    } else {
+      logErr(`[aglc] Extractor failure: ${message}`);
+    }
+    process.exit(1);
+  }
 
   // Run contract gate (if any contracts are declared)
   const contractResult = await runContractGate(artifact, [absFile]);
@@ -453,6 +501,7 @@ async function checkFile(archPath: string, filePath: string) {
           workflow_warnings: [],
           timestamp: new Date().toISOString(),
           artifact: archPath,
+          ...(debugExtractors ? { extractor_debug: delta.extractorDebug } : {}),
           agent_context: 'No architectural flow patterns detected.',
         }, null, 2) + '\n');
       } else {
@@ -498,7 +547,9 @@ async function checkFile(archPath: string, filePath: string) {
   verdict.passed = verdict.passed && contractResult.violations.length === 0 && workflowResult.violations.length === 0;
 
   if (jsonMode) {
-    process.stdout.write(formatVerdictJson(verdict, archPath) + '\n');
+    const payload = JSON.parse(formatVerdictJson(verdict, archPath)) as Record<string, unknown>;
+    if (debugExtractors) payload.extractor_debug = delta.extractorDebug;
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
   } else {
     console.log(formatVerdict(verdict));
   }
@@ -572,13 +623,33 @@ async function graphCommand(archPath: string, filePath: string | undefined, proj
       : parseDiff(absProject, artifact);
   }
 
-  const delta = await generateDeltaAssertions(changed, artifact);
+  let delta;
+  try {
+    delta = await generateDeltaAssertions(changed, artifact, { debugExtractors, requireAst });
+  } catch (error) {
+    const message = (error as Error).message;
+    if (jsonMode) {
+      process.stdout.write(JSON.stringify({ error: message }, null, 2) + '\n');
+    } else {
+      logErr(`[aglc] Extractor failure: ${message}`);
+    }
+    process.exit(1);
+  }
   if (jsonMode) {
-    process.stdout.write(JSON.stringify(delta.graphReport, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({
+      ...delta.graphReport,
+      ...(debugExtractors ? { extractor_debug: delta.extractorDebug } : {}),
+    }, null, 2) + '\n');
   } else {
     log(`[aglc] Graph facts: ${delta.graphFacts.length}`);
     log(`[aglc] Flow projections: ${delta.facts.length}`);
     log(`[aglc] SMT assertions: ${delta.smtAssertions.filter(s => s.startsWith('(assert')).length}`);
+    if (debugExtractors && delta.extractorDebug.length > 0) {
+      log(`[aglc] Extractor debug events: ${delta.extractorDebug.length}`);
+      for (const event of delta.extractorDebug) {
+        log(`  [${event.extractor}] ${event.stage}: ${event.message}`);
+      }
+    }
     for (const w of delta.graphWarnings) {
       log(`  warning: ${w.message}`);
     }

@@ -23,6 +23,8 @@ node github_releases : release_host {
   auth: oauth2
 }
 
+plugin "@collivity/aglc-roslyn"
+
 component CliCompiler {
   runs_on: node_runtime
   paths: "src/index.ts"

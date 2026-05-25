@@ -16,7 +16,7 @@ export const CALL_QUERY = `
     (identifier) @fn_name
     (selector_expression
       operand: (identifier) @receiver
-      field: (identifier) @fn_name)
+      field: (field_identifier) @fn_name)
   ]
   arguments: (argument_list
     (interpreted_string_literal) @first_arg)?)
@@ -29,8 +29,10 @@ export const CALL_QUERY = `
 export const ROUTE_QUERY = `
 (call_expression
   function: (selector_expression
-    field: (identifier) @method
+    operand: (identifier) @receiver
+    field: (field_identifier) @method
     (#match? @method "^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|Get|Post|Put|Delete|Patch|HandleFunc|Handle)$"))
   arguments: (argument_list
-    (interpreted_string_literal) @route_path .))
+    (interpreted_string_literal) @route_path
+    (_) @route_handler))
 ` as const;

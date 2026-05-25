@@ -73,7 +73,7 @@ function extractRoutesAst(content: string, filePath: string): RouteFact[] {
     const methodCap = routeCaptures[i];
     const pathCap = routeCaptures[i + 1];
     if (methodCap?.name === 'method' && pathCap?.name === 'route_path') {
-      const method = methodCap.text.toUpperCase();
+      const method = /^(Handle|HandleFunc)$/.test(methodCap.text) ? '*' : methodCap.text.toUpperCase();
       // Strip surrounding quotes from the string literal
       const rawPath = pathCap.text.replace(/^"|"$/g, '');
       routes.push({ method, path: rawPath, normalized: normalizeRoute(rawPath), file: filePath, line: methodCap.startRow + 1 });

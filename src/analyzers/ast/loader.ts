@@ -79,3 +79,29 @@ export function makeParser(langKey: keyof Omit<LoadedParsers, 'Parser'>): Parser
 export function isTreeSitterLanguageAvailable(langKey: keyof Omit<LoadedParsers, 'Parser'>): boolean {
   return Boolean(getTreeSitter()?.[langKey]);
 }
+
+export function describeTreeSitterAvailability(langKey: keyof Omit<LoadedParsers, 'Parser'>): {
+  parserLoaded: boolean;
+  grammarLoaded: boolean;
+  reason?: string;
+} {
+  const ts = getTreeSitter();
+  if (!ts) {
+    return {
+      parserLoaded: false,
+      grammarLoaded: false,
+      reason: 'tree-sitter native binary could not be loaded',
+    };
+  }
+  if (!ts[langKey]) {
+    return {
+      parserLoaded: true,
+      grammarLoaded: false,
+      reason: `tree-sitter ${langKey} grammar could not be loaded`,
+    };
+  }
+  return {
+    parserLoaded: true,
+    grammarLoaded: true,
+  };
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@collivity/aglc-roslyn",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "aglc-roslyn": "./bin/aglc-roslyn.mjs"
+  }
+}

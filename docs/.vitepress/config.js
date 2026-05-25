@@ -10,6 +10,7 @@ module.exports = {
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'How it works', link: '/how-it-works' },
+      { text: 'Protocol', link: '/protocol' },
       { text: 'Roadmap', link: '/roadmap' },
       { text: 'Examples', link: '/examples' },
       { text: 'CLI Reference', link: '/cli/reference' },
@@ -24,6 +25,7 @@ module.exports = {
         items: [
           { text: 'What is aglang?', link: '/guide/getting-started' },
           { text: 'Quick Setup (aglc add)', link: '/guide/generate' },
+          { text: 'Agent Protocol', link: '/protocol' },
           { text: 'Roadmap', link: '/roadmap' },
           { text: 'Examples', link: '/examples' },
           { text: 'How it works ->', link: '/how-it-works' },
@@ -48,6 +50,7 @@ module.exports = {
         items: [
           { text: 'Extractors', link: '/extractors' },
           { text: 'AI Agents', link: '/agents' },
+          { text: 'Agent Protocol', link: '/protocol' },
           { text: 'JSON Verdict API', link: '/api/json-verdict' },
         ]
       }

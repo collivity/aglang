@@ -16,6 +16,9 @@ hero:
       text: How it works
       link: /how-it-works
     - theme: alt
+      text: Agent protocol
+      link: /protocol
+    - theme: alt
       text: Examples
       link: /examples
     - theme: alt
@@ -107,3 +110,5 @@ Your .ag spec                 Your codebase (file or project)
 ```
 
 Agents use the same interface while code is still in progress; pre-commit hooks and CI use it as the final enforcement point. The solver is deterministic math — no LLM guesses. [Full pipeline walkthrough →](./how-it-works)
+
+If you want aglang to become a shared service for parent agents and subagents, the current protocol draft is in [protocol.md](./protocol.md).

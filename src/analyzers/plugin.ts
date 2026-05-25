@@ -3,9 +3,38 @@
 // because semantic analyzers (Roslyn, tsc) need project context.
 
 import { spawnSync } from 'child_process';
+import { existsSync, readFileSync, readdirSync } from 'fs';
+import { join, resolve } from 'path';
 
 export type Confidence = 'definite' | 'probable' | 'possible';
 export type ExtractionStrategy = 'ast' | 'regex' | 'graph' | 'legacy-flow';
+
+export interface ExtractorDebugEvent {
+  extractor: string;
+  stage: string;
+  message: string;
+  file?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface ExtractorDebugSession {
+  enabled: boolean;
+  requireAst: boolean;
+  events: ExtractorDebugEvent[];
+  log(event: ExtractorDebugEvent): void;
+}
+
+export function createExtractorDebugSession(enabled = false, requireAst = false): ExtractorDebugSession {
+  return {
+    enabled,
+    requireAst,
+    events: [],
+    log(event: ExtractorDebugEvent) {
+      if (!enabled) return;
+      this.events.push(event);
+    },
+  };
+}
 
 export interface FlowFact {
   from: string;       // component name (aglang identifier)
@@ -50,6 +79,8 @@ export interface ExtractorInput {
   componentName: string;
   files: string[];
   mappings: Record<string, string>;  // component name → path glob
+  debug?: ExtractorDebugSession;
+  requireAst?: boolean;
 }
 
 export interface ExtractorPlugin {
@@ -94,15 +125,94 @@ export interface SubprocessPluginInfo {
   version?: string;
 }
 
+interface SubprocessInvocation {
+  command: string;
+  args: string[];
+}
+
+function findLocalPackageRoot(packageName: string): string | undefined {
+  const roots = [process.cwd(), resolve(process.cwd(), '..')];
+  for (const root of roots) {
+    for (const container of ['plugins', 'packages']) {
+      const containerPath = join(root, container);
+      if (!existsSync(containerPath)) continue;
+      for (const entry of readdirSync(containerPath, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const packageRoot = join(containerPath, entry.name);
+        const packageJsonPath = join(packageRoot, 'package.json');
+        if (!existsSync(packageJsonPath)) continue;
+        try {
+          const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { name?: string };
+          if (pkg.name === packageName) return packageRoot;
+        } catch {
+          continue;
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+function resolvePackageBin(packageRoot: string, packageName: string): string | undefined {
+  const packageJsonPath = join(packageRoot, 'package.json');
+  const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as {
+    bin?: string | Record<string, string>;
+  };
+  if (typeof pkg.bin === 'string') return join(packageRoot, pkg.bin);
+  if (pkg.bin && typeof pkg.bin === 'object') {
+    const matching = pkg.bin[packageName] ?? Object.values(pkg.bin)[0];
+    if (matching) return join(packageRoot, matching);
+  }
+  return undefined;
+}
+
+function resolveSubprocessInvocation(packageName: string): SubprocessInvocation[] {
+  const invocations: SubprocessInvocation[] = [];
+  const localPackageRoot = findLocalPackageRoot(packageName);
+  if (localPackageRoot) {
+    const localBin = resolvePackageBin(localPackageRoot, packageName);
+    if (localBin) {
+      invocations.push({
+        command: process.execPath,
+        args: [localBin],
+      });
+    }
+  }
+  invocations.push({
+    command: 'npx',
+    args: ['--no', packageName],
+  });
+  return invocations;
+}
+
+function runInvocation(invocations: SubprocessInvocation[], extraArgs: string[]): ReturnType<typeof spawnSync> {
+  let lastResult: ReturnType<typeof spawnSync> | undefined;
+  for (const invocation of invocations) {
+    const result = spawnSync(invocation.command, [...invocation.args, ...extraArgs], {
+      encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    if (!result.error && result.status === 0) return result;
+    lastResult = result;
+  }
+  return lastResult ?? spawnSync('npx', ['--no', 'definitely-missing-package'], { encoding: 'utf8' });
+}
+
+function outputText(output: string | Buffer | null | undefined): string {
+  if (typeof output === 'string') return output;
+  if (!output) return '';
+  return output.toString('utf8');
+}
+
 export class SubprocessPlugin implements ExtractorPlugin {
   name: string;
   extensions: string[];
-  private executable: string;
+  private invocations: SubprocessInvocation[];
 
   constructor(packageName: string, info: SubprocessPluginInfo) {
     this.name = info.name;
     this.extensions = info.extensions;
-    this.executable = packageName;
+    this.invocations = resolveSubprocessInvocation(packageName);
   }
 
   async extract(input: ExtractorInput): Promise<FlowFact[]> {
@@ -111,17 +221,14 @@ export class SubprocessPlugin implements ExtractorPlugin {
       '--mappings', JSON.stringify(input.mappings),
       '--files', ...input.files,
     ];
-    const result = spawnSync('npx', ['--no', this.executable, ...args], {
-      encoding: 'utf8',
-      maxBuffer: 10 * 1024 * 1024, // 10 MB
-    });
+    const result = runInvocation(this.invocations, args);
     if (result.error || result.status !== 0) {
-      const err = result.stderr?.trim() || result.error?.message || `exit ${result.status}`;
+      const err = outputText(result.stderr).trim() || result.error?.message || `exit ${result.status}`;
       console.warn(`[aglc] plugin '${this.name}' extraction failed: ${err}`);
       return [];
     }
     try {
-      const facts = JSON.parse(result.stdout) as unknown;
+      const facts = JSON.parse(outputText(result.stdout)) as unknown;
       if (!Array.isArray(facts)) {
         console.warn(`[aglc] plugin '${this.name}': expected JSON array, got ${typeof facts}`);
         return [];
@@ -139,18 +246,15 @@ export class SubprocessPlugin implements ExtractorPlugin {
  * Throws if the plugin is not installed or returns invalid JSON.
  */
 export function querySubprocessPluginInfo(packageName: string): SubprocessPluginInfo {
-  const result = spawnSync('npx', ['--no', packageName, '--info'], {
-    encoding: 'utf8',
-    maxBuffer: 1024 * 1024,
-  });
+  const result = runInvocation(resolveSubprocessInvocation(packageName), ['--info']);
   if (result.error || result.status !== 0) {
     throw new Error(
       `Plugin '${packageName}' not found or failed --info query: ` +
-      (result.stderr?.trim() || result.error?.message || `exit ${result.status}`),
+      (outputText(result.stderr).trim() || result.error?.message || `exit ${result.status}`),
     );
   }
   try {
-    const info = JSON.parse(result.stdout) as SubprocessPluginInfo;
+    const info = JSON.parse(outputText(result.stdout)) as SubprocessPluginInfo;
     if (!info.name || !Array.isArray(info.extensions)) {
       throw new Error('missing name or extensions field');
     }

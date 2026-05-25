@@ -5,7 +5,7 @@
 // using MongoDB.Driver;  using Microsoft.EntityFrameworkCore;
 export const USING_QUERY = `
 (using_directive
-  (identifier) @namespace_part)
+  (_) @namespace_name)
 ` as const;
 
 // ── Attribute annotations ─────────────────────────────────────────────────────
@@ -33,9 +33,9 @@ export const CTOR_PARAM_QUERY = `
     (parameter
       type: [
         (identifier) @param_type
-        (generic_name name: (identifier) @param_type)
-        (nullable_type type: (identifier) @param_type)
-        (qualified_name right: (identifier) @param_type)
+        (generic_name (identifier) @param_type)
+        (nullable_type (identifier) @param_type)
+        (qualified_name name: (identifier) @param_type)
       ])))
 ` as const;
 
@@ -46,8 +46,9 @@ export const FIELD_QUERY = `
   (variable_declaration
     type: [
       (identifier) @field_type
-      (generic_name name: (identifier) @field_type)
-      (nullable_type type: (identifier) @field_type)
+      (generic_name (identifier) @field_type)
+      (nullable_type (identifier) @field_type)
+      (qualified_name name: (identifier) @field_type)
     ]))
 ` as const;
 
@@ -57,9 +58,9 @@ export const PROPERTY_QUERY = `
 (property_declaration
   type: [
     (identifier) @property_type
-    (generic_name name: (identifier) @property_type)
-    (nullable_type type: (identifier) @property_type)
-    (qualified_name right: (identifier) @property_type)
+    (generic_name (identifier) @property_type)
+    (nullable_type (identifier) @property_type)
+    (qualified_name name: (identifier) @property_type)
   ])
 ` as const;
 
@@ -69,7 +70,7 @@ export const NEW_OBJECT_QUERY = `
 (object_creation_expression
   type: [
     (identifier) @class_name
-    (generic_name name: (identifier) @class_name)
-    (qualified_name right: (identifier) @class_name)
+    (generic_name (identifier) @class_name)
+    (qualified_name name: (identifier) @class_name)
   ])
 ` as const;

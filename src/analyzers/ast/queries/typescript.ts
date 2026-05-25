@@ -7,14 +7,14 @@
 // default : import X from 'module'          → module_specifier = 'module'
 // namespace: import * as X from 'module'    → module_specifier = 'module'
 export const IMPORT_QUERY = `
-(import_declaration
+(import_statement
   source: (string (string_fragment) @module_specifier))
 ` as const;
 
 // Also captures the imported name or alias so we can build a symbol map.
 // e.g. import { MongoClient } from 'mongodb' → name=MongoClient, module=mongodb
 export const IMPORT_NAMED_QUERY = `
-(import_declaration
+(import_statement
   (import_clause
     (named_imports
       (import_specifier
@@ -29,10 +29,12 @@ export const IMPORT_NAMED_QUERY = `
 export const EXPRESS_ROUTE_QUERY = `
 (call_expression
   function: (member_expression
+    object: (identifier) @receiver
     property: (property_identifier) @method
     (#match? @method "^(get|post|put|delete|patch|head|options)$"))
   arguments: (arguments
-    (string (string_fragment) @route_path) .))
+    (string (string_fragment) @route_path)
+    (_) @route_handler))
 ` as const;
 
 // ── NestJS class-level @Controller decorator ──────────────────────────────────

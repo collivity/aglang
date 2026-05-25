@@ -1,5 +1,5 @@
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
-import type { Confidence, FlowFact, GraphFact } from '../analyzers/plugin.ts';
+import type { Confidence, ExtractionStrategy, FlowFact, GraphFact } from '../analyzers/plugin.ts';
 import { isBlocking } from '../analyzers/plugin.ts';
 import { resolveCategoryToTargets } from '../analyzers/node-resolver.ts';
 
@@ -47,6 +47,45 @@ export const RESERVED_GRAPH_PREDICATES = [
 
 function smtId(name: string): string {
   return name.replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
+function strategyRank(strategy?: ExtractionStrategy): number {
+  switch (strategy) {
+    case 'graph': return 4;
+    case 'ast': return 3;
+    case 'regex': return 2;
+    case 'legacy-flow': return 1;
+    default: return 0;
+  }
+}
+
+function confidenceRank(confidence: Confidence): number {
+  switch (confidence) {
+    case 'definite': return 3;
+    case 'probable': return 2;
+    case 'possible': return 1;
+  }
+}
+
+function extractorRank(extractor?: string): number {
+  if (!extractor) return 0;
+  return extractor.includes('aglc-roslyn') ? 10 : 0;
+}
+
+function outranks(candidate: FlowFact, current: FlowFact): boolean {
+  const candidateExtractor = extractorRank(candidate.graphEvidence?.extractor);
+  const currentExtractor = extractorRank(current.graphEvidence?.extractor);
+  if (candidateExtractor !== currentExtractor) return candidateExtractor > currentExtractor;
+
+  const candidateStrategy = strategyRank(candidate.graphEvidence?.strategy);
+  const currentStrategy = strategyRank(current.graphEvidence?.strategy);
+  if (candidateStrategy !== currentStrategy) return candidateStrategy > currentStrategy;
+
+  const candidateConfidence = confidenceRank(candidate.confidence);
+  const currentConfidence = confidenceRank(current.confidence);
+  if (candidateConfidence !== currentConfidence) return candidateConfidence > currentConfidence;
+
+  return false;
 }
 
 function evidenceText(fact: GraphFact): string {
@@ -176,14 +215,15 @@ export function projectGraphToFlows(
   }
 
   const uniqueFacts: FlowFact[] = [];
-  const seen = new Set<string>();
+  const bestByEdge = new Map<string, FlowFact>();
   for (const fact of flowFacts) {
-    const key = `${fact.from}::${fact.to}::${fact.confidence}::${fact.graphEvidence?.graphFactId ?? ''}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      uniqueFacts.push(fact);
+    const key = `${fact.from}::${fact.to}`;
+    const current = bestByEdge.get(key);
+    if (!current || outranks(fact, current)) {
+      bestByEdge.set(key, fact);
     }
   }
+  uniqueFacts.push(...bestByEdge.values());
 
   const blockingFacts = uniqueFacts.filter(f => isBlocking(f, strict));
   const warningFacts = uniqueFacts.filter(f => !isBlocking(f, strict) && f.confidence === 'probable');

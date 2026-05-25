@@ -12,10 +12,19 @@ export const USE_QUERY = `
 export const ROUTE_ATTR_QUERY = `
 (attribute_item
   (attribute
-    path: (identifier) @attr_name
+    (identifier) @attr_name
     (#match? @attr_name "^(get|post|put|delete|patch|head|options|route)$")
     arguments: (token_tree
-      (literal) @route_path)?))
+      (string_literal (string_content) @route_path))))
+
+(attribute_item
+  (attribute
+    (identifier) @attr_name
+    (#eq? @attr_name "route")
+    arguments: (token_tree
+      (string_literal (string_content) @route_path)
+      (identifier)
+      (string_literal (string_content) @http_method))))
 ` as const;
 
 // ── Struct / function instantiation ──────────────────────────────────────────

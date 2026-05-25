@@ -1,7 +1,12 @@
 // Shared AST walking utilities used by all language extractors.
 // Wraps tree-sitter parse + query API with a consistent interface.
 
+import { createRequire } from 'module';
 import type { default as Parser } from 'tree-sitter';
+import type { ExtractorDebugSession } from '../plugin.ts';
+
+const require = createRequire(import.meta.url);
+const QueryCtor = (require('tree-sitter') as { Query: new (language: unknown, source: string) => { captures(node: unknown): Array<{ name: string; node: unknown }> } }).Query;
 
 export interface CaptureMatch {
   name: string;
@@ -18,19 +23,15 @@ export function queryCaptures(
   language: any,
   querySource: string,
 ): CaptureMatch[] {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const q = (language as any).query(querySource);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const captures: Array<{ name: string; node: any }> = q.captures(tree.rootNode);
-    return captures.map(({ name, node }) => ({
-      name,
-      text: node.text as string,
-      startRow: node.startPosition.row as number,
-    }));
-  } catch {
-    return [];
-  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const q = new QueryCtor(language, querySource);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const captures: Array<{ name: string; node: any }> = q.captures(tree.rootNode);
+  return captures.map(({ name, node }) => ({
+    name,
+    text: node.text as string,
+    startRow: node.startPosition.row as number,
+  }));
 }
 
 /**
@@ -42,11 +43,38 @@ export function parseAndQuery(
   language: any,
   content: string,
   querySource: string,
+  options?: {
+    debug?: ExtractorDebugSession;
+    extractor?: string;
+    queryName?: string;
+    file?: string;
+  },
 ): CaptureMatch[] {
   try {
     const tree = parser.parse(content);
-    return queryCaptures(tree, language, querySource);
-  } catch {
+    const captures = queryCaptures(tree, language, querySource);
+    options?.debug?.log({
+      extractor: options.extractor ?? 'unknown',
+      stage: 'ast_query',
+      message: `Query '${options.queryName ?? 'anonymous'}' returned ${captures.length} capture(s)`,
+      file: options.file,
+      details: {
+        query: options.queryName ?? 'anonymous',
+        captures: captures.length,
+      },
+    });
+    return captures;
+  } catch (error) {
+    options?.debug?.log({
+      extractor: options.extractor ?? 'unknown',
+      stage: 'ast_query_error',
+      message: `Query '${options.queryName ?? 'anonymous'}' failed`,
+      file: options.file,
+      details: {
+        query: options.queryName ?? 'anonymous',
+        error: (error as Error).message,
+      },
+    });
     return [];
   }
 }
