@@ -1,0 +1,14 @@
+id: OrderLifecycleCSharpAssignments
+owner: examples
+version: 1
+confidence: definite
+match:
+  kind: assignment
+  property: Status
+  valueEnum: OrderStatus
+emit:
+  kind: transition
+  data: Order
+  field: status
+  from: "$previousMember"
+  to: "$valueMember"

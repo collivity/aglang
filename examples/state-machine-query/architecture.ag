@@ -1,0 +1,29 @@
+node runtime : agent_runtime {
+  trust: trusted
+}
+
+enum OrderStatus {
+  Created | Pending | Processing | Fulfilled | Cancelled | Refunded
+}
+
+data Order {
+  id: UUID
+  status: OrderStatus
+}
+
+component Orders {
+  runs_on: runtime
+  paths: "src/**/*.{ts,cs}"
+}
+
+machine OrderLifecycle on Order.status {
+  allow transition Created -> Pending
+  allow transition Pending -> Processing
+  allow transition Processing -> Fulfilled
+  allow transition Processing -> Cancelled
+  allow transition Fulfilled -> Refunded
+  deny transition Created -> Fulfilled
+  deny transition Pending -> Fulfilled
+  deny transition Cancelled -> *
+  deny transition Refunded -> *
+}

@@ -71,6 +71,7 @@ export interface GraphFact {
   technology?: string;
   model?: string;
   route?: string;
+  properties?: Record<string, string | number | boolean | string[]>;
   confidence: Confidence;
   evidence: GraphFactEvidence;
 }

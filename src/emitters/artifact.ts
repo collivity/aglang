@@ -50,7 +50,7 @@ export interface ArchitectureArtifact {
   enums: Array<{ name: string; values: string[] }>;
   // Data type declarations for context emission
   dataTypes: Array<{ name: string; fields: Array<{ key: string; typeExpr: string }>; classification?: string; jurisdiction?: string }>;
-  // State machine declarations (advisory — not Z3-enforced yet)
+  // State machine declarations (Z3-backed when extractor queries emit transition facts)
   stateMachines: Array<{
     name: string;
     onType: string;
@@ -341,7 +341,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   }
 
   return {
-    schemaVersion: 12,
+    schemaVersion: 13,
     sourcePath,
     enforcement: [
       {
@@ -401,8 +401,8 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
       },
       {
         declaration: 'machine',
-        level: 'advisory',
-        mechanism: 'Emitted to AGENTS.md for agent guidance; transition extraction is not enforced yet.',
+        level: 'formal_z3',
+        mechanism: 'Extracted transition facts are asserted against declared state-machine transition rules.',
       },
     ],
     constraints,

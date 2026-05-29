@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { execFileSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import {
   SubprocessPlugin,
@@ -176,16 +176,4 @@ describe('runtime plugin discovery from artifact declarations', () => {
     }
   });
 
-  it('self-hosted artifact includes the Roslyn plugin declaration', () => {
-    const source = readFileSync(path.resolve(process.cwd(), 'architecture.ag'), 'utf8');
-    const program = parse(tokenize(source));
-    expect(check(program)).toEqual([]);
-    const artifact = emitArtifact(program, 'architecture.ag');
-    expect(artifact.plugins).toContain('@collivity/aglc-roslyn');
-
-    const compiledArtifact = JSON.parse(readFileSync(path.resolve(process.cwd(), 'architecture.o'), 'utf8')) as {
-      plugins?: string[];
-    };
-    expect(compiledArtifact.plugins).toContain('@collivity/aglc-roslyn');
-  });
 });

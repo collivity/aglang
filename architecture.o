@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 12,
+  "schemaVersion": 13,
   "sourcePath": "C:\\Users\\pante\\Codespaces\\aglang\\architecture.ag",
   "enforcement": [
     {
@@ -59,8 +59,8 @@
     },
     {
       "declaration": "machine",
-      "level": "advisory",
-      "mechanism": "Emitted to AGENTS.md for agent guidance; transition extraction is not enforced yet."
+      "level": "formal_z3",
+      "mechanism": "Extracted transition facts are asserted against declared state-machine transition rules."
     }
   ],
   "constraints": [
@@ -72,6 +72,8 @@
     "(declare-sort Jurisdiction 0)",
     "(declare-sort Operation 0)",
     "(declare-sort RoleType 0)",
+    "(declare-sort Field 0)",
+    "(declare-sort StateValue 0)",
     "(declare-datatype Lifetime ((Lifetime__singleton) (Lifetime__scoped) (Lifetime__transient)))",
     "(declare-fun Flow      (Entity Entity) Bool)",
     "(declare-fun CanReach  (Entity Entity) Bool)",
@@ -87,6 +89,7 @@
     "(declare-fun RequiresAuth (Entity Entity) Bool)",
     "(declare-fun Performs (Entity Operation DataType) Bool)",
     "(declare-fun ChecksRole (Entity RoleType) Bool)",
+    "(declare-fun Transition (DataType Field StateValue StateValue) Bool)",
     "(declare-fun Encrypted (Entity Entity) Bool)",
     "(declare-fun Trusted   (Entity) Bool)",
     "(declare-fun IsNode    (Entity) Bool)",
@@ -396,9 +399,7 @@
     "VscodeExtension": "node_runtime",
     "Tests": "node_runtime"
   },
-  "plugins": [
-    "@collivity/aglc-roslyn"
-  ],
+  "plugins": [],
   "repos": [],
   "componentRepos": {},
   "workflowPolicies": [

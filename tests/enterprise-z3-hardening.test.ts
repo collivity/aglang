@@ -82,6 +82,12 @@ describe('enterprise Z3 hardening tranche', () => {
     const verdict = await runGate(artifact, delta);
     expect(verdict.passed).toBe(false);
     expect(verdict.violations[0]!.type).toBe('reach_violation');
+    expect(verdict.solver_diagnostics?.some(d =>
+      d.status === 'unsat' &&
+      d.declaration === 'invariant deny reach' &&
+      d.rule === 'Layers' &&
+      d.components.join(' -> ') === 'UI -> Service -> Db'
+    )).toBe(true);
   });
 
   it('blocks classified data reaching an untrusted target through multiple hops', async () => {
@@ -221,5 +227,336 @@ describe('enterprise Z3 hardening tranche', () => {
     const verdict = await runGate(artifact, delta);
     expect(verdict.passed).toBe(false);
     expect(verdict.violations[0]!.type).toBe('permission_violation');
+  });
+
+  it('blocks query-extracted state machine transitions with query provenance', async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, '.aglang', 'extractors'), { recursive: true });
+    const query = join(dir, '.aglang', 'extractors', 'order-transitions.agq.yml');
+    writeFileSync(query, `
+id: OrderLifecycleTransitions
+owner: payments
+version: 1
+confidence: definite
+match:
+  kind: assignment
+  property: status
+  valueEnum: OrderStatus
+emit:
+  kind: transition
+  data: Order
+  field: status
+  from: "$previousMember"
+  to: "$valueMember"
+`);
+    const source = join(dir, 'orders.ts');
+    writeFileSync(source, `
+      enum OrderStatus { Draft, Active, Archived }
+      function archive(order: { status: OrderStatus }) {
+        if (order.status === OrderStatus.Active) {
+          order.status = OrderStatus.Archived;
+        }
+      }
+    `);
+
+    const artifact = compile(`
+      node runtime : agent_runtime { trust: trusted }
+      enum OrderStatus { Draft | Active | Archived }
+      data Order { status: OrderStatus }
+      component Orders { runs_on: runtime paths: "*.ts" }
+      machine OrderLifecycle on Order.status {
+        allow transition Draft -> Active
+      }
+    `);
+
+    const delta = await generateDeltaAssertions([
+      { componentName: 'Orders', files: [source] },
+    ], artifact, { projectRoot: dir });
+
+    expect(delta.transitionFacts).toHaveLength(1);
+    expect(delta.blockingTransitionFacts[0]!.from).toBe('Active');
+    expect(delta.blockingTransitionFacts[0]!.to).toBe('Archived');
+
+    const verdict = await runGate(artifact, delta);
+    expect(verdict.passed).toBe(false);
+    expect(verdict.violations[0]!.type).toBe('state_machine_violation');
+    expect(verdict.violations[0]!.detected.query?.id).toBe('OrderLifecycleTransitions');
+  });
+
+  it('allows declared query-extracted state machine transitions', async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, '.aglang', 'extractors'), { recursive: true });
+    writeFileSync(join(dir, '.aglang', 'extractors', 'order-transitions.agq.yml'), `
+id: OrderLifecycleTransitions
+owner: payments
+version: 1
+confidence: definite
+match:
+  kind: assignment
+  property: status
+  valueEnum: OrderStatus
+emit:
+  kind: transition
+  data: Order
+  field: status
+  from: "$previousMember"
+  to: "$valueMember"
+`);
+    const source = join(dir, 'orders.ts');
+    writeFileSync(source, `
+      enum OrderStatus { Draft, Active, Archived }
+      function activate(order: { status: OrderStatus }) {
+        if (order.status === OrderStatus.Draft) {
+          order.status = OrderStatus.Active;
+        }
+      }
+    `);
+
+    const artifact = compile(`
+      node runtime : agent_runtime { trust: trusted }
+      enum OrderStatus { Draft | Active | Archived }
+      data Order { status: OrderStatus }
+      component Orders { runs_on: runtime paths: "*.ts" }
+      machine OrderLifecycle on Order.status {
+        allow transition Draft -> Active
+      }
+    `);
+
+    const delta = await generateDeltaAssertions([
+      { componentName: 'Orders', files: [source] },
+    ], artifact, { projectRoot: dir });
+
+    expect(delta.blockingTransitionFacts).toHaveLength(1);
+    const verdict = await runGate(artifact, delta);
+    expect(verdict.passed).toBe(true);
+  });
+
+  it('blocks explicit denied state machine transitions', async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, '.aglang', 'extractors'), { recursive: true });
+    writeFileSync(join(dir, '.aglang', 'extractors', 'order-transitions.agq.yml'), `
+id: OrderLifecycleTransitions
+owner: payments
+version: 1
+confidence: definite
+match:
+  kind: assignment
+  property: status
+  valueEnum: OrderStatus
+emit:
+  kind: transition
+  data: Order
+  field: status
+  from: "$previousMember"
+  to: "$valueMember"
+`);
+    const source = join(dir, 'orders.ts');
+    writeFileSync(source, `
+      enum OrderStatus { Draft, Active }
+      function regress(order: { status: OrderStatus }) {
+        if (order.status === OrderStatus.Active) {
+          order.status = OrderStatus.Draft;
+        }
+      }
+    `);
+
+    const artifact = compile(`
+      node runtime : agent_runtime { trust: trusted }
+      enum OrderStatus { Draft | Active }
+      data Order { status: OrderStatus }
+      component Orders { runs_on: runtime paths: "*.ts" }
+      machine OrderLifecycle on Order.status {
+        deny transition Active -> Draft
+      }
+    `);
+
+    const delta = await generateDeltaAssertions([
+      { componentName: 'Orders', files: [source] },
+    ], artifact, { projectRoot: dir });
+    const verdict = await runGate(artifact, delta);
+
+    expect(verdict.passed).toBe(false);
+    expect(verdict.violations[0]!.type).toBe('state_machine_violation');
+  });
+
+  it('keeps unknown-from transitions warning-only and out of SMT assertions', async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, '.aglang', 'extractors'), { recursive: true });
+    writeFileSync(join(dir, '.aglang', 'extractors', 'order-transitions.agq.yml'), `
+id: OrderLifecycleTransitions
+owner: payments
+version: 1
+confidence: definite
+match:
+  kind: assignment
+  property: status
+  valueEnum: OrderStatus
+emit:
+  kind: transition
+  data: Order
+  field: status
+  from: "$previousMember"
+  to: "$valueMember"
+`);
+    const source = join(dir, 'orders.ts');
+    writeFileSync(source, `
+      enum OrderStatus { Draft, Active, Archived }
+      function archive(order: { status: OrderStatus }) {
+        order.status = OrderStatus.Archived;
+      }
+    `);
+
+    const artifact = compile(`
+      node runtime : agent_runtime { trust: trusted }
+      enum OrderStatus { Draft | Active | Archived }
+      data Order { status: OrderStatus }
+      component Orders { runs_on: runtime paths: "*.ts" }
+      machine OrderLifecycle on Order.status {
+        allow transition Draft -> Active
+      }
+    `);
+
+    const delta = await generateDeltaAssertions([
+      { componentName: 'Orders', files: [source] },
+    ], artifact, { projectRoot: dir });
+    const verdict = await runGate(artifact, delta);
+
+    expect(delta.transitionFacts).toHaveLength(1);
+    expect(delta.blockingTransitionFacts).toHaveLength(0);
+    expect(delta.transitionWarningFacts).toHaveLength(1);
+    expect(delta.smtAssertions.join('\n')).not.toContain('State__');
+    expect(verdict.passed).toBe(true);
+    expect(verdict.warnings.some(w => w.from === 'Order.status' && w.to === 'Archived')).toBe(true);
+  });
+
+  it('uses enum-namespaced state constants for machines with shared state names', () => {
+    const artifact = compile(`
+      node runtime : agent_runtime { trust: trusted }
+      enum OrderStatus { Active | Closed }
+      enum TicketStatus { Active | Closed }
+      data Order { status: OrderStatus }
+      data Ticket { status: TicketStatus }
+      component Orders { runs_on: runtime paths: "orders.ts" }
+      component Tickets { runs_on: runtime paths: "tickets.ts" }
+      machine OrderLifecycle on Order.status {
+        deny transition Active -> Closed
+      }
+      machine TicketLifecycle on Ticket.status {
+        deny transition Active -> Closed
+      }
+    `);
+
+    const constraints = artifact.constraints.join('\n');
+    expect(constraints).toContain('State__OrderStatus__Active');
+    expect(constraints).toContain('State__TicketStatus__Active');
+  });
+
+  it('extracts C# guarded assignments as blocking transition facts', async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, '.aglang', 'extractors'), { recursive: true });
+    writeFileSync(join(dir, '.aglang', 'extractors', 'order-transitions.agq.yml'), `
+id: OrderLifecycleTransitions
+owner: payments
+version: 1
+confidence: definite
+match:
+  kind: assignment
+  property: Status
+  valueEnum: OrderStatus
+emit:
+  kind: transition
+  data: Order
+  field: Status
+  from: "$previousMember"
+  to: "$valueMember"
+`);
+    const source = join(dir, 'OrderService.cs');
+    writeFileSync(source, `
+      enum OrderStatus { Draft, Active, Archived }
+      class Order { public OrderStatus Status { get; set; } }
+      class OrderService {
+        void Archive(Order order) {
+          if (order.Status == OrderStatus.Active) {
+            order.Status = OrderStatus.Archived;
+          }
+        }
+      }
+    `);
+
+    const artifact = compile(`
+      node runtime : agent_runtime { trust: trusted }
+      enum OrderStatus { Draft | Active | Archived }
+      data Order { Status: OrderStatus }
+      component Orders { runs_on: runtime paths: "*.cs" }
+      machine OrderLifecycle on Order.Status {
+        allow transition Draft -> Active
+      }
+    `);
+
+    const delta = await generateDeltaAssertions([
+      { componentName: 'Orders', files: [source] },
+    ], artifact, { projectRoot: dir });
+    const verdict = await runGate(artifact, delta);
+
+    expect(delta.blockingTransitionFacts[0]!.from).toBe('Active');
+    expect(delta.blockingTransitionFacts[0]!.to).toBe('Archived');
+    expect(verdict.passed).toBe(false);
+    expect(verdict.violations[0]!.detected.query?.id).toBe('OrderLifecycleTransitions');
+  });
+
+  it('extracts Kotlin guarded assignments as blocking transition facts', async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, '.aglang', 'extractors'), { recursive: true });
+    writeFileSync(join(dir, '.aglang', 'extractors', 'order-transitions.agq.yml'), `
+id: OrderLifecycleKotlinTransitions
+owner: mobile
+version: 1
+confidence: definite
+match:
+  extractor: Kotlin regex analyzer
+  kind: assignment
+  property: status
+  valueEnum: OrderStatus
+emit:
+  kind: transition
+  data: Order
+  field: status
+  from: "$previousMember"
+  to: "$valueMember"
+`);
+    const source = join(dir, 'CheckoutViewModel.kt');
+    writeFileSync(source, `
+      enum class OrderStatus { Created, PendingPayment, Paid, Fulfilled }
+      data class Order(var status: OrderStatus)
+      class CheckoutViewModel {
+        fun optimisticFulfill(order: Order) {
+          if (order.status == OrderStatus.PendingPayment) {
+            order.status = OrderStatus.Fulfilled
+          }
+        }
+      }
+    `);
+
+    const artifact = compile(`
+      node mobile : edge_mobile { trust: untrusted }
+      enum OrderStatus { Created | PendingPayment | Paid | Fulfilled }
+      data Order { status: OrderStatus }
+      component AndroidApp { runs_on: mobile paths: "*.kt" }
+      machine OrderLifecycle on Order.status {
+        allow transition Created -> PendingPayment
+        allow transition PendingPayment -> Paid
+        deny transition PendingPayment -> Fulfilled
+      }
+    `);
+
+    const delta = await generateDeltaAssertions([
+      { componentName: 'AndroidApp', files: [source] },
+    ], artifact, { projectRoot: dir });
+    const verdict = await runGate(artifact, delta);
+
+    expect(delta.blockingTransitionFacts[0]!.from).toBe('PendingPayment');
+    expect(delta.blockingTransitionFacts[0]!.to).toBe('Fulfilled');
+    expect(verdict.passed).toBe(false);
+    expect(verdict.violations[0]!.detected.query?.id).toBe('OrderLifecycleKotlinTransitions');
   });
 });

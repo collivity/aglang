@@ -1,10 +1,10 @@
 # aglang · Architecture Ground Language
 
-**aglang** keeps coding agents inside your repository’s architecture rules. Describe topology, components, invariants, workflow policies, and API contracts in a `.ag` spec file. `aglc` turns those rules into enforceable checks, then validates implementation work continuously while coding and at commit time.
+**aglang** is an auditable architecture verification layer for real repositories. Describe topology, components, invariants, workflow policies, state machines, and API contracts in a `.ag` spec file. `aglc` turns those rules into enforceable checks, then validates implementation work continuously while coding, in CI, and at commit time.
 
-Designed as an **agent-first guardrail**: agents read `AGENTS.md`, validate focused edits with `aglc check-file --json`, validate the full guarded project with `aglc check --all --json`, and ask before changing `.ag` architecture source. Under the hood, hard rules are compiled into solver-backed constraints so violations come with precise proof details instead of vague warnings.
+Agents are a primary workflow: they read `AGENTS.md`, validate focused edits with `aglc check-file --json`, validate the full guarded project with `aglc check --all --json`, and ask before changing `.ag` or `.agq.yml` architecture source. Under the hood, hard rules are compiled into solver-backed constraints and deterministic policy gates so violations come with source evidence, stable ids, query provenance, and proof details instead of vague warnings.
 
-aglang is also an anti-drift layer for parent agents and subagents: once architecture intent is encoded in a checked `.ag` spec, workers do not need to keep the whole system in prompt memory to stay aligned with the same boundaries.
+aglang is also an anti-drift layer for multi-repo systems: once architecture intent is encoded in reviewed `.ag` and `.agq.yml` artifacts, engineers, CI, parent agents, and subagents can check the same boundaries without relying on prompt memory or stale documentation.
 
 ---
 
@@ -20,7 +20,7 @@ aglang is also an anti-drift layer for parent agents and subagents: once archite
   aglc check --all --json
          │
          ▼
-  git commit / CI gate
+  local check / CI gate
          │
          ▼
   aglc check              ← file/project/diff → extracts flow facts
@@ -36,8 +36,8 @@ aglang is also an anti-drift layer for parent agents and subagents: once archite
 
 1. **Architecture build** — `aglc compile spec.ag` produces `architecture.o` (a JSON artifact with SMT-LIB2 constraints + component→path mappings).
 2. **Work-in-progress validation** — agents run `aglc check-file --json` while editing and `aglc check --all --json` before finishing.
-3. **Commit enforcement** — the pre-commit hook runs `aglc check`, extracts flow, reachability, propagated dataflow, trust-boundary, dependency-injection, workflow, and contract facts, feeds formal facts with the compiled constraints to the solver, and blocks the commit if any hard rule is violated.
-4. **Agent bootstrap** — `aglc add` can create a starter `.ag` spec, compiled artifact, hook, and agent files for engineer review.
+3. **Local and CI enforcement** — `aglc check` extracts flow, reachability, propagated dataflow, trust-boundary, dependency-injection, workflow, and contract facts, feeds formal facts with the compiled constraints to the solver, and fails if any hard rule is violated.
+4. **Agent bootstrap** — `aglc add` can create a starter `.ag` spec, compiled artifact, and agent files for engineer review.
 
 
 
@@ -61,7 +61,7 @@ aglang is also an anti-drift layer for parent agents and subagents: once archite
 ## Requirements
 
 - **Node.js ≥ 18** (WASM-based Z3 solver requires async/WASM support)
-- Git (for the pre-commit hook and `aglc check`)
+- Git (for diff-aware `aglc check`)
 
 ---
 
@@ -112,7 +112,7 @@ For broad query health against a real repo, run `npx tsx scripts/tree-sitter-cor
 # 1. Scan your project and generate a deep starter spec (one-shot setup)
 npx @collivity/aglang add ./my-project --name MyProject
 
-# The add command runs: deep generate → compile → install git hook → emit skill.json
+# The add command runs: deep generate → compile → emit skill.json
 # Use a planning/design session to review the generated architecture,
 # refine invariants, then compile the approved change:
 aglc compile my-project/architecture.ag
@@ -152,11 +152,10 @@ aglc compile myapp.ag
 # ✔ Compiled → architecture.o
 #   Components: 3  Invariants: 1  Contracts: 0
 
-aglc install --project . --arch architecture.o
-# ✔ Installed pre-commit hook → .git/hooks/pre-commit
+aglc check --arch architecture.o --project . --all
 ```
 
-Every `git commit` is now checked. Violations are blocked with evidence:
+Run `aglc check` locally or in CI. Violations are reported with evidence:
 
 ```
 Arch Compilation Error (Rule: Layered)
@@ -206,9 +205,9 @@ Not every declaration is enforced the same way:
 
 | Level | Declarations | Behavior |
 |---|---|---|
-| `formal_z3` | `invariant deny flow`, `invariant deny reach`, `invariant deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy` | Facts are asserted into SMT and checked by Z3 when extractors produce definite evidence. |
+| `formal_z3` | `invariant deny flow`, `invariant deny reach`, `invariant deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy`, `machine` | Facts are asserted into SMT and checked by Z3 when extractors produce definite evidence. |
 | `deterministic_policy` | `contract`, `workflow_policy` | Extracted route/workflow facts are checked by deterministic gates. |
-| `advisory` | `machine`, `permission`, `require encryption` | Emitted to docs and agent context; not blocking until an extractor/gate enforces them. |
+| `advisory` | `require encryption` | Emitted to docs and agent context; not blocking until an extractor/gate enforces them. |
 
 This taxonomy is emitted into `architecture.o`, `AGENTS.md`, and `skill.json` so agents know which rules are proof-backed, policy-backed, or guidance-only.
 
@@ -407,12 +406,15 @@ contract <name> {
 }
 
 // State machine
-statemachine <EntityName> {
-  states: Draft | Active | Archived
-  transitions {
-    Draft  -> Active   { by: Admin | Editor }
-    Active -> Archived { by: Admin }
-  }
+enum OrderStatus { Draft | Active | Archived }
+
+data Order {
+  status: OrderStatus
+}
+
+machine OrderLifecycle on Order.status {
+  allow transition Draft -> Active
+  deny transition Active -> Draft
 }
 
 // Permissions
@@ -441,17 +443,19 @@ import "relative/path/other.ag"
 |---|---|
 | `aglc compile <file.ag>` | Compile spec → `architecture.o` |
 | `aglc generate [dir] [--out <file.ag>] [--name <n>] [--max-depth <n>] [--single-file]` | Scan codebase → deep starter `.ag` spec |
-| `aglc check --arch <arch.o> --project <dir>` | Check staged git diff (used by hook) |
+| `aglc check --arch <arch.o> --project <dir>` | Check staged git diff |
+| `aglc check --arch <arch.o> --project <dir> --diff <ref>` | Check files changed in `<ref>...HEAD` |
 | `aglc check-file --arch <arch.o> --file <path>` | Check a single file (dev/debug) |
+| `aglc explain --arch <arch.o> --project <dir> --violation <id>` | Explain a stable violation ID with evidence and suggested fix class |
 | `aglc emit-context --arch <arch.o> [--out <path>]` | Write `AGENTS.md` (agent context brief) |
 | `aglc emit-skill --arch <arch.o> [--out <path>]` | Write `skill.json` (agent skill manifest) |
 | `aglc install-agent-skill [--path <skills-dir>]` | Install the packaged generic Codex skill |
-| `aglc install [--project <dir>] [--arch <arch.o>]` | Install pre-commit git hook |
 | `aglc import-openapi <swagger.json> [--out <f.ag>]` | Import OpenAPI 3.x → `.ag` contracts |
 | `aglc import-tf <main.tf> [--out <f.ag>]` | Import Terraform → `.ag` node declarations |
 
 **Flags:**
 - `--json` — machine-readable JSON to stdout (progress logs go to stderr)
+- `--diff <ref>` — compare changed files against `<ref>...HEAD` and include diff metadata
 - `--dump-smt` — write the raw SMT-LIB2 script to `examples/debug.smt2`
 
 ---
@@ -466,9 +470,17 @@ All check commands emit a JSON object when `--json` is passed:
   "passed": false,
   "timestamp": "2026-05-19T09:00:00.000Z",
   "artifact": "architecture.o",
+  "diff": {
+    "base": "origin/main",
+    "mode": "git_ref",
+    "changed_files": ["src/index.ts"],
+    "changed_components": ["CliCompiler"]
+  },
   "violations": [
     {
+      "id": "viol_98e3f0a0ce9854b1",
       "type": "reach_violation",
+      "status": "new",
       "invariant": "Layered",
       "rule": { "kind": "DenyReach", "from": "UI", "to": "Db" },
       "detected": {
@@ -500,6 +512,7 @@ All check commands emit a JSON object when `--json` is passed:
   ],
   "change_violations": [
     {
+      "id": "viol_524d0b7f3b64ba51",
       "type": "change_violation",
       "policy": "DocsFreshness",
       "trigger": "CliCompiler",
@@ -507,11 +520,37 @@ All check commands emit a JSON object when `--json` is passed:
       "message": "DocsFreshness requires CliReferenceDocs when CliCompiler changes"
     }
   ],
+  "rule_coverage": [
+    {
+      "rule": "Layered",
+      "declaration": "invariant",
+      "components": ["UI", "Db"],
+      "evidence": ["Reachability path: UI -> Service -> Db"]
+    }
+  ],
+  "solver_diagnostics": [
+    {
+      "id": "viol_8ef9d7c21f6f2a90",
+      "status": "unsat",
+      "elapsed_ms": 4,
+      "rule": "Layered",
+      "declaration": "invariant deny reach",
+      "source_file": "/abs/path/to/file.cs",
+      "components": ["UI", "Service", "Db"],
+      "fact_count": 2,
+      "path_depth": 3,
+      "fanout": 7
+    }
+  ],
   "warnings": [],
   "contract_warnings": [],
   "agent_context": "Human-readable summary for agent consumption"
 }
 ```
+
+Use `aglc explain --violation <id> --json` with the same check scope to get the rule citation, source evidence, graph fact chain when available, Z3 proof, fix class, and suggested fix text.
+
+`solver_diagnostics[]` is emitted from rule-sized solver slices. If Z3 returns `unknown` for a slice, the check fails closed and the diagnostic includes the rule, source file, contributing components/data, path depth, fanout, and suggested refactor text so agents can reduce the problematic state/write/dependency surface.
 
 ---
 
@@ -534,12 +573,11 @@ aglang is designed as a first-class tool for AI coding agents:
 1. Setup/design session: aglc generate . --out architecture.ag
    → engineer reviews intended architecture rules
    → authorized run: aglc compile architecture.ag
-   → authorized run: aglc install --arch architecture.o
+   → authorized run: aglc check --arch architecture.o --project . --all
 
 2. Coding agents: read AGENTS.md → edit code
    → run: aglc check-file --arch architecture.o --file <path> --json
    → run: aglc check --arch architecture.o --project . --all --json
-   → pre-commit hook fires: aglc check --arch architecture.o --project .
    → agent fixes structured JSON violations in implementation code
 ```
 
@@ -579,7 +617,7 @@ Each package is discovered by npm package name and must implement the subprocess
 
 `--info` returns JSON with `name`, `extensions`, and optional `version`. Extraction prints normalized `FlowFact[]` JSON. aglang preserves extractor provenance in graph output and lets higher-precedence plugin facts win when they describe the same effective edge as a local extractor.
 
-This repository self-hosts with `plugin "@collivity/aglc-roslyn"` in [architecture.ag](architecture.ag). The repo includes a bundled development copy under [plugins/aglc-roslyn](plugins/aglc-roslyn/package.json); external projects should install the published package or use `npm link @collivity/aglc-roslyn` before running `aglc check`.
+This repository self-hosts on built-in tree-sitter/AST extractors plus reviewed `.agq.yml` query artifacts. External extractor plugins remain supported for projects that need custom facts, but aglang's own architecture check should not require Roslyn or any other external plugin.
 
 ---
 

@@ -52,15 +52,15 @@ The compiler outputs a compiled JSON artifact (`architecture.o`). This file cont
 
 ---
 
-## Phase 2: The Commit-Time Gate (Real-Time)
+## Phase 2: The Check Gate
 
-This is what happens the moment an agent or human types `git commit`. The aglang runtime springs into action.
+This is what happens when an agent, human, or CI job runs `aglc check`.
 
 ```
    [Human/Agent edits code]
              │
              ▼
-      (git commit hook)
+        aglc check
              │
              ▼
   ┌──────────────────────┐
@@ -101,9 +101,9 @@ This is what happens the moment an agent or human types `git commit`. The aglang
 
 | Level | Used for | Meaning |
 |---|---|---|
-| `formal_z3` | `deny flow`, `deny reach`, `deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy` | Facts are asserted into SMT and checked by Z3 when extractors produce definite evidence. |
+| `formal_z3` | `deny flow`, `deny reach`, `deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy`, `machine` | Facts are asserted into SMT and checked by Z3 when extractors produce definite evidence. |
 | `deterministic_policy` | `contract`, `workflow_policy` | Extracted facts are checked by deterministic code paths with exact diagnostics. |
-| `advisory` | `machine`, `require encryption` | Rules are emitted to docs/agent context, but do not block yet. |
+| `advisory` | `require encryption` | Rules are emitted to docs/agent context, but do not block yet. |
 
 This distinction is part of the product contract: aglang should not imply that advisory declarations are formally enforced.
 
@@ -196,6 +196,5 @@ By decoupling the high-level design specification from the micro-analysis of Git
 |---|---|
 | `architecture.ag` | Your human-readable spec |
 | `architecture.o` | Compiled JSON artifact with SMT constraints + component mappings |
-| `.git/hooks/pre-commit` | The gate that runs at every `git commit` |
 | `skill.json` | AI agent manifest — describes the architectural rules in agent-readable form |
 | `AGENTS.md` | Context file — agents read this to understand boundaries before coding |

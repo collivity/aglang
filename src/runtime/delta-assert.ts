@@ -7,7 +7,7 @@ import { extname } from 'path';
 import type { ChangedComponent } from './diff-parser.ts';
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
 import type { ExtractionStrategy, ExtractorPlugin, FlowFact, GraphFact, ExtractorDebugEvent } from '../analyzers/plugin.ts';
-import { discoverPlugins } from '../analyzers/plugin.ts';
+import { discoverPlugins, isBlocking } from '../analyzers/plugin.ts';
 import { createExtractorDebugSession } from '../analyzers/plugin.ts';
 import { csharpPlugin, extractAuthFactsFromCSharp, extractDiFactsFromCSharp, type AuthFact, type DiFact } from '../analyzers/csharp.ts';
 import { kotlinPlugin } from '../analyzers/kotlin.ts';
@@ -25,6 +25,7 @@ import {
   projectGraphToFlows,
   type GraphReport,
 } from './graph-projection.ts';
+import { applyExtractionQueryFacts, loadExtractionQueries, type TransitionFact } from './extraction-query.ts';
 
 export type { FlowFact, GraphFact };
 
@@ -118,6 +119,9 @@ export interface DeltaResult {
   blockingDiFacts: RuntimeDiFact[];
   authFacts: AuthFact[];
   blockingPermissionFacts: PermissionViolationFact[];
+  transitionFacts: TransitionFact[];
+  blockingTransitionFacts: TransitionFact[];
+  transitionWarningFacts: TransitionFact[];
   warningFacts: FlowFact[];    // confidence=probable (non-strict)
   smtAssertions: string[];     // only for blocking facts
   // Maps "from::to" → the exact SMT assertion string fed to Z3
@@ -133,6 +137,13 @@ export interface DeltaResult {
 
 function smtId(name: string): string {
   return name.replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
+function stateSmtId(artifact: ArchitectureArtifact, data: string, fieldName: string, value: string): string {
+  const dataDecl = (artifact.dataTypes ?? []).find(d => d.name === data);
+  const field = dataDecl?.fields.find(f => f.key === fieldName);
+  const enumName = field?.typeExpr.replace(/^Optional<(.+)>$/, '$1').trim();
+  return enumName ? `State__${smtId(enumName)}__${smtId(value)}` : `State__${smtId(data)}__${smtId(fieldName)}__${smtId(value)}`;
 }
 
 function diFactMatchesPolicy(fact: DiFact, artifact: ArchitectureArtifact): boolean {
@@ -544,9 +555,30 @@ export async function generateDeltaAssertions(
     }
   }
 
+  const extractionQueries = loadExtractionQueries(options.projectRoot);
+  const queryFacts = applyExtractionQueryFacts(extractionQueries, uniqueGraphFacts);
   const projection = projectGraphToFlows(uniqueGraphFacts, artifact, { strict });
+  const factSmtMap = new Map(projection.factSmtMap);
+  const queryFlowSmtAssertions: string[] = [];
+  for (const fact of queryFacts.flowFacts) {
+    const assertion = `(assert (Flow ${smtId(fact.from)} ${smtId(fact.to)}))`;
+    factSmtMap.set(`${fact.from}::${fact.to}`, assertion);
+    if (isBlocking(fact, strict)) queryFlowSmtAssertions.push(assertion);
+  }
+  const flowFacts = [...projection.flowFacts, ...queryFacts.flowFacts];
+  const blockingFlowFacts = [...projection.blockingFacts, ...queryFacts.flowFacts.filter(f => isBlocking(f, strict))];
+  const warningFlowFacts = [...projection.warningFacts, ...queryFacts.flowFacts.filter(f => !isBlocking(f, strict) && f.confidence === 'probable')];
   const graphReport = buildGraphReport(uniqueGraphFacts, projection);
-  const reachFacts = computeReachFacts(projection.flowFacts);
+  const transitionFacts = queryFacts.transitionFacts;
+  const blockingTransitionFacts = transitionFacts.filter(f => Boolean(f.from) && isBlocking({
+    from: f.data,
+    to: f.to,
+    confidence: f.confidence,
+    evidence: f.evidence,
+    file: f.file,
+  }, strict));
+  const transitionWarningFacts = transitionFacts.filter(f => !blockingTransitionFacts.includes(f) && (!f.from || f.confidence === 'probable'));
+  const reachFacts = computeReachFacts(flowFacts);
   const blockingReachFacts = reachFacts.filter(f =>
     artifact.invariants.some(inv => inv.rules.some(rule =>
       rule.kind === 'DenyReach' && rule.from === f.from && rule.to === f.to,
@@ -579,13 +611,16 @@ export async function generateDeltaAssertions(
   });
   const authFacts = extractAuthFactsFromCSharp(csharpInputs, artifact.permissionPolicies ?? artifact.permissions ?? []);
   const blockingPermissionFacts = inferPermissionViolations(authFacts, artifact);
+  const transitionAssertions = blockingTransitionFacts.map(f => {
+    return `(assert (Transition ${smtId(f.data)} Field__${smtId(f.data)}__${smtId(f.field)} ${stateSmtId(artifact, f.data, f.field, f.from!)} ${stateSmtId(artifact, f.data, f.field, f.to)}))`;
+  });
 
   return {
-    facts: projection.flowFacts,
+    facts: flowFacts,
     dataFlowFacts,
     reachFacts,
     graphFacts: uniqueGraphFacts,
-    blockingFacts: projection.blockingFacts,
+    blockingFacts: blockingFlowFacts,
     blockingDataFlowFacts,
     blockingReachFacts,
     blockingTrustPolicyFacts,
@@ -593,9 +628,12 @@ export async function generateDeltaAssertions(
     blockingDiFacts,
     authFacts,
     blockingPermissionFacts,
-    warningFacts: projection.warningFacts,
-    smtAssertions: [...projection.smtAssertions, ...reachAssertions, ...dataFlowAssertions, ...diAssertions],
-    factSmtMap: projection.factSmtMap,
+    transitionFacts,
+    blockingTransitionFacts,
+    transitionWarningFacts,
+    warningFacts: warningFlowFacts,
+    smtAssertions: [...projection.smtAssertions, ...queryFlowSmtAssertions, ...reachAssertions, ...dataFlowAssertions, ...diAssertions, ...transitionAssertions],
+    factSmtMap,
     diFactSmtMap,
     graphReport,
     unresolvedTargets: projection.unresolvedTargets,

@@ -218,11 +218,11 @@ export function emitAgentsMarkdown(artifact: ArchitectureArtifact): string {
     }
   }
 
-  // State machine transitions (advisory — not Z3-enforced, but agents MUST follow these)
+  // State machine transitions (Z3-backed when extraction queries emit transition facts)
   if ((artifact.stateMachines ?? []).length > 0) {
     lines.push(`## State Machine Rules`);
     lines.push('');
-    lines.push(`> ⚠️ **Advisory rules** — not yet Z3-enforced at commit time, but you MUST follow these.`);
+    lines.push(`> **Enforced when extractor query evidence is available** — transition facts are checked against these rules.`);
     lines.push(`> Agents: do NOT write code that performs transitions not listed as \`allow\` here.`);
     lines.push('');
     for (const sm of artifact.stateMachines) {

@@ -13,8 +13,7 @@ aglc add [projectRoot] [--name <ProjectName>] [--out <architecture.ag>] [--max-d
 1. **Scans** your project for source roots, manifests, and extractor facts
 2. **Generates** a deep `architecture.ag` starter with discovered components, routes, and imported sub-specs for oversized areas
 3. **Compiles** the spec → `architecture.o`
-4. **Installs** a git pre-commit hook
-5. **Emits** `skill.json` for AI agent toolchains
+4. **Emits** `skill.json` for AI agent toolchains
 
 **Output:**
 
@@ -25,8 +24,6 @@ aglc add [projectRoot] [--name <ProjectName>] [--out <architecture.ag>] [--max-d
     Components: 3 | Infra nodes: 2 | Contracts: 1
 [aglc add] Compiling spec...
   ✓ Compiled → /my-project/architecture.o
-[aglc add] Installing git pre-commit hook...
-  ✓ Installed hook
   ✓ Emitted skill manifest → /my-project/skill.json
 
 ╔══════════════════════════════════════════════════╗
@@ -37,13 +34,13 @@ aglc add [projectRoot] [--name <ProjectName>] [--out <architecture.ag>] [--max-d
 ║  2. Add or refine invariants in an agent-guided  ║
 ║     session                                      ║
 ║  3. Re-compile approved changes                  ║
-║  4. Every git commit is now checked              ║
+║  4. Run aglc check locally or in CI              ║
 ╚══════════════════════════════════════════════════╝
 ```
 
 ## `aglc generate` — Spec generation only
 
-If you want just the spec without installing the hook:
+If you want just the spec without compiling or emitting agent files:
 
 ```bash
 aglc generate [projectRoot] [--out architecture.ag] [--name MyApp] [--max-depth 3] [--single-file]

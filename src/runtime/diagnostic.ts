@@ -11,6 +11,38 @@ const GREEN  = '\x1b[32m';
 const MAGENTA = '\x1b[35m';
 
 function formatViolationBlock(v: GateViolation): string[] {
+  if (v.type === 'state_machine_violation') {
+    return [
+      '',
+      `${RED}${BOLD}╔══════════════════════════════════════════════════════════╗${RESET}`,
+      `${RED}${BOLD}║        aglang State Machine Violation                    ║${RESET}`,
+      `${RED}${BOLD}╚══════════════════════════════════════════════════════════╝${RESET}`,
+      '',
+      `${BOLD}Machine Violated:${RESET}  ${YELLOW}${v.invariant}${RESET}`,
+      `${BOLD}Transition:${RESET}        ${CYAN}${v.detected.data}.${(v.rule as { field: string }).field}${RESET} ${CYAN}${v.detected.from}${RESET} → ${CYAN}${v.detected.to}${RESET}`,
+      '',
+      `${BOLD}Detected in file:${RESET}`,
+      `  ${v.detected.file}`,
+      '',
+      `${BOLD}Evidence:${RESET} [confidence: ${v.detected.confidence}]`,
+      `  ${v.detected.evidence}`,
+      ...(v.detected.query ? [
+        '',
+        `${BOLD}Query:${RESET} ${v.detected.query.id}@${v.detected.query.version}`,
+        `  ${v.detected.query.file}`,
+        `  GraphFact: ${v.detected.query.graphFactId}`,
+      ] : []),
+      '',
+      `${BOLD}Explanation:${RESET}`,
+      `  ${v.message}`,
+      '',
+      `${BOLD}Z3 Proof (conflicting assertions):${RESET}`,
+      `  ${CYAN}Permanent rule:${RESET} ${v.z3_proof.permanent_constraint}`,
+      `  ${CYAN}Delta (your code):${RESET} ${v.z3_proof.delta_assertion}`,
+      `  These two assertions are mutually UNSAT — formal proof of violation.`,
+    ];
+  }
+
   if (v.type === 'di_violation') {
     return [
       '',
@@ -187,6 +219,19 @@ export function formatVerdict(verdict: GateVerdict): string {
     for (const file of v.trigger_files) parts.push(`  ${file}`);
   }
 
+  if ((verdict.solver_diagnostics?.length ?? 0) > 0) {
+    const hotspots = verdict.solver_diagnostics!.filter(d => d.status === 'unknown' || d.status === 'error' || Boolean(d.suggested_refactor));
+    if (hotspots.length > 0) {
+      parts.push('');
+      parts.push(`${YELLOW}${BOLD}Solver slice diagnostics:${RESET}`);
+      for (const d of hotspots.slice(0, 5)) {
+        parts.push(`  ${YELLOW}${d.status}${RESET} ${d.declaration} ${d.rule} (${d.elapsed_ms}ms)`);
+        if (d.source_file) parts.push(`    ${d.source_file}`);
+        if (d.suggested_refactor) parts.push(`    ${d.suggested_refactor}`);
+      }
+    }
+  }
+
   parts.push('');
   parts.push(`${RED}${BOLD}Commit Aborted.${RESET} Fix all layering violations before committing.`);
   parts.push(`Tip: run ${CYAN}aglc check-file --json${RESET} for machine-readable violation details.`);
@@ -214,6 +259,7 @@ export function formatVerdictJson(verdict: GateVerdict, artifactPath: string): s
     contract_violations: contractViolations,
     workflow_violations: workflowViolations,
     change_violations: changeViolations,
+    solver_diagnostics: verdict.solver_diagnostics ?? [],
     warnings: verdict.warnings,
     contract_warnings: contractWarnings,
     workflow_warnings: workflowWarnings,
@@ -224,6 +270,7 @@ export function formatVerdictJson(verdict: GateVerdict, artifactPath: string): s
         `Flow, dataflow, and DI violations include z3_proof with conflicting SMT assertions. ` +
         `Contract violations include proof with the contract assertion vs extracted code. ` +
         `Change violations include z3_proof with touched-component assertions. ` +
+        `Solver path-explosion diagnostics, when present, are in solver_diagnostics[]. ` +
         `Read AGENTS.md for full architectural rules and fix your code accordingly.`,
   }, null, 2);
 }

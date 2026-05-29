@@ -1,0 +1,14 @@
+id: OrderLifecycleTypeScriptAssignments
+owner: examples
+version: 1
+confidence: definite
+match:
+  kind: assignment
+  property: status
+  valueEnum: OrderStatus
+emit:
+  kind: transition
+  data: Order
+  field: status
+  from: "$previousMember"
+  to: "$valueMember"

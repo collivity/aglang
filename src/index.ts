@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // aglc — Architecture Ground Language Compiler CLI
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, cpSync } from 'fs';
-import { resolve, dirname, basename, join } from 'path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, cpSync } from 'fs';
+import { resolve, dirname, basename, join, relative } from 'path';
 import { fileURLToPath } from 'url';
 import { check } from './checker.ts';
 import { emitArtifact, writeArtifact, loadArtifact } from './emitters/artifact.ts';
 import { emitAgentsMarkdown } from './emitters/agents.ts';
 import { emitSkillManifest, writeSkillManifest } from './emitters/skill.ts';
 import { loadAndMerge, ImportError } from './importer.ts';
-import { parseDiff, parseProjectFiles } from './runtime/diff-parser.ts';
+import { parseDiff, parseDiffAgainst, parseProjectFiles, type ChangedComponent, type DiffSelection } from './runtime/diff-parser.ts';
 import { generateDeltaAssertions } from './runtime/delta-assert.ts';
 import { runGate } from './runtime/gate.ts';
 import { runContractGate } from './runtime/contract-gate.ts';
@@ -36,15 +36,15 @@ function usage() {
 aglc — Architecture Ground Language Compiler
 
 Commands:
-  aglc add [projectRoot] [--name <n>] [--out <file.ag>] [--max-depth <n>] [--single-file]     One-shot agent setup: generate → compile → hook → skill.json
+  aglc add [projectRoot] [--name <n>] [--out <file.ag>] [--max-depth <n>] [--single-file]     One-shot setup: generate → compile → skill.json
   aglc compile <file.ag> [--out <arch.o>]                    Compile .ag spec → architecture.o
   aglc generate [projectRoot] [--out <file.ag>] [--max-depth <n>] [--single-file]  Scan codebase → auto-generate starter .ag spec
   aglc emit-context --arch <arch.o> [--out <path>]          Emit AGENTS.md for AI agents
   aglc emit-skill   --arch <arch.o> [--out <path>]          Emit skill.json manifest for AI agents
   aglc install-agent-skill [--path <skills-dir>]            Install packaged aglang Codex skill for local agents
-  aglc install [--project <dir>] [--arch <arch.o>]          Install pre-commit git hook
-  aglc check --arch <arch.o> --project <dir> [--repo-filter <Name>] [--all] [--json] [--debug-extractors] [--require-ast]  Check staged git diff or whole project vs architecture
+  aglc check --arch <arch.o> --project <dir> [--repo-filter <Name>] [--diff <ref>] [--all] [--json] [--debug-extractors] [--require-ast]  Check staged, ref diff, or whole project vs architecture
   aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt] [--workflow-z3] [--dump-workflow-smt] [--debug-extractors] [--require-ast]  Analyze a specific file
+  aglc explain --arch <arch.o> --project <dir> --violation <id> [--json] [--diff <ref>] [--all]  Explain a violation from the current check scope
   aglc graph --arch <arch.o> [--file <f> | --project <dir>] [--json] [--debug-extractors] [--require-ast]  Emit graph facts and Z3 flow projections
   aglc import-openapi <swagger.json> [--out <file.ag>]       Import OpenAPI 3.x spec → .ag contracts
   aglc import-tf <main.tf> [--out <file.ag>]                Import Terraform → .ag node declarations
@@ -55,6 +55,7 @@ Flags:
   --single-file     Inline generated components instead of emitting imported sub-specs
   --debug-extractors   Include extractor trace output and fallback reasons
   --require-ast        Fail when an AST-capable extractor falls back to regex for a detected fact
+  --diff <ref>         Check files changed in git range <ref>...HEAD and mark reported violations as new
   --dump-smt           Write the full SMT-LIB script fed to Z3 → examples/debug.smt2
   --workflow-z3        Include workflow policy SMT debug snippets in verdicts
   --dump-workflow-smt  Write workflow policy SMT debug snippets → workflow-debug.smt2
@@ -162,62 +163,6 @@ async function compile(agPath: string, outOverride?: string) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// INSTALL (git pre-commit hook)
-// ─────────────────────────────────────────────────────────────
-function installHook(projectRoot: string, archPath: string) {
-  const absProject = resolve(projectRoot);
-  const hooksDir = resolve(absProject, '.git', 'hooks');
-
-  if (!existsSync(resolve(absProject, '.git'))) {
-    console.error(`Error: no .git directory found in ${absProject}`);
-    process.exit(1);
-  }
-
-  mkdirSync(hooksDir, { recursive: true });
-  const hookPath = resolve(hooksDir, 'pre-commit');
-  const absArch = resolve(archPath);
-
-  // Shell-safe: use single-quoted POSIX strings, no variable interpolation in values.
-  // Use `npx aglc` — consumers have aglc as a listed dependency; npx will find the bin.
-  // Paths are validated above (resolve()) and written as single-quoted literals so no
-  // shell metacharacters ($, `, (, ), etc.) can be injected from path values.
-  const safeSingleQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-  const hookScript = `#!/bin/sh
-# aglang pre-commit hook — auto-generated by aglc install
-# Checks staged files against architectural invariants before committing.
-# To bypass (emergency only): git commit --no-verify
-
-ARCH=${safeSingleQuote(absArch)}
-PROJECT=${safeSingleQuote(absProject)}
-
-if [ ! -f "$ARCH" ]; then
-  echo "[aglc] Warning: architecture.o not found at $ARCH, skipping check."
-  exit 0
-fi
-
-npx --no aglc check --arch "$ARCH" --project "$PROJECT"
-if [ $? -ne 0 ]; then
-  exit 1
-fi
-exit 0
-`;
-
-  writeFileSync(hookPath, hookScript, { encoding: 'utf8' });
-  try {
-    chmodSync(hookPath, 0o755);
-  } catch {
-    // chmod may not work on Windows — that's fine, WSL/Git will handle it
-  }
-
-  console.log(`✓ Installed pre-commit hook → ${hookPath}`);
-  console.log(`  Architecture artifact: ${absArch}`);
-  console.log(`  Project root:          ${absProject}`);
-  console.log('');
-  console.log('  On every git commit, aglc will check staged files against your architecture.');
-  console.log('  To bypass (emergency only): git commit --no-verify');
-}
-
-// ─────────────────────────────────────────────────────────────
 // EMIT-CONTEXT (AGENTS.md)
 // ─────────────────────────────────────────────────────────────
 function emitContext(archPath: string, outPath: string) {
@@ -255,7 +200,75 @@ function emitSkill(archPath: string, outPath: string) {
 // ─────────────────────────────────────────────────────────────
 // CHECK (git diff mode)
 // ─────────────────────────────────────────────────────────────
-async function checkDiff(archPath: string, projectRoot: string, repoFilter?: string, all = false) {
+function buildDiffSelection(absProject: string, changed: ChangedComponent[], mode: DiffSelection['mode'], base: string): DiffSelection {
+  return {
+    base,
+    mode,
+    changed_files: changed.flatMap(c => c.files.map(file => relative(absProject, file).replace(/\\/g, '/'))),
+    changed_components: changed.map(c => c.componentName),
+  };
+}
+
+function buildRuleCoverage(artifact: ArchitectureArtifact, changed: ChangedComponent[], delta: Awaited<ReturnType<typeof generateDeltaAssertions>>) {
+  const changedComponents = new Set(changed.map(c => c.componentName));
+  const coverage: Array<{ rule: string; declaration: string; components: string[]; evidence: string[] }> = [];
+  for (const invariant of artifact.invariants ?? []) {
+    const components = new Set<string>();
+    const evidence: string[] = [];
+    for (const rule of invariant.rules) {
+      const values = rule.kind === 'DenyDataFlow' ? [rule.to] : [rule.from, rule.to];
+      if (values.some(v => changedComponents.has(v))) {
+        values.forEach(v => { if (changedComponents.has(v)) components.add(v); });
+      }
+    }
+    for (const fact of [...delta.facts, ...delta.reachFacts]) {
+      if (fact.from && fact.to && invariant.rules.some(rule => rule.kind !== 'DenyDataFlow' && rule.from === fact.from && rule.to === fact.to)) {
+        components.add(fact.from);
+        components.add(fact.to);
+        evidence.push(fact.evidence);
+      }
+    }
+    if (components.size > 0 || evidence.length > 0) {
+      coverage.push({ rule: invariant.name, declaration: 'invariant', components: [...components], evidence: [...new Set(evidence)].slice(0, 5) });
+    }
+  }
+  for (const policy of artifact.changePolicies ?? []) {
+    const components = new Set<string>();
+    for (const rule of policy.rules) {
+      if (changedComponents.has(rule.trigger) || changedComponents.has(rule.required)) {
+        components.add(rule.trigger);
+        components.add(rule.required);
+      }
+    }
+    if (components.size > 0) {
+      coverage.push({ rule: policy.name, declaration: 'change_policy', components: [...components], evidence: ['changed component set'] });
+    }
+  }
+  for (const policy of artifact.diPolicies ?? []) {
+    const components = new Set<string>();
+    for (const fact of delta.diFacts) {
+      if (policy.rules.some(rule => 'from' in rule && rule.from === fact.from)) {
+        components.add(fact.from);
+        if ('to' in fact) components.add(fact.to);
+      }
+    }
+    if (components.size > 0) {
+      coverage.push({ rule: policy.name, declaration: 'di_policy', components: [...components], evidence: delta.diFacts.map(f => f.evidence).slice(0, 5) });
+    }
+  }
+  return coverage;
+}
+
+function annotateBaselineStatus(payload: Record<string, unknown>, status: 'new' | 'existing' | 'resolved' | 'unchanged'): void {
+  for (const key of ['violations', 'contract_violations', 'workflow_violations', 'change_violations']) {
+    const items = payload[key];
+    if (Array.isArray(items)) {
+      payload[key] = items.map(item => typeof item === 'object' && item ? { ...item, status } : item);
+    }
+  }
+}
+
+async function checkDiff(archPath: string, projectRoot: string, repoFilter?: string, all = false, diffBase?: string) {
   if (!existsSync(archPath)) {
     logErr(`Error: architecture.o not found: ${archPath}`);
     process.exit(1);
@@ -283,8 +296,17 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
     log(`[aglc] Repo filter: ${repoFilter} (components: ${[...repoComponents!].join(', ')})`);
   }
 
-  log(all ? `[aglc] Scanning all tracked component files in ${absProject}...` : `[aglc] Parsing git diff in ${absProject}...`);
-  let changed = all ? parseProjectFiles(absProject, artifact) : parseDiff(absProject, artifact);
+  const mode: DiffSelection['mode'] = all ? 'all' : diffBase ? 'git_ref' : 'staged';
+  log(all
+    ? `[aglc] Scanning all tracked component files in ${absProject}...`
+    : diffBase
+      ? `[aglc] Parsing git diff ${diffBase}...HEAD in ${absProject}...`
+      : `[aglc] Parsing git diff in ${absProject}...`);
+  let changed = all
+    ? parseProjectFiles(absProject, artifact)
+    : diffBase
+      ? parseDiffAgainst(absProject, artifact, diffBase)
+      : parseDiff(absProject, artifact);
 
   if (repoComponents) {
     changed = changed.filter(c => repoComponents.has(c.componentName));
@@ -293,9 +315,11 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
   if (changed.length === 0) {
     const msg = all
       ? 'No files matched tracked components. Check allowed.'
-      : 'No staged changes in tracked components. Commit allowed.';
+      : diffBase
+        ? `No files changed against ${diffBase}...HEAD in tracked components. Check allowed.`
+        : 'No staged changes in tracked components. Commit allowed.';
     if (jsonMode) {
-      process.stdout.write(JSON.stringify({ schema_version: 2, passed: true, violations: [], contract_violations: [], workflow_violations: [], change_violations: [], warnings: [], contract_warnings: [], workflow_warnings: [], timestamp: new Date().toISOString(), artifact: archPath, agent_context: msg }, null, 2) + '\n');
+      process.stdout.write(JSON.stringify({ schema_version: 2, passed: true, violations: [], contract_violations: [], workflow_violations: [], change_violations: [], warnings: [], contract_warnings: [], workflow_warnings: [], timestamp: new Date().toISOString(), artifact: archPath, diff: buildDiffSelection(absProject, changed, mode, diffBase ?? (all ? 'workspace' : 'staged')), rule_coverage: [], agent_context: msg }, null, 2) + '\n');
     } else {
       log(`[aglc] ${msg}`);
     }
@@ -306,7 +330,7 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
   log(`[aglc] Generating delta assertions...`);
   let delta;
   try {
-    delta = await generateDeltaAssertions(changed, artifact, { debugExtractors, requireAst });
+    delta = await generateDeltaAssertions(changed, artifact, { debugExtractors, requireAst, projectRoot: absProject });
   } catch (error) {
     const message = (error as Error).message;
     if (jsonMode) {
@@ -337,7 +361,9 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
     delta.blockingTrustPolicyFacts.length === 0 &&
     delta.blockingDiFacts.length === 0 &&
     delta.blockingPermissionFacts.length === 0 &&
+    delta.blockingTransitionFacts.length === 0 &&
     delta.warningFacts.length === 0 &&
+    delta.transitionWarningFacts.length === 0 &&
     contractResult.violations.length === 0 &&
     workflowResult.violations.length === 0 &&
     changeResult.violations.length === 0
@@ -356,6 +382,8 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
         workflow_warnings: workflowResult.warnings,
         timestamp: new Date().toISOString(),
         artifact: archPath,
+        diff: buildDiffSelection(absProject, changed, mode, diffBase ?? (all ? 'workspace' : 'staged')),
+        rule_coverage: buildRuleCoverage(artifact, changed, delta),
         ...(debugExtractors ? { extractor_debug: delta.extractorDebug } : {}),
         agent_context: msg,
       }, null, 2) + '\n');
@@ -384,6 +412,9 @@ async function checkDiff(archPath: string, projectRoot: string, repoFilter?: str
 
   if (jsonMode) {
     const payload = JSON.parse(formatVerdictJson(verdict, archPath)) as Record<string, unknown>;
+    payload.diff = buildDiffSelection(absProject, changed, mode, diffBase ?? (all ? 'workspace' : 'staged'));
+    payload.rule_coverage = buildRuleCoverage(artifact, changed, delta);
+    annotateBaselineStatus(payload, diffBase ? 'new' : 'unchanged');
     if (debugExtractors) payload.extractor_debug = delta.extractorDebug;
     process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
   } else {
@@ -464,7 +495,7 @@ async function checkFile(archPath: string, filePath: string) {
     delta = await generateDeltaAssertions(
       [{ componentName, files: [absFile] }],
       artifact,
-      { debugExtractors, requireAst },
+      { debugExtractors, requireAst, projectRoot: process.cwd() },
     );
   } catch (error) {
     const message = (error as Error).message;
@@ -486,7 +517,7 @@ async function checkFile(archPath: string, filePath: string) {
     log(`[aglc] Contract check: ${contractResult.violations.length} violation(s), ${contractResult.warnings.length} warning(s)`);
   }
 
-  if (delta.facts.length === 0 && delta.diFacts.length === 0 && contractResult.violations.length === 0 && workflowResult.violations.length === 0) {
+  if (delta.facts.length === 0 && delta.diFacts.length === 0 && delta.transitionFacts.length === 0 && contractResult.violations.length === 0 && workflowResult.violations.length === 0) {
     if (contractResult.warnings.length > 0) {
       // Pass but show warnings
     } else {
@@ -529,6 +560,14 @@ async function checkFile(archPath: string, filePath: string) {
     }
   }
 
+  if (delta.transitionFacts.length > 0) {
+    log(`[aglc] Detected state-machine transition facts:`);
+    for (const f of delta.transitionFacts) {
+      const tag = f.confidence === 'definite' ? '🔴' : f.confidence === 'probable' ? '🟡' : '⚪';
+      log(`  ${tag} [${f.confidence}] ${f.data}.${f.field} ${f.from ?? '*'} → ${f.to}: ${f.evidence}`);
+    }
+  }
+
   // Dump full SMT-LIB script to file if requested
   if (dumpSmt) {
     const smtScript = [...artifact.constraints, '', ...delta.smtAssertions].join('\n');
@@ -556,6 +595,127 @@ async function checkFile(archPath: string, filePath: string) {
     console.log(formatVerdict(verdict));
   }
   process.exit(verdict.passed ? 0 : 1);
+}
+
+// ─────────────────────────────────────────────────────────────
+// EXPLAIN (stable violation lookup)
+// ─────────────────────────────────────────────────────────────
+function fixClassForViolation(type: string): string {
+  if (type === 'change_violation') return 'add_companion_change';
+  if (type === 'permission_violation') return 'fix_auth_policy';
+  if (type === 'state_machine_violation') return 'fix_state_transition';
+  if (type === 'di_violation') return 'move_registration';
+  if (type === 'trust_policy_violation' || type === 'data_policy_violation') return 'fix_auth_policy';
+  return 'move_dependency';
+}
+
+function suggestedFixForViolation(v: Record<string, unknown>): string {
+  const type = String(v.type ?? '');
+  if (type === 'change_violation') {
+    return `Touch the required companion component '${String(v.required ?? '')}' in the same checked diff, or revise the change_policy only with explicit architecture approval.`;
+  }
+  const detected = (v.detected && typeof v.detected === 'object') ? v.detected as Record<string, unknown> : {};
+  if (type === 'state_machine_violation') {
+    return `Move the state assignment in ${String(detected.file ?? '')} to a declared transition path, or update the machine declaration with approval.`;
+  }
+  if (type === 'permission_violation' || type === 'trust_policy_violation') {
+    return `Add or correct the required authentication/authorization evidence near ${String(detected.file ?? '')}, or update the declared policy with approval.`;
+  }
+  if (type === 'di_violation') {
+    return `Move the DI registration or constructor dependency so '${String(detected.from ?? '')}' no longer depends on '${String(detected.to ?? '')}'.`;
+  }
+  return `Remove or invert the dependency from '${String(detected.from ?? '')}' to '${String(detected.to ?? '')}', or move the code behind an allowed component boundary.`;
+}
+
+async function explainViolation(archPath: string, projectRoot: string, violationId: string, all = false, diffBase?: string) {
+  if (!existsSync(archPath)) {
+    logErr(`Error: architecture.o not found: ${archPath}`);
+    process.exit(1);
+  }
+  const artifact: ArchitectureArtifact = loadArtifact(readFileSync(archPath, 'utf8'));
+  const absProject = resolve(projectRoot);
+  const mode: DiffSelection['mode'] = all ? 'all' : diffBase ? 'git_ref' : 'staged';
+  const changed = all
+    ? parseProjectFiles(absProject, artifact)
+    : diffBase
+      ? parseDiffAgainst(absProject, artifact, diffBase)
+      : parseDiff(absProject, artifact);
+
+  let delta;
+  try {
+    delta = await generateDeltaAssertions(changed, artifact, { debugExtractors, requireAst, projectRoot: absProject });
+  } catch (error) {
+    const message = (error as Error).message;
+    if (jsonMode) process.stdout.write(extractorErrorJson(archPath, message) + '\n');
+    else logErr(`[aglc] Extractor failure: ${message}`);
+    process.exit(1);
+  }
+
+  const allChangedFiles = changed.flatMap(c => c.files);
+  const contractResult = await runContractGate(artifact, allChangedFiles, { projectRoot: absProject, checkCompleteness: true });
+  const workflowResult = runWorkflowGate(artifact, allChangedFiles, {
+    projectRoot: absProject,
+    workflowZ3: args.includes('--workflow-z3'),
+    dumpWorkflowSmt: args.includes('--dump-workflow-smt') ? workflowDebugPathForArch(archPath) : undefined,
+  });
+  const changeResult = await runChangeGate(artifact, changed);
+  const verdict = await runGate(artifact, delta);
+  verdict.contract_violations = contractResult.violations;
+  verdict.workflow_violations = workflowResult.violations;
+  verdict.change_violations = changeResult.violations;
+
+  const allViolations = [
+    ...verdict.violations,
+    ...changeResult.violations,
+    ...contractResult.violations,
+    ...workflowResult.violations,
+  ] as unknown as Array<Record<string, unknown>>;
+  const found = allViolations.find(v => v.id === violationId);
+  if (!found) {
+    const payload = {
+      schema_version: 2,
+      found: false,
+      violation_id: violationId,
+      diff: buildDiffSelection(absProject, changed, mode, diffBase ?? (all ? 'workspace' : 'staged')),
+      message: `No violation with id '${violationId}' was found in the selected check scope.`,
+    };
+    if (jsonMode) process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+    else logErr(payload.message);
+    process.exit(2);
+  }
+
+  const explanation = {
+    schema_version: 2,
+    found: true,
+    violation_id: violationId,
+    type: found.type,
+    rule: found.invariant ?? found.policy ?? found.contract,
+    declaration: found.type === 'change_violation' ? 'change_policy' : found.type === 'workflow_violation' ? 'workflow_policy' : found.type === 'contract_violation' ? 'contract' : 'invariant_or_policy',
+    spec_citation: artifact.sourcePath,
+    source: (found.detected && typeof found.detected === 'object')
+      ? {
+          file: (found.detected as Record<string, unknown>).file,
+          line: (found.graph_evidence as Record<string, unknown> | undefined)?.line,
+          evidence: (found.detected as Record<string, unknown>).evidence,
+        }
+      : { evidence: found.evidence ?? found.message },
+    graph_fact_chain: (found.graph_evidence ? [found.graph_evidence] : []),
+    z3_proof: found.z3_proof ?? found.proof ?? null,
+    fix_class: fixClassForViolation(String(found.type ?? '')),
+    suggested_fix: suggestedFixForViolation(found),
+    diff: buildDiffSelection(absProject, changed, mode, diffBase ?? (all ? 'workspace' : 'staged')),
+  };
+
+  if (jsonMode) {
+    process.stdout.write(JSON.stringify(explanation, null, 2) + '\n');
+  } else {
+    console.log(`Violation ${violationId}`);
+    console.log(`Type: ${String(explanation.type)}`);
+    console.log(`Rule: ${String(explanation.rule)}`);
+    console.log(`Fix class: ${explanation.fix_class}`);
+    console.log(`Suggested fix: ${explanation.suggested_fix}`);
+  }
+  process.exit(0);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -598,6 +758,7 @@ async function graphCommand(archPath: string, filePath: string | undefined, proj
 
   const artifact: ArchitectureArtifact = loadArtifact(readFileSync(archPath, 'utf8'));
   let changed;
+  let graphProjectRoot = process.cwd();
 
   if (filePath) {
     if (!existsSync(filePath)) {
@@ -620,6 +781,7 @@ async function graphCommand(archPath: string, filePath: string | undefined, proj
     changed = [{ componentName, files: [absFile] }];
   } else {
     const absProject = resolve(projectRoot ?? '.');
+    graphProjectRoot = absProject;
     changed = args.includes('--all')
       ? parseProjectFiles(absProject, artifact)
       : parseDiff(absProject, artifact);
@@ -627,7 +789,7 @@ async function graphCommand(archPath: string, filePath: string | undefined, proj
 
   let delta;
   try {
-    delta = await generateDeltaAssertions(changed, artifact, { debugExtractors, requireAst });
+    delta = await generateDeltaAssertions(changed, artifact, { debugExtractors, requireAst, projectRoot: graphProjectRoot });
   } catch (error) {
     const message = (error as Error).message;
     if (jsonMode) {
@@ -752,22 +914,12 @@ async function addProject(projectRoot: string, opts: { name?: string; out?: stri
   writeArtifact(artifact, archOut);
   log(`  ✓ Compiled → ${archOut}`);
 
-  // 3. Install pre-commit hook
-  log(`[aglc add] Installing git pre-commit hook...`);
-  const hasGit = existsSync(resolve(absProject, '.git'));
-  if (!hasGit) {
-    log(`  ⚠ No .git directory found in ${absProject} — skipping hook installation.`);
-    log(`    Run 'git init && aglc install --project . --arch ${archOut}' manually.`);
-  } else {
-    installHook(absProject, archOut);
-  }
-
-  // 4. Emit skill.json
+  // 3. Emit skill.json
   const manifest = emitSkillManifest(artifact, archOut);
   writeSkillManifest(manifest, skillOut);
   log(`  ✓ Emitted skill manifest → ${skillOut}`);
 
-  // 5. Summary
+  // 4. Summary
   console.log(`
 ╔══════════════════════════════════════════════════════════╗
 ║  aglang setup complete                                   ║
@@ -782,7 +934,7 @@ async function addProject(projectRoot: string, opts: { name?: string; out?: stri
 ║  2. Add or adjust invariants through that guided session ║
 ║  3. Re-compile approved changes:                         ║
 ║     aglc compile ${agOut.padEnd(39)} ║
-║  4. Every git commit is now checked automatically        ║
+║  4. Run aglc check explicitly in local workflows or CI   ║
 ╚══════════════════════════════════════════════════════════╝`);
 }
 
@@ -821,11 +973,6 @@ function writeGeneratedSpecFiles(outDir: string, rootFileName: string, files: Ar
     if (!agFile) usage();
     await compile(agFile!, getArg('--out'));
 
-  } else if (command === 'install') {
-    const projectRoot = getArg('--project') ?? '.';
-    const archPath = getArg('--arch') ?? 'architecture.o';
-    installHook(projectRoot, archPath);
-
   } else if (command === 'emit-context') {
     const archPath = getArg('--arch') ?? 'architecture.o';
     const outPath = getArg('--out') ?? 'AGENTS.md';
@@ -843,13 +990,20 @@ function writeGeneratedSpecFiles(outDir: string, rootFileName: string, files: Ar
     const archPath = getArg('--arch') ?? 'architecture.o';
     const projectRoot = getArg('--project') ?? '.';
     const repoFilter = getArg('--repo-filter');
-    await checkDiff(archPath, projectRoot, repoFilter, args.includes('--all'));
+    await checkDiff(archPath, projectRoot, repoFilter, args.includes('--all'), getArg('--diff'));
 
   } else if (command === 'check-file') {
     const archPath = getArg('--arch') ?? 'architecture.o';
     const filePath = getArg('--file');
     if (!filePath) usage();
     await checkFile(archPath, filePath!);
+
+  } else if (command === 'explain') {
+    const archPath = getArg('--arch') ?? 'architecture.o';
+    const projectRoot = getArg('--project') ?? '.';
+    const violationId = getArg('--violation');
+    if (!violationId) usage();
+    await explainViolation(archPath, projectRoot, violationId!, args.includes('--all'), getArg('--diff'));
 
   } else if (command === 'graph') {
     const archPath = getArg('--arch') ?? 'architecture.o';

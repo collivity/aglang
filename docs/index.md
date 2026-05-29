@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: aglang
-  text: Checked Architecture For Agents
-  tagline: "Write architecture intent once in a `.ag` spec, then let agents, subagents, and git hooks check real code against it while work is still in progress."
+  text: Auditable Architecture Verification Layer
+  tagline: "Turn architecture intent, deterministic code facts, and reviewed semantic queries into a checked model of a real system."
   image:
     src: /hero.svg
     alt: aglang architecture pipeline diagram
@@ -24,59 +24,85 @@ hero:
 
 features:
   - icon: ✅
-    title: Checks Real Code
-    details: "aglang compiles a reviewed `.ag` spec into `architecture.o`, extracts facts from the codebase, and checks those facts against declared rules."
+    title: Verifies Code Facts
+    details: "aglang compiles a reviewed `.ag` spec into `architecture.o`, extracts tree-sitter and AST facts, and checks those facts against declared rules."
 
-  - icon: 🤖
-    title: Useful For Agents And Subagents
-    details: "The spec becomes shared truth across workers, which reduces architectural drift when parent agents and subagents operate with partial context."
+  - icon: 🔎
+    title: Reviews Semantic Queries
+    details: "Committed `.agq.yml` query files turn deterministic graph facts into domain facts such as transitions and flows without calling an LLM during checks."
 
   - icon: 🔁
-    title: Works During Coding
-    details: "Agents can run `aglc check-file` during focused edits and `aglc check --all` before finishing, instead of waiting until commit time."
+    title: Explains Violations
+    details: "`aglc check`, JSON verdicts, and `aglc explain` connect a failed rule to source evidence, query provenance, and solver proof details."
 
   - icon: 🧩
     title: Enforces Boundaries
-    details: "Today the strongest built-in checks are flow, reachability, dataflow, trust, DI, contracts, workflow policies, and change policies."
+    details: "Today the strongest built-in checks cover flow, reachability, dataflow, trust/auth, DI, contracts, workflows, change policies, and state machines."
 
-  - icon: 📦
-    title: Bootstraps Existing Repos
-    details: "`aglc add` and `aglc generate` can create a starter spec, but the best results usually come from reviewing and refining that draft with a human or agent."
+  - icon: 🗂️
+    title: Coordinates Multi-Repo Work
+    details: "One architecture contract can govern services, CI workflows, docs, package metadata, and agent work across repository boundaries."
 
-  - icon: 🔌
-    title: Extraction Is Extensible
-    details: "Built-in extractors cover multiple languages now, and the plugin protocol lets teams add stronger repo-specific extraction over time."
+  - icon: 🤖
+    title: Gives Agents Shared Truth
+    details: "Agents are a primary workflow because they benefit from machine-readable architecture context, but the same checks serve humans and CI."
 ---
 
 ## What aglang is
 
-aglang is an architecture checking layer for real coding workflows.
+aglang is an auditable verification layer for architecture and code facts.
 
-You describe components, nodes, contracts, and rules in a `.ag` file. `aglc` compiles that into a checked artifact, extracts facts from the repository, and tells you when the implementation contradicts the intended structure.
+You describe components, nodes, contracts, state machines, and rules in a `.ag` file. `aglc` compiles that into `architecture.o`, extracts deterministic facts from the repository, applies reviewed semantic queries from `.agq.yml`, and checks the resulting model with Z3-backed rules and deterministic policy gates.
 
-The important point is that aglang is not just documentation and not just a commit hook:
+The important point is that aglang is not just documentation, not just a CI check, and not just an agent helper:
 
-- it gives agents a machine-readable view of architecture intent
-- it lets engineers and agents validate work before merge
-- it produces structured verdicts with proof details, not vague style feedback
+- it gives engineers, agents, and CI the same machine-readable architecture truth
+- it separates extracted facts from reviewed semantic interpretation
+- it produces structured verdicts with source evidence, stable ids, and proof details
 
 ---
 
-## What it can do today
+## How the check works
 
-aglang is already good at a few things that matter in practice:
+The first-page model is intentionally simple:
 
-- **Architecture drift reduction**: a reviewed spec gives parent agents and subagents the same external boundary model, instead of relying on prompt memory.
-- **Dependency injection checks**: C# DI extraction is strong enough to catch constructor-injection boundary violations, service-locator usage, and some lifetime issues.
-- **Route and workflow checks**: contracts and GitHub Actions policies are checked deterministically when modeled.
-- **Work-in-progress validation**: `check-file` and `check --all` make the same architecture visible while the code is still changing.
-- **Starter generation**: `generate` and `add` can bootstrap a draft spec for an existing repo.
+1. **Extract facts** from source code, manifests, workflows, and optional plugin output.
+2. **Review semantic queries and specs** in `.ag`, `.agq.yml`, and generated context before trusting them.
+3. **Check the model** with Z3-backed rules and deterministic contract/workflow policy evaluators.
+4. **Explain violations** with JSON verdicts, query provenance, solver diagnostics, and `aglc explain --violation <id> --json`.
 
-This is the right mental model:
+`aglc check` does not call an LLM. Humans and agents can help author the spec or semantic queries, but the verification run uses committed source artifacts.
 
-- `generate` is a starting point
-- a reviewed `.ag` is the shared truth
-- `check` is the enforcement runtime
+---
+
+## What is verified
+
+aglang is strongest where architecture intent can be stated as facts and rules:
+
+- **Flows and reachability**: direct and transitive component or node paths.
+- **Data policies**: classification and jurisdiction reachability.
+- **Trust and auth boundaries**: declared trust zones, auth metadata, and classified data crossings.
+- **Dependency injection**: constructor injection, lifetime relationships, and service-locator usage where extractors produce definite evidence.
+- **Contracts**: implemented and consumed routes checked against declared API contracts.
+- **Workflows**: GitHub Actions publish, deploy, release, permissions, and step order.
+- **Change policies**: required companion changes such as docs, package metadata, or generated agent context.
+- **State machines**: query-emitted transitions checked against declared `machine` blocks.
+
+## What is audited
+
+The verification surface is made of reviewable files and machine-readable outputs:
+
+- `.ag` is the architecture source of truth.
+- `architecture.o` is the compiled checked artifact.
+- `.agq.yml` files are the semantic layer over deterministic graph facts.
+- `AGENTS.md` and `skill.json` are generated context for coding agents.
+- JSON verdicts contain stable violation ids, diff metadata, rule coverage, query provenance, proof details, and solver diagnostics.
+
+## Why multi-repo matters
+
+Real architecture drift rarely stays inside one package. A release workflow, public API, generated docs, package metadata, and service implementation can live in different repositories while still representing one architecture decision.
+
+aglang lets a reviewed architecture contract coordinate those surfaces. Components can carry `repo:` metadata, change policies can require related files to move together, and the same `architecture.o` can be used by humans, CI, and agents working on different slices of a system.
 
 ---
 
@@ -84,12 +110,13 @@ This is the right mental model:
 
 The limits matter.
 
+- It does **not** prove arbitrary program correctness.
 - It does **not** infer perfect architecture from source code automatically.
-- Some extractors are stronger than others; generated starters still need review.
+- It verifies extracted and reviewed architecture facts against declared rules; weak extraction means weak evidence.
+- Some extractors are stronger than others, and generated starters still need review.
 - Advisory declarations are not hard gates unless a runtime or extractor supports them.
-- For large or noisy repos, an agent-authored or engineer-reviewed spec is usually much better than raw auto-generation.
 
-If you want maximum value from aglang, treat the generated spec as a draft and the checked spec as the product.
+If you want maximum value from aglang, treat generated specs and queries as drafts. The reviewed `.ag`, `.agq.yml`, and generated verification artifacts are the product.
 
 ---
 
@@ -120,7 +147,7 @@ aglc check-file --arch architecture.o --file src/foo.cs --json
 aglc check --arch architecture.o --project . --all --json
 ```
 
-### 5. Let commit hooks and CI enforce the same rules
+### 5. Let local checks and CI enforce the same rules
 
 The same checked artifact can run locally and in CI. Humans and agents both hit the same gate.
 
@@ -132,9 +159,9 @@ Not every declaration is enforced the same way.
 
 | Level | Used for | Meaning |
 |---|---|---|
-| `formal_z3` | `deny flow`, `deny reach`, `deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy` | Checked with solver-backed constraints when extractors produce definite evidence. |
+| `formal_z3` | `deny flow`, `deny reach`, `deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy`, `machine` | Checked with solver-backed constraints when extractors produce definite evidence. |
 | `deterministic_policy` | `contract`, `workflow_policy` | Checked by deterministic gates with exact diagnostics. |
-| `advisory` | `machine`, `require encryption` | Emitted to docs and agent context, but not blocking by themselves yet. |
+| `advisory` | `require encryption` | Emitted to docs and agent context, but not blocking by themselves yet. |
 
 That distinction is part of the contract with users: aglang should say clearly what is proven, what is policy-checked, and what is only guidance.
 
@@ -168,7 +195,7 @@ Then bootstrap a project:
 aglc add /path/to/your/project
 ```
 
-`aglc add` creates a starter architecture spec, compiles it, installs the git hook, and emits the agent manifest files. The next step is review, not blind trust. [Full getting-started guide →](./guide/getting-started)
+`aglc add` creates a starter architecture spec, compiles it, and emits the agent manifest files. The next step is review, not blind trust. [Full getting-started guide →](./guide/getting-started)
 
 ---
 

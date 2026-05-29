@@ -3,7 +3,7 @@
 // Uses tree-sitter AST when available, falls back to regex silently.
 
 import { readFileSync } from 'fs';
-import type { ExtractorPlugin, ExtractorInput, FlowFact, ExtractionStrategy } from './plugin.ts';
+import type { ExtractorPlugin, ExtractorInput, FlowFact, GraphFact, ExtractionStrategy } from './plugin.ts';
 import { normalizeRoute } from './typescript.ts';
 import { makeParser, getTreeSitter } from './ast/loader.ts';
 import { parseAndQuery } from './ast/walker.ts';
@@ -583,6 +583,79 @@ export const csharpPlugin: ExtractorPlugin = {
         : withStrategy(analyzeFileRegex(content, filePath, input.componentName), 'regex')));
     }
     return facts;
+  },
+  async extractGraph(input: ExtractorInput): Promise<GraphFact[]> {
+    const graphFacts: GraphFact[] = [];
+    const flowFacts = await this.extract(input);
+    graphFacts.push(...flowFacts.map((fact, index) => ({
+      id: `csharp-flow:${index}:${fact.from}:${fact.to}:${fact.file}:${fact.line ?? 0}`,
+      kind: 'accesses_technology',
+      subject: fact.from,
+      technology: fact.to,
+      confidence: fact.confidence,
+      evidence: {
+        extractor: csharpPlugin.name,
+        strategy: fact.strategy ?? 'legacy-flow',
+        file: fact.file,
+        line: fact.line,
+        message: fact.evidence,
+      },
+    } satisfies GraphFact)));
+
+    for (const filePath of input.files) {
+      let content: string;
+      try { content = readFileSync(filePath, 'utf8'); } catch { continue; }
+      const emitted = new Set<string>();
+      const add = (kind: string, index: number, properties: GraphFact['properties'], message: string): void => {
+        const line = lineOf(content, index);
+        const id = `csharp-semantic:${filePath}:${line}:${kind}:${JSON.stringify(properties)}`;
+        if (emitted.has(id)) return;
+        emitted.add(id);
+        graphFacts.push({
+          id,
+          kind,
+          subject: input.componentName,
+          properties,
+          confidence: 'definite',
+          evidence: {
+            extractor: csharpPlugin.name,
+            strategy: 'regex',
+            file: filePath,
+            line,
+            message,
+          },
+        });
+      };
+
+      const callRe = /\b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\.\s*([A-Za-z_]\w*)\s*\(\s*([A-Za-z_]\w*)\.([A-Za-z_]\w*)/g;
+      let call: RegExpExecArray | null;
+      while ((call = callRe.exec(content)) !== null) {
+        add('call', call.index, {
+          receiver: call[1]!,
+          callee: call[2]!,
+          argumentEnum: call[3]!,
+          argumentMember: call[4]!,
+        }, `${call[1]}.${call[2]}(${call[3]}.${call[4]})`);
+      }
+
+      const assignmentRe = /\b([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\.([A-Za-z_]\w*)/g;
+      let assignment: RegExpExecArray | null;
+      while ((assignment = assignmentRe.exec(content)) !== null) {
+        const before = content.slice(Math.max(0, assignment.index - 300), assignment.index);
+        const guardRe = new RegExp(`${assignment[1]}\\.${assignment[2]}\\s*(?:==|is)\\s*${assignment[3]}\\.([A-Za-z_]\\w*)`);
+        const guards = [...before.matchAll(new RegExp(guardRe.source, 'g'))];
+        const guard = guards.at(-1);
+        add('assignment', assignment.index, {
+          object: assignment[1]!,
+          property: assignment[2]!,
+          valueEnum: assignment[3]!,
+          valueMember: assignment[4]!,
+          ...(guard ? { previousMember: guard[1]! } : {}),
+        }, `${assignment[1]}.${assignment[2]} = ${assignment[3]}.${assignment[4]}`);
+      }
+    }
+
+    return graphFacts;
   },
 };
 

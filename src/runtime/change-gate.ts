@@ -1,8 +1,10 @@
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
 import type { ChangedComponent } from './diff-parser.ts';
 import { checkConstraints } from '../smt/solver.ts';
+import { createHash } from 'crypto';
 
 export interface ChangeViolation {
+  id: string;
   type: 'change_violation';
   policy: string;
   trigger: string;
@@ -29,6 +31,11 @@ function smtId(name: string): string {
 
 function touchedSymbol(component: string): string {
   return `Touched_${smtId(component)}`;
+}
+
+function changeViolationId(policy: string, trigger: string, required: string, files: string[]): string {
+  const body = ['change_violation', policy, trigger, required, ...files].join('|');
+  return `viol_${createHash('sha256').update(body).digest('hex').slice(0, 16)}`;
 }
 
 export async function runChangeGate(
@@ -77,6 +84,7 @@ export async function runChangeGate(
         const triggerAssertion = `(assert ${touchedSymbol(rule.trigger)})`;
         const missingAssertion = `(assert (not ${touchedSymbol(rule.required)}))`;
         violations.push({
+          id: changeViolationId(policy.name, rule.trigger, rule.required, triggerFiles),
           type: 'change_violation',
           policy: policy.name,
           trigger: rule.trigger,

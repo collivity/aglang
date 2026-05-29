@@ -1,0 +1,57 @@
+node android_device : edge_mobile {
+  trust: untrusted
+}
+
+node api_runtime : server {
+  trust: trusted
+  auth: jwt
+}
+
+node worker_runtime : server {
+  trust: trusted
+  auth: mtls
+}
+
+enum OrderStatus {
+  Created | PendingPayment | Paid | FulfillmentQueued | Fulfilled | Cancelled | Refunded
+}
+
+data Order {
+  id: UUID
+  status: OrderStatus
+  stripe_payment_intent_id: Optional<String>
+}
+
+component AndroidApp {
+  runs_on: android_device
+  paths: "android/**/*.kt"
+}
+
+component BackendApi {
+  runs_on: api_runtime
+  paths: "backend/api/**/*.ts"
+}
+
+component StripeWebhook {
+  runs_on: api_runtime
+  paths: "backend/webhooks/**/*.ts"
+}
+
+component FulfillmentWorker {
+  runs_on: worker_runtime
+  paths: "workers/**/*.ts"
+}
+
+machine OrderLifecycle on Order.status {
+  allow transition Created -> PendingPayment
+  allow transition PendingPayment -> Paid
+  allow transition PendingPayment -> Cancelled
+  allow transition Paid -> FulfillmentQueued
+  allow transition FulfillmentQueued -> Fulfilled
+  allow transition Paid -> Refunded
+  deny transition Created -> Paid
+  deny transition Created -> Fulfilled
+  deny transition PendingPayment -> Fulfilled
+  deny transition Cancelled -> *
+  deny transition Refunded -> *
+}

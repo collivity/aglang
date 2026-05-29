@@ -1,0 +1,15 @@
+id: StripeOrderLifecycleTypeScriptAssignments
+owner: examples
+version: 1
+confidence: definite
+match:
+  extractor: TypeScript/Node.js server analyzer
+  kind: assignment
+  property: status
+  valueEnum: OrderStatus
+emit:
+  kind: transition
+  data: Order
+  field: status
+  from: "$previousMember"
+  to: "$valueMember"

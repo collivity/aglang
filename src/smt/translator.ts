@@ -1,5 +1,5 @@
 // SMT-LIB 2.6 translator — converts checked AST to formula strings
-import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, ResourceDecl, DiPolicyDecl, DataPolicyDecl, TrustPolicyDecl, PermissionDecl } from '../ast.ts';
+import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, ResourceDecl, DiPolicyDecl, DataPolicyDecl, TrustPolicyDecl, PermissionDecl, StateMachineDecl, TransitionRule } from '../ast.ts';
 import { BASE_SMT_DECLARATIONS } from '../stdlib/topology.ts';
 import { expandInvariantRules } from '../invariant-selectors.ts';
 
@@ -18,6 +18,7 @@ export function translate(program: Program): string[] {
   const dataPolicies: DataPolicyDecl[] = [];
   const trustPolicies: TrustPolicyDecl[] = [];
   const permissions: PermissionDecl[] = [];
+  const stateMachines: StateMachineDecl[] = [];
   const enums: EnumDecl[] = [];
   const dataTypes: DataDecl[] = [];
 
@@ -30,6 +31,7 @@ export function translate(program: Program): string[] {
     else if (d.kind === 'DataPolicyDecl') dataPolicies.push(d);
     else if (d.kind === 'TrustPolicyDecl') trustPolicies.push(d);
     else if (d.kind === 'PermissionDecl') permissions.push(d);
+    else if (d.kind === 'StateMachineDecl') stateMachines.push(d);
     else if (d.kind === 'EnumDecl') enums.push(d);
     else if (d.kind === 'DataDecl') dataTypes.push(d);
   }
@@ -219,6 +221,45 @@ export function translate(program: Program): string[] {
     }
     for (const op of operations) stmts.push(`(declare-const Operation__${smtId(op)} Operation)`);
     for (const role of roles) stmts.push(`(declare-const Role__${smtId(role)} RoleType)`);
+    stmts.push('');
+  }
+
+  if (stateMachines.length > 0) {
+    stmts.push('; === state machine transition rules ===');
+    const declaredStateValues = new Set<string>();
+    for (const machine of stateMachines) {
+      const dataDecl = dataTypes.find(d => d.name === machine.onType);
+      const field = dataDecl?.fields.find(f => f.key === machine.onField);
+      const enumName = field?.typeExpr.replace(/^Optional<(.+)>$/, '$1').trim();
+      const enumDecl = enums.find(e => e.name === enumName);
+      if (!enumDecl) continue;
+      const stateNamespace = enumName!;
+      const fieldId = `Field__${smtId(machine.onType)}__${smtId(machine.onField)}`;
+      const stateId = (value: string): string => `State__${smtId(stateNamespace)}__${smtId(value)}`;
+      stmts.push(`; --- ${machine.name} ---`);
+      stmts.push(`(declare-const ${fieldId} Field)`);
+      for (const value of enumDecl.values) {
+        const id = stateId(value);
+        if (!declaredStateValues.has(id)) {
+          stmts.push(`(declare-const ${id} StateValue)`);
+          declaredStateValues.add(id);
+        }
+      }
+      const denyTransition = (from: string, to: string): void => {
+        stmts.push(`(assert (=> (Transition ${smtId(machine.onType)} ${fieldId} ${stateId(from)} ${stateId(to)}) false))`);
+      };
+      const matches = (rule: TransitionRule, from: string, to: string): boolean =>
+        (rule.from === '*' || rule.from === from) && (rule.to === '*' || rule.to === to);
+      const allowRules = machine.transitions.filter(t => t.kind === 'allow');
+      for (const from of enumDecl.values) {
+        for (const to of enumDecl.values) {
+          if (from === to) continue;
+          const explicitlyDenied = machine.transitions.some(t => t.kind === 'deny' && matches(t, from, to));
+          const allowed = allowRules.length === 0 || allowRules.some(t => matches(t, from, to));
+          if (explicitlyDenied || !allowed) denyTransition(from, to);
+        }
+      }
+    }
     stmts.push('');
   }
 

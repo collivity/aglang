@@ -1,6 +1,6 @@
 # AI Agents
 
-aglang is designed as an **agent-facing architecture validation interface**. AI coding agents can use it continuously while they work: read the local architecture context, validate focused edits with JSON verdicts, and rely on the same Z3-backed checks that run at commit time.
+aglang is an **auditable architecture verification layer** that agents can consume while they work. AI coding agents are a primary workflow because they benefit from machine-readable architecture truth, but the same checked `.ag`, `.agq.yml`, `architecture.o`, and JSON verdicts are useful to engineers and CI.
 
 ## Why agents need architectural guardrails
 
@@ -10,7 +10,7 @@ When an AI agent refactors code, it may:
 - Bypass an auth layer "for simplicity"
 - Inject infrastructure into UI code, create singleton-to-scoped DI bugs, or use `IServiceProvider` as a service locator
 
-Traditional code review catches these eventually. aglang catches them while the agent is still coding, then enforces the same rules at commit time with mathematical proof of the violation.
+Traditional code review catches these eventually. aglang catches them while the agent is still coding, then enforces the same rules at commit time with source evidence, deterministic policy checks, and Z3-backed proof details.
 
 ## Setup for agents
 
@@ -34,9 +34,10 @@ This creates:
 - `architecture.ag` — the spec (agents should read this)
 - `architecture.o` — the compiled artifact
 - `skill.json` — agent skill manifest
-- `.git/hooks/pre-commit` — enforcement hook
 
 `.ag` files are engineer-guided architecture source. Coding agents should not create, edit, regenerate, or compile changes to `.ag` specs unless the engineer explicitly asks for architecture/spec work, ideally in a planning or design session.
+
+Semantic query files in `.aglang/extractors/*.agq.yml` are also reviewed architecture source. They translate deterministic graph facts into domain facts such as state-machine transitions or architecture flows. Agents may inspect them to understand provenance, but should ask before creating or changing them.
 
 ### 2. Emit agent context
 
@@ -52,14 +53,15 @@ aglc emit-context --arch architecture.o --out AGENTS.md
 aglc emit-skill --arch architecture.o --out skill.json
 ```
 
-`skill.json` follows the emerging AI skill/tool manifest format. Agents that support it can load architectural constraints as part of their toolchain.
+`skill.json` follows the emerging AI skill/tool manifest format. Agents that support it can load architectural constraints, command templates, violation schema fields, query provenance, diff metadata, and solver diagnostics as part of their toolchain.
 
 ## Continuous validation loop
 
 ```
 Agent reads AGENTS.md → edits code → aglc check-file --json
                                   → aglc check --all --json
-                                  → git commit hook runs same gate
+                                  → aglc explain --violation <id> --json
+                                  → CI can run the same gate
                                                         │
                                           Z3 SAT   → pass ✓
                                           Z3 UNSAT → fix reported code ✗
@@ -72,6 +74,7 @@ All check commands support `--json` for machine-readable output:
 ```bash
 aglc check-file --arch architecture.o --file src/api/gateway/checkout.py --json
 aglc check --arch architecture.o --project . --all --json
+aglc explain --arch architecture.o --project . --violation viol_4d72958c9c079a2f --json
 ```
 
 ```json
@@ -85,7 +88,7 @@ aglc check --arch architecture.o --project . --all --json
 }
 ```
 
-Agents can parse this JSON and decide how to fix the violation rather than reading terminal output.
+Agents can parse this JSON and decide how to fix the violation rather than reading terminal output. For blocking verdicts, the stable `id` should be passed to `aglc explain --violation <id> --json` to get the deterministic repair-loop explanation.
 
 ## Workflow for agent-managed projects
 
@@ -93,11 +96,15 @@ Agents can parse this JSON and decide how to fix the violation rather than readi
 2. **Agent reads** — coding agents read `AGENTS.md` and `skill.json` before making implementation changes.
 3. **Agent validates while coding** — run `aglc check-file --json` for focused edits.
 4. **Agent validates before finishing** — run `aglc check --all --json` for the guarded project.
-5. **Architecture evolves deliberately** — agents ask before changing `.ag`, `architecture.o`, `AGENTS.md`, or `skill.json`.
+5. **Architecture evolves deliberately** — agents ask before changing `.ag`, `.agq.yml`, `architecture.o`, `AGENTS.md`, `skill.json`, or generated context.
 
 When `reach_violation`, `data_policy_violation`, or `trust_policy_violation` entries appear in `violations[]`, use `detected.path`, `detected.data`, and the Z3 proof to remove the forbidden path or add the declared auth/trust boundary the architecture requires.
 
 When `di_violation` entries appear in `violations[]`, fix the implementation dependency graph. Reach-based DI failures may include a transitive `detected.path`. Do not work around the gate by editing `.ag` unless the engineer explicitly asks to change the intended architecture.
+
+When `state_machine_violation` entries appear in `violations[]`, use the machine name, transition edge, source evidence, and `detected.query` provenance to fix the invalid state write. `aglc check` never calls an LLM; it evaluates committed source, compiled architecture, and reviewed query files.
+
+When `solver_diagnostics[]` contains `unknown`, `error`, or `suggested_refactor`, treat it as a path-explosion or modeling hotspot. Prefer simplifying the implementation path, state write, or dependency graph before asking to change architecture rules.
 
 When `change_violations[]` appear, update the required companion component in the same change. For example, a CLI or package metadata change may require README, CLI reference, or agent skill updates.
 

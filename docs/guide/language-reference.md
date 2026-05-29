@@ -15,10 +15,10 @@ aglang declarations have explicit enforcement levels:
 | `trust_policy` | `formal_z3` | Trust-boundary auth and classified data boundary rules are checked from extracted facts and declared node metadata. |
 | `change_policy` | `formal_z3` | Touched-component facts are checked against SMT-LIB implication rules in Z3. |
 | `di_policy` | `formal_z3` | Definite constructor-injection, lifetime, and service-locator facts are checked in Z3. |
+| `machine` | `formal_z3` | Extracted transition facts are checked against declared state-machine transitions. |
 | `contract` | `deterministic_policy` | Route facts are compared against declared implements/consumes contracts. |
 | `workflow_policy` | `deterministic_policy` | GitHub Actions facts are checked for release, deploy, publish, permission, and step-order rules. |
 | `invariant require encryption` | `advisory` | Reported as a warning because static extraction does not yet prove encryption. |
-| `machine` | `advisory` | Emitted to agent context; transition extraction is not enforced yet. |
 | `permission` | `formal_z3` | Authorization intent is emitted and can be enforced when extractors produce definite operation and role-check evidence. |
 
 `formal_z3` and `deterministic_policy` violations block checks. `advisory` declarations guide agents and docs, but do not block by themselves unless a future extractor/gate promotes them.
@@ -265,7 +265,7 @@ Each blocking DI fact becomes an SMT assertion such as `(assert (Injects Views B
 
 ## State Machine
 
-State machines describe allowed transitions for a data type field. They are advisory in the current runtime.
+State machines describe allowed transitions for a data type field. They are enforced when deterministic extractor queries emit transition facts from reviewed `.agq.yml` files.
 
 ```ag
 enum OrderStatus { Draft | Active | Archived }
@@ -279,6 +279,18 @@ machine OrderLifecycle on Order.status {
   deny transition Active -> Draft
 }
 ```
+
+The enforcement path is:
+
+1. The `machine` declaration compiles into allowed and denied transition constraints in `architecture.o`.
+2. Built-in or plugin extractors produce deterministic graph facts from source code.
+3. Committed `.aglang/extractors/*.agq.yml` files match those graph facts and emit transition facts with query provenance.
+4. `aglc check` asserts definite transition facts into Z3 and reports `state_machine_violation` when a transition contradicts the machine.
+5. `aglc explain --arch architecture.o --project . --violation <id> --json` re-runs the selected scope and returns the repair-loop explanation for the stable violation id.
+
+Transition query files are auditable source artifacts. LLMs may help draft them when requested, but `aglc check` does not call an LLM. Extracted transitions without a resolved `from` state are warnings only and are not asserted into Z3.
+
+A blocking JSON verdict includes the machine name, transition edge, source file, evidence, query id/version/file, graph fact id when available, stable violation id, and conflicting Z3 assertions.
 
 ## Permission
 

@@ -1,7 +1,7 @@
 {
   "name": "@collivity/aglang",
   "version": "0.2.2",
-  "description": "Architecture Ground Language — agent-facing architecture validation for continuous coding feedback and Z3-backed enforcement",
+  "description": "Architecture Ground Language — auditable architecture verification for code facts, policies, agents, and CI",
   "type": "module",
   "main": "build/aglc.js",
   "bin": {
@@ -34,7 +34,6 @@
     "devtools",
     "agents",
     "guardrails",
-    "git-hook",
     "static-analysis",
     "architecture-as-code"
   ],
@@ -52,6 +51,8 @@
     "build/aglc.js",
     "scripts/postinstall-agent-skill.mjs",
     "skills",
+    "docs/**/*.md",
+    "docs/public",
     "stdlib",
     "README.md",
     "LICENSE"

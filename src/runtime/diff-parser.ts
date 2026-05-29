@@ -1,5 +1,5 @@
 // Git diff parser — maps changed files to architecture components
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { readdirSync } from 'fs';
 import { join, relative } from 'path';
 import micromatch from 'micromatch';
@@ -8,6 +8,13 @@ import type { ArchitectureArtifact } from '../emitters/artifact.ts';
 export interface ChangedComponent {
   componentName: string;
   files: string[]; // absolute paths
+}
+
+export interface DiffSelection {
+  base: string;
+  mode: 'git_ref' | 'staged' | 'all';
+  changed_files: string[];
+  changed_components: string[];
 }
 
 const DEFAULT_IGNORES = new Set([
@@ -87,6 +94,34 @@ export function parseDiff(
   const byComponent = new Map<string, string[]>();
 
   for (const relFile of stagedFiles) {
+    const absFile = join(projectRoot, relFile);
+    addFileToComponents(byComponent, projectRoot, artifact, absFile);
+  }
+
+  return [...byComponent.entries()].map(([componentName, files]) => ({ componentName, files }));
+}
+
+export function parseDiffAgainst(
+  projectRoot: string,
+  artifact: ArchitectureArtifact,
+  baseRef: string,
+): ChangedComponent[] {
+  let changedFiles: string[];
+
+  try {
+    const output = execFileSync('git', ['diff', '--name-only', `${baseRef}...HEAD`], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    });
+    changedFiles = output.trim().split('\n').filter(Boolean);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`[aglc] Could not read files changed against '${baseRef}...HEAD': ${msg}`);
+  }
+
+  const byComponent = new Map<string, string[]>();
+
+  for (const relFile of changedFiles) {
     const absFile = join(projectRoot, relFile);
     addFileToComponents(byComponent, projectRoot, artifact, absFile);
   }

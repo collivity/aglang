@@ -246,3 +246,194 @@ public sealed class SyncHandler
 ```
 
 With `deny resolve IServiceProvider from Application`, this emits `(assert (Resolves Application IServiceProvider))` and fails in Z3.
+
+## Multi-runtime order lifecycle
+
+This example models a common Stripe-style order workflow spread across several runtimes:
+
+- Android starts checkout but must not mark an order as fulfilled.
+- The backend API creates the payment intent and moves `Created -> PendingPayment`.
+- The Stripe webhook is the authority for `PendingPayment -> Paid` and `Paid -> Refunded`.
+- A worker performs fulfillment with `Paid -> FulfillmentQueued -> Fulfilled`.
+
+The machine is declared once, even though the code that mutates orders is scattered:
+
+```ag
+node android_device : edge_mobile {
+  trust: untrusted
+}
+
+node api_runtime : server {
+  trust: trusted
+  auth: jwt
+}
+
+node worker_runtime : server {
+  trust: trusted
+  auth: mtls
+}
+
+enum OrderStatus {
+  Created | PendingPayment | Paid | FulfillmentQueued | Fulfilled | Cancelled | Refunded
+}
+
+data Order {
+  id: UUID
+  status: OrderStatus
+  stripe_payment_intent_id: Optional<String>
+}
+
+component AndroidApp {
+  runs_on: android_device
+  paths: "android/**/*.kt"
+}
+
+component BackendApi {
+  runs_on: api_runtime
+  paths: "backend/api/**/*.ts"
+}
+
+component StripeWebhook {
+  runs_on: api_runtime
+  paths: "backend/webhooks/**/*.ts"
+}
+
+component FulfillmentWorker {
+  runs_on: worker_runtime
+  paths: "workers/**/*.ts"
+}
+
+machine OrderLifecycle on Order.status {
+  allow transition Created -> PendingPayment
+  allow transition PendingPayment -> Paid
+  allow transition PendingPayment -> Cancelled
+  allow transition Paid -> FulfillmentQueued
+  allow transition FulfillmentQueued -> Fulfilled
+  allow transition Paid -> Refunded
+  deny transition Created -> Paid
+  deny transition Created -> Fulfilled
+  deny transition PendingPayment -> Fulfilled
+  deny transition Cancelled -> *
+  deny transition Refunded -> *
+}
+```
+
+The reviewed query files in `.aglang/extractors/` tell aglang which graph facts count as order transitions. A TypeScript query can be scoped to the TypeScript extractor:
+
+```yaml
+id: StripeOrderLifecycleTypeScriptAssignments
+owner: examples
+version: 1
+confidence: definite
+match:
+  extractor: TypeScript/Node.js server analyzer
+  kind: assignment
+  property: status
+  valueEnum: OrderStatus
+emit:
+  kind: transition
+  data: Order
+  field: status
+  from: "$previousMember"
+  to: "$valueMember"
+```
+
+Android/Kotlin can participate in the same lifecycle with a second query:
+
+```yaml
+id: StripeOrderLifecycleKotlinAssignments
+owner: examples
+version: 1
+confidence: definite
+match:
+  extractor: Kotlin regex analyzer
+  kind: assignment
+  property: status
+  valueEnum: OrderStatus
+emit:
+  kind: transition
+  data: Order
+  field: status
+  from: "$previousMember"
+  to: "$valueMember"
+```
+
+Given this Android code:
+
+```kotlin
+class CheckoutViewModel {
+    fun optimisticFulfill(order: Order) {
+        if (order.status == OrderStatus.PendingPayment) {
+            order.status = OrderStatus.Fulfilled
+        }
+    }
+}
+```
+
+the Kotlin extractor emits a graph fact for the guarded assignment. The query turns that into this transition evidence:
+
+```text
+Order.status PendingPayment -> Fulfilled
+```
+
+That edge is explicitly denied by `OrderLifecycle`, so `aglc check` fails. The human-readable diagnostic includes the machine, transition, source file, query id, graph fact id, and Z3 proof:
+
+```text
+aglang State Machine Violation
+
+Machine Violated:  OrderLifecycle
+Transition:        Order.status PendingPayment -> Fulfilled
+
+Detected in file:
+  examples/stripe-order-workflow/android/CheckoutViewModel.kt
+
+Evidence: [confidence: definite]
+  Extraction query 'StripeOrderLifecycleKotlinAssignments' matched assignment:
+  order.status = OrderStatus.Fulfilled
+
+Query: StripeOrderLifecycleKotlinAssignments@1
+  examples/stripe-order-workflow/.aglang/extractors/order-lifecycle-kotlin.agq.yml
+  GraphFact: kotlin-semantic:...CheckoutViewModel.kt:19:assignment:...
+
+Z3 Proof (conflicting assertions):
+  Permanent rule: (assert (=> (Transition Order Field__Order__status State__OrderStatus__PendingPayment State__OrderStatus__Fulfilled) false))
+  Delta (your code): (assert (Transition Order Field__Order__status State__OrderStatus__PendingPayment State__OrderStatus__Fulfilled))
+```
+
+The same check also emits a structured JSON verdict for agents and CI:
+
+```json
+{
+  "type": "state_machine_violation",
+  "invariant": "OrderLifecycle",
+  "rule": {
+    "kind": "Transition",
+    "from": "PendingPayment",
+    "to": "Fulfilled",
+    "data": "Order",
+    "field": "status"
+  },
+  "detected": {
+    "from": "PendingPayment",
+    "to": "Fulfilled",
+    "data": "Order",
+    "confidence": "definite",
+    "file": "examples/stripe-order-workflow/android/CheckoutViewModel.kt",
+    "query": {
+      "id": "StripeOrderLifecycleKotlinAssignments",
+      "version": 1,
+      "file": "examples/stripe-order-workflow/.aglang/extractors/order-lifecycle-kotlin.agq.yml",
+      "graphFactId": "kotlin-semantic:...CheckoutViewModel.kt:19:assignment:..."
+    }
+  }
+}
+```
+
+Run the example locally:
+
+```bash
+aglc compile examples/stripe-order-workflow/architecture.ag --out /tmp/aglang-stripe-order-workflow.o
+aglc check --arch /tmp/aglang-stripe-order-workflow.o --project examples/stripe-order-workflow --all
+```
+
+This is the main value of state machines in aglang: a lifecycle rule declared once is enforced against transition evidence from multiple runtimes and languages.

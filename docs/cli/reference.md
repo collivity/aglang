@@ -2,7 +2,7 @@
 
 ## `aglc add`
 
-One-shot agent bootstrap: generate → compile → hook → skill.json.
+One-shot verification bootstrap: generate a starter architecture spec, compile it, and emit agent context.
 
 ```bash
 aglc add [projectRoot] [--name <ProjectName>] [--out <file.ag>] [--max-depth <n>] [--single-file]
@@ -62,13 +62,14 @@ Use `--single-file` when you need stdout-friendly output or want one flat starte
 Check the current staged git diff, or the whole guarded project, against a compiled architecture artifact.
 
 ```bash
-aglc check --arch <architecture.o> --project <dir> [--all] [--json] [--debug-extractors] [--require-ast] [--workflow-z3] [--dump-workflow-smt]
+aglc check --arch <architecture.o> --project <dir> [--diff <ref>] [--all] [--json] [--debug-extractors] [--require-ast] [--workflow-z3] [--dump-workflow-smt]
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--arch` | Path to compiled `.o` artifact |
 | `--project` | Git project root to scan |
+| `--diff <ref>` | Scan files changed in `<ref>...HEAD` instead of the staged diff |
 | `--all` | Scan all tracked component files instead of only staged changes |
 | `--json` | Output machine-readable JSON verdict to stdout |
 | `--debug-extractors` | Include extractor trace events and fallback reasons in JSON output |
@@ -76,7 +77,11 @@ aglc check --arch <architecture.o> --project <dir> [--all] [--json] [--debug-ext
 | `--workflow-z3` | Include workflow policy SMT debug snippets in workflow violations |
 | `--dump-workflow-smt` | Write workflow policy SMT debug snippets to `workflow-debug.smt2` |
 
-`aglc check` also evaluates reachability, propagated dataflow, `data_policy`, `trust_policy`, `di_policy`, and `change_policy` blocks against the staged diff, or against every tracked component file when `--all` is used. Reachability and trust failures appear as `reach_violation`, `data_policy_violation`, or `trust_policy_violation` entries in `violations[]`; dependency-injection failures appear as `di_violation`; change policy failures appear in `change_violations[]`.
+`aglc check` also evaluates reachability, propagated dataflow, `data_policy`, `trust_policy`, `di_policy`, `machine`, and `change_policy` blocks against the staged diff, against `<ref>...HEAD` when `--diff` is used, or against every tracked component file when `--all` is used. Reachability and trust failures appear as `reach_violation`, `data_policy_violation`, or `trust_policy_violation` entries in `violations[]`; dependency-injection failures appear as `di_violation`; state-machine failures appear as `state_machine_violation`; change policy failures appear in `change_violations[]`.
+
+In JSON mode, project checks include `diff.changed_files`, `diff.changed_components`, `diff.mode`, and `rule_coverage[]`. Violations include stable `id` values; when `--diff <ref>` is used, returned violations are marked with `status: "new"` because the check scope is limited to files changed in the selected comparison.
+
+The gate also checks rule-sized SMT slices before the full solver script. JSON output includes `solver_diagnostics[]` with per-slice status, elapsed time, source file, contributing components, path depth, fanout, and suggested refactor text when a slice returns `unknown` or gets expensive. This is the path-explosion escape hatch: AGLang reports the rule and source evidence that made the solver struggle instead of only reporting a global Z3 failure.
 
 **Exit codes:**
 - `0` — No violations (commit may proceed)
@@ -86,7 +91,7 @@ aglc check --arch <architecture.o> --project <dir> [--all] [--json] [--debug-ext
 
 ## `aglc check-file`
 
-Analyze a specific file against the architecture. Coding agents should use this during focused edits before waiting for a commit hook.
+Analyze a specific file against the architecture. Coding agents should use this during focused edits before running broader project or CI checks.
 
 ```bash
 aglc check-file --arch <architecture.o> --file <path> [--json] [--debug-extractors] [--require-ast] [--dump-smt] [--workflow-z3] [--dump-workflow-smt]
@@ -113,15 +118,15 @@ If a declared extractor plugin fails before emitting facts, JSON mode returns `e
 
 ---
 
-## `aglc install`
+## `aglc explain`
 
-Install the git pre-commit hook into a project.
+Explain a current violation by stable ID without editing files.
 
 ```bash
-aglc install [--project <dir>] [--arch <architecture.o>]
+aglc explain --arch <architecture.o> --project <dir> --violation <id> [--json] [--diff <ref>] [--all]
 ```
 
-The hook runs `aglc check` before every `git commit`. Writes to `.git/hooks/pre-commit`.
+The command re-runs the selected check scope, finds the matching violation, and reports the violated rule, source evidence, graph fact chain when available, proof details, `fix_class`, and suggested fix text. Use the same `--diff` or `--all` scope that produced the violation ID.
 
 ---
 

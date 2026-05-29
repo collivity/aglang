@@ -12,6 +12,8 @@ export interface SkillManifest {
   commands: {
     check_file: string;
     check_project: string;
+    check_project_diff: string;
+    explain_violation: string;
     emit_context: string;
   };
   violation_schema: object;
@@ -31,14 +33,18 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
     skill: 'aglang-architecture-guard',
     version: '1.0',
     description:
-      'Validates code changes against architectural invariants enforced by the Z3 SMT solver. ' +
-      'Use check_file before committing code to detect direct flow, reachability, data, trust, DI, and workflow violations.',
+      'Verifies extracted and reviewed architecture facts against Z3-backed rules and deterministic policies. ' +
+      'Use check_file or check_project_diff while coding, then explain_violation to repair failed checks from stable ids.',
     context_file: 'AGENTS.md',
     commands: {
       check_file:
         `aglc check-file --arch "${absArch}" --file <absolute_path_to_file> --json`,
       check_project:
         `aglc check --arch "${absArch}" --project <project_root> --all --json`,
+      check_project_diff:
+        `aglc check --arch "${absArch}" --project <project_root> --diff <git_ref> --json`,
+      explain_violation:
+        `aglc explain --arch "${absArch}" --project <project_root> --violation <violation_id> --json`,
       emit_context:
         `aglc emit-context --arch "${absArch}" --out AGENTS.md`,
     },
@@ -51,12 +57,31 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
         passed: { type: 'boolean', description: 'true = commit allowed, false = violations detected' },
         timestamp: { type: 'string', format: 'date-time' },
         artifact: { type: 'string', description: 'Path to the architecture.o file used' },
+        diff: {
+          type: 'object',
+          description: 'Checked diff scope metadata for staged, --diff, or --all checks',
+          properties: {
+            base: { type: 'string' },
+            mode: { type: 'string', enum: ['git_ref', 'staged', 'all'] },
+            changed_files: { type: 'array', items: { type: 'string' } },
+            changed_components: { type: 'array', items: { type: 'string' } },
+          },
+        },
         violations: {
           type: 'array',
           items: {
             type: 'object',
-            required: ['type', 'invariant', 'rule', 'detected', 'message'],
+            required: ['type', 'invariant', 'rule', 'detected'],
             properties: {
+              id: {
+                type: 'string',
+                description: 'Stable violation id; pass to explain_violation for the deterministic repair loop',
+              },
+              status: {
+                type: 'string',
+                enum: ['new', 'unchanged'],
+                description: 'Diff-relative status when available',
+              },
               type: {
                 type: 'string',
                 enum: [
@@ -67,6 +92,7 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
                   'trust_policy_violation',
                   'di_violation',
                   'permission_violation',
+                  'state_machine_violation',
                 ],
               },
               invariant: { type: 'string', description: 'Name of the violated invariant' },
@@ -77,6 +103,7 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
                   from: { type: 'string', description: 'Source component' },
                   to: { type: 'string', description: 'Target component or node' },
                   data: { type: 'string', description: 'Data type for data policy violations' },
+                  field: { type: 'string', description: 'Data field for state-machine violations' },
                 },
               },
               detected: {
@@ -90,9 +117,20 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
                   confidence: { type: 'string', enum: ['definite', 'probable', 'possible'] },
                   evidence: { type: 'string', description: 'Human-readable description of the detected pattern' },
                   file: { type: 'string', description: 'Absolute path to the file containing the violation' },
+                  query: {
+                    type: 'object',
+                    description: 'Reviewed semantic query provenance when the fact came from .agq.yml',
+                    properties: {
+                      id: { type: 'string' },
+                      version: { type: ['number', 'string'] },
+                      file: { type: 'string' },
+                      graphFactId: { type: 'string' },
+                    },
+                  },
                 },
               },
               message: { type: 'string', description: 'Human-readable violation message' },
+              z3_proof: { type: 'object', description: 'Conflicting permanent constraint and extracted delta assertion' },
             },
           },
         },
@@ -102,6 +140,8 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
           items: {
             type: 'object',
             properties: {
+              id: { type: 'string', description: 'Stable violation id when available' },
+              status: { type: 'string', enum: ['new', 'unchanged'] },
               type: { type: 'string', enum: ['implements_undeclared', 'consumes_undeclared', 'consumes_method_mismatch'] },
               severity: { type: 'string', enum: ['error', 'warning'] },
               contract: { type: 'string' },
@@ -116,7 +156,20 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
         workflow_violations: {
           type: 'array',
           description: 'GitHub Actions workflow policy violations',
-          items: { type: 'object' },
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'Stable violation id when available' },
+              status: { type: 'string', enum: ['new', 'unchanged'] },
+              type: { type: 'string' },
+              policy: { type: 'string' },
+              workflow: { type: 'string' },
+              file: { type: 'string' },
+              message: { type: 'string' },
+              evidence: { type: 'string' },
+              proof: { type: 'object' },
+            },
+          },
         },
         change_violations: {
           type: 'array',
@@ -125,6 +178,8 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
             type: 'object',
             properties: {
               type: { type: 'string', enum: ['change_violation'] },
+              id: { type: 'string', description: 'Stable violation id' },
+              status: { type: 'string', enum: ['new', 'unchanged'] },
               policy: { type: 'string' },
               trigger: { type: 'string' },
               required: { type: 'string' },
@@ -132,6 +187,19 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
               trigger_files: { type: 'array', items: { type: 'string' } },
               required_glob: { type: 'string' },
               z3_proof: { type: 'object' },
+            },
+          },
+        },
+        rule_coverage: {
+          type: 'array',
+          description: 'Optional summary of rules checked and source evidence used',
+          items: {
+            type: 'object',
+            properties: {
+              rule: { type: 'string' },
+              declaration: { type: 'string' },
+              components: { type: 'array', items: { type: 'string' } },
+              evidence: { type: 'array', items: { type: 'string' } },
             },
           },
         },
@@ -152,7 +220,35 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
           description: 'Non-blocking contract observations (undeclared fetch calls, advisory encryption rules)',
           items: { type: 'object' },
         },
+        workflow_warnings: {
+          type: 'array',
+          description: 'Non-blocking workflow observations',
+          items: { type: 'object' },
+        },
         smt_model: { type: ['string', 'null'], description: 'Z3 SAT model (null when UNSAT/violation)' },
+        solver_diagnostics: {
+          type: 'array',
+          description: 'Rule-sized solver slice results with provenance and refactor suggestions for path-explosion or expensive checks',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              status: { type: 'string', enum: ['sat', 'unsat', 'unknown', 'error'] },
+              elapsed_ms: { type: 'number' },
+              rule: { type: 'string' },
+              declaration: { type: 'string' },
+              source_file: { type: 'string' },
+              line: { type: 'number' },
+              components: { type: 'array', items: { type: 'string' } },
+              data: { type: 'string' },
+              fact_count: { type: 'number' },
+              path_depth: { type: 'number' },
+              fanout: { type: 'number' },
+              reason: { type: 'string' },
+              suggested_refactor: { type: 'string' },
+            },
+          },
+        },
         agent_context: { type: 'string', description: 'Plain-text summary for agent consumption' },
       },
     },
@@ -163,8 +259,8 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
       possible:  'INFO — Pattern may be present. Informational only. Never blocks.',
     },
     advisory_note:
-      'Enforcement is declaration-specific. Flow deny invariants and change_policy rules are Z3-backed. ' +
-      'Reachability, propagated dataflow, trust boundary, DI, contract, and workflow policies are enforced when extractors produce definite evidence. State machines and encryption requirements remain advisory unless this manifest says otherwise.',
+      'Enforcement is declaration-specific. Flow deny invariants, state machines, and change_policy rules are Z3-backed. ' +
+      'Reachability, propagated dataflow, trust boundary, DI, contract, and workflow policies are enforced when extractors produce definite evidence. Encryption requirements remain advisory unless this manifest says otherwise.',
   };
 }
 
