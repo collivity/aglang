@@ -238,6 +238,56 @@ Focus: standardize the interface and make third-party integrations realistic.
 - Third-party runtimes can implement against published contracts with confidence.
 - Compatibility promises are explicit and test-backed.
 
+## `v1.1` - Runtime evidence and SLO verification
+
+Focus: extend aglang from static architecture/code-fact verification into runtime architecture verification by treating logs, traces, metrics, and deployment observations as first-class evidence.
+
+### Scope
+
+- Add runtime fact model:
+  - latency facts with component, edge, percentile, value, window, environment, and source
+  - error-rate and availability facts
+  - queue lag and processing-time facts
+  - CPU, memory, replica, and saturation facts
+  - observed runtime flow facts from traces
+  - deployment/config facts from Kubernetes, Terraform state, cloud inventory, or CI environments
+- Add SLO and runtime policy syntax:
+  - component latency thresholds, for example `p95 < 30ms`
+  - edge latency thresholds, for example `CheckoutApi -> Payments p99 < 200ms`
+  - error budget and error-rate rules
+  - queue lag and processing deadlines
+  - resource bounds for memory, CPU, replicas, and cold start
+  - forbidden observed runtime paths
+  - required runtime auth/TLS/mTLS evidence where telemetry can prove it
+- Add ingestion adapters:
+  - OpenTelemetry traces and metrics
+  - Prometheus query snapshots
+  - structured application logs
+  - Kubernetes deployment/state snapshots
+  - cloud or platform inventory snapshots
+- Add runtime check commands:
+  - `aglc ingest-runtime --source <otel|prometheus|logs|k8s> --out runtime-facts.json`
+  - `aglc check-runtime --arch architecture.o --facts runtime-facts.json --json`
+  - `aglc explain-runtime --violation <id> --json`
+- Add runtime audit reports:
+  - include evidence window, environment, metric source, query, sample count, and aggregation method
+  - hash-link runtime facts to reports
+  - separate dev/staging/prod environments
+  - support baseline mode for known SLO violations
+- Add examples:
+  - service p95 latency under 30ms
+  - forbidden service-to-service call observed in traces
+  - queue lag above declared deadline
+  - PII-tagged runtime path crossing an untrusted boundary
+  - production deployment drift from declared component topology
+
+### Exit criteria
+
+- A team can declare simple runtime SLOs and verify them from imported telemetry snapshots.
+- Runtime violations include the metric source, time window, aggregation method, and architecture rule.
+- Static and runtime evidence can appear in the same audit report.
+- aglang can distinguish architecture drift in source from architecture drift in the running system.
+
 ## Highest-leverage priorities
 
 If only a few things move next, they should be these:
@@ -247,7 +297,8 @@ If only a few things move next, they should be these:
 3. Official MCP server
 4. Better TS extraction
 5. CI/reporting outputs
-6. Conformance tests
+6. Runtime evidence model
+7. Conformance tests
 
 ## Suggested issue split
 
@@ -260,6 +311,7 @@ Use this roadmap as the top-level epic set:
 - `Epic: v0.7 cross-repo compliance graph`
 - `Epic: v0.8 enterprise readiness and audit evidence`
 - `Epic: v1.0 protocol standardization`
+- `Epic: v1.1 runtime evidence and SLO verification`
 
 Then split each epic into bounded delivery issues with one implementation surface each:
 
