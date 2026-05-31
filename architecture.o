@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 13,
+  "schemaVersion": 14,
   "sourcePath": "C:\\Users\\pante\\Codespaces\\aglang\\architecture.ag",
   "enforcement": [
     {
@@ -16,6 +16,36 @@
       "declaration": "invariant deny reach",
       "level": "formal_z3",
       "mechanism": "Transitive flow reachability facts extracted from code are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant require flow",
+      "level": "formal_z3",
+      "mechanism": "Definite extracted paths that bypass the required intermediate endpoint are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant require dataflow",
+      "level": "formal_z3",
+      "mechanism": "Definite data paths that bypass the required intermediate endpoint are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant require auth",
+      "level": "formal_z3",
+      "mechanism": "Reviewed unauthenticated-flow counterexample facts are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant require encryption",
+      "level": "formal_z3",
+      "mechanism": "Reviewed unencrypted-flow counterexample facts are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant require dependency",
+      "level": "formal_z3",
+      "mechanism": "Reviewed dependency facts without the required interface are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant require operation",
+      "level": "formal_z3",
+      "mechanism": "Reviewed operation facts are asserted against required component placement constraints."
     },
     {
       "declaration": "data_policy",
@@ -53,11 +83,6 @@
       "mechanism": "GitHub Actions facts are checked for publish/deploy/release, permissions, and step order."
     },
     {
-      "declaration": "invariant require encryption",
-      "level": "advisory",
-      "mechanism": "Reported as warnings because extractors do not yet prove encryption."
-    },
-    {
       "declaration": "machine",
       "level": "formal_z3",
       "mechanism": "Extracted transition facts are asserted against declared state-machine transition rules."
@@ -77,6 +102,8 @@
     "(declare-datatype Lifetime ((Lifetime__singleton) (Lifetime__scoped) (Lifetime__transient)))",
     "(declare-fun Flow      (Entity Entity) Bool)",
     "(declare-fun CanReach  (Entity Entity) Bool)",
+    "(declare-fun PathWithoutVia (Entity Entity Entity) Bool)",
+    "(declare-fun DataPathWithoutVia (DataType Entity Entity) Bool)",
     "(declare-fun DataFlow  (DataType Entity) Bool)",
     "(declare-fun DataCanReach (DataType Entity) Bool)",
     "(declare-fun ClassifiedAs (DataType Classification) Bool)",
@@ -87,7 +114,13 @@
     "(declare-fun LifetimeReach (Lifetime Lifetime) Bool)",
     "(declare-fun Resolves  (Entity ServiceType) Bool)",
     "(declare-fun RequiresAuth (Entity Entity) Bool)",
+    "(declare-fun UnauthenticatedFlow (Entity Entity) Bool)",
+    "(declare-fun UnencryptedFlow (Entity Entity) Bool)",
     "(declare-fun Performs (Entity Operation DataType) Bool)",
+    "(declare-fun OperationIn (Entity Operation) Bool)",
+    "(declare-fun OperationOnDataIn (Entity Operation DataType) Bool)",
+    "(declare-sort InterfaceType 0)",
+    "(declare-fun DependencyWithoutInterface (Entity Entity InterfaceType) Bool)",
     "(declare-fun ChecksRole (Entity RoleType) Bool)",
     "(declare-fun Transition (DataType Field StateValue StateValue) Bool)",
     "(declare-fun Encrypted (Entity Entity) Bool)",
@@ -152,6 +185,16 @@
     "(assert (IsComp VscodeExtension))",
     "(declare-const Tests Entity)",
     "(assert (IsComp Tests))",
+    "(declare-const ArchitectureSpec Entity)",
+    "(assert (IsComp ArchitectureSpec))",
+    "(declare-const CompiledArchitecture Entity)",
+    "(assert (IsComp CompiledArchitecture))",
+    "(declare-const AgentContext Entity)",
+    "(assert (IsComp AgentContext))",
+    "(declare-const SkillManifest Entity)",
+    "(assert (IsComp SkillManifest))",
+    "(declare-const SemanticQueries Entity)",
+    "(assert (IsComp SemanticQueries))",
     "",
     "; === invariant rules ===",
     "; --- CompilerEntrypointBoundary ---",
@@ -213,7 +256,12 @@
     "ReleaseWorkflow": ".github/workflows/release.yml",
     "DocsWorkflow": ".github/workflows/docs.yml",
     "VscodeExtension": "editors/vscode-aglang/src/**/*.ts",
-    "Tests": "tests/**/*.ts"
+    "Tests": "tests/**/*.ts",
+    "ArchitectureSpec": "architecture.ag",
+    "CompiledArchitecture": "architecture.o",
+    "AgentContext": "AGENTS.md",
+    "SkillManifest": "skill.json",
+    "SemanticQueries": ".aglang/extractors/**/*.agq.yml"
   },
   "invariants": [
     {
@@ -397,7 +445,12 @@
     "ReleaseWorkflow": "github_actions",
     "DocsWorkflow": "github_actions",
     "VscodeExtension": "node_runtime",
-    "Tests": "node_runtime"
+    "Tests": "node_runtime",
+    "ArchitectureSpec": "node_runtime",
+    "CompiledArchitecture": "node_runtime",
+    "AgentContext": "node_runtime",
+    "SkillManifest": "node_runtime",
+    "SemanticQueries": "node_runtime"
   },
   "plugins": [],
   "repos": [],
@@ -553,6 +606,61 @@
           "kind": "RequireTouched",
           "required": "PublicDocs",
           "trigger": "AgentSkill"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ArchitectureSpec",
+          "trigger": "LanguageFrontend"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ArchitectureSpec",
+          "trigger": "RuntimeGate"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ArchitectureSpec",
+          "trigger": "SmtBackend"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ArchitectureSpec",
+          "trigger": "Emitters"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "CompiledArchitecture",
+          "trigger": "ArchitectureSpec"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "AgentContext",
+          "trigger": "ArchitectureSpec"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "SkillManifest",
+          "trigger": "ArchitectureSpec"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "PublicDocs",
+          "trigger": "ArchitectureSpec"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "AgentSkill",
+          "trigger": "ArchitectureSpec"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "PublicDocs",
+          "trigger": "SemanticQueries"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "AgentSkill",
+          "trigger": "SemanticQueries"
         }
       ]
     }

@@ -30,7 +30,7 @@ const SPEC = `
 describe('change_policy DSL and gate', () => {
   it('parses change_policy blocks and emits changePolicies in architecture.o', () => {
     const artifact = compile(SPEC);
-    expect(artifact.schemaVersion).toBe(13);
+    expect(artifact.schemaVersion).toBe(14);
     expect(artifact.changePolicies).toHaveLength(1);
     expect(artifact.enforcement.some(e => e.declaration === 'change_policy' && e.level === 'formal_z3')).toBe(true);
     expect(artifact.changePolicies[0]!.rules).toHaveLength(2);

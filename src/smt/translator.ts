@@ -9,6 +9,8 @@ function smtId(name: string): string {
 
 export function translate(program: Program): string[] {
   const stmts: string[] = [...BASE_SMT_DECLARATIONS, ''];
+  const declaredOperations = new Set<string>();
+  const declaredInterfaces = new Set<string>();
 
   const nodes: NodeDecl[] = [];
   const resources: ResourceDecl[] = [];
@@ -123,6 +125,7 @@ export function translate(program: Program): string[] {
   // Translate invariant rules
   if (invariants.length > 0) {
     stmts.push('; === invariant rules ===');
+    const declaredEntities = [...nodes.map(n => n.name), ...resources.map(r => r.name), ...components.map(c => c.name)];
     for (const { invariant, rule } of expandInvariantRules(program)) {
       stmts.push(`; --- ${invariant} ---`);
       if (rule.kind === 'DenyFlow') {
@@ -137,12 +140,45 @@ export function translate(program: Program): string[] {
         const data = smtId(rule.data);
         const to = smtId(rule.to);
         stmts.push(`(assert (=> (DataCanReach ${data} ${to}) false))`);
+      } else if (rule.kind === 'RequireFlowVia') {
+        stmts.push(`(assert (=> (PathWithoutVia ${smtId(rule.from)} ${smtId(rule.to)} ${smtId(rule.via)}) false))`);
+      } else if (rule.kind === 'RequireDataFlowVia') {
+        stmts.push(`(assert (=> (DataPathWithoutVia ${smtId(rule.data)} ${smtId(rule.to)} ${smtId(rule.via)}) false))`);
+      } else if (rule.kind === 'DenyUnauthenticatedFlow') {
+        stmts.push(`(assert (=> (UnauthenticatedFlow ${smtId(rule.from)} ${smtId(rule.to)}) false))`);
+      } else if (rule.kind === 'DenyUnencryptedFlow') {
+        stmts.push(`(assert (=> (UnencryptedFlow ${smtId(rule.from)} ${smtId(rule.to)}) false))`);
+      } else if (rule.kind === 'RequireDependencyViaInterface') {
+        const interfaceId = `Interface__${smtId(rule.interface)}`;
+        if (!declaredInterfaces.has(interfaceId)) {
+          stmts.push(`(declare-const ${interfaceId} InterfaceType)`);
+          declaredInterfaces.add(interfaceId);
+        }
+        stmts.push(`(assert (=> (DependencyWithoutInterface ${smtId(rule.from)} ${smtId(rule.to)} Interface__${smtId(rule.interface)}) false))`);
+      } else if (rule.kind === 'RequireOperationIn') {
+        const operationId = `Operation__${smtId(rule.operation)}`;
+        if (!declaredOperations.has(operationId)) {
+          stmts.push(`(declare-const ${operationId} Operation)`);
+          declaredOperations.add(operationId);
+        }
+        for (const entity of declaredEntities) {
+          if (entity !== rule.component) {
+            stmts.push(`(assert (=> (OperationIn ${smtId(entity)} Operation__${smtId(rule.operation)}) false))`);
+          }
+        }
+      } else if (rule.kind === 'RequireOperationOnDataIn') {
+        const operationId = `Operation__${smtId(rule.operation)}`;
+        if (!declaredOperations.has(operationId)) {
+          stmts.push(`(declare-const ${operationId} Operation)`);
+          declaredOperations.add(operationId);
+        }
+        for (const entity of declaredEntities) {
+          if (entity !== rule.component) {
+            stmts.push(`(assert (=> (OperationOnDataIn ${smtId(entity)} Operation__${smtId(rule.operation)} ${smtId(rule.data)}) false))`);
+          }
+        }
       }
-      // RequireEncryption: NOT emitted as Z3 constraint.
-      // Encryption cannot be determined from static code analysis alone —
-      // no extractor currently produces Encrypted=false evidence.
-      // These rules are documented in AGENTS.md as advisory invariants.
-      // Future: network config / TLS certificate extractors could enable enforcement.
+      // RequireContractImplementedBy is validated deterministically by the checker.
     }
     stmts.push('');
   }
@@ -219,7 +255,13 @@ export function translate(program: Program): string[] {
         if (rule.roleEnum !== '*' && rule.roleValue !== '*') roles.add(`${rule.roleEnum}__${rule.roleValue}`);
       }
     }
-    for (const op of operations) stmts.push(`(declare-const Operation__${smtId(op)} Operation)`);
+    for (const op of operations) {
+      const operationId = `Operation__${smtId(op)}`;
+      if (!declaredOperations.has(operationId)) {
+        stmts.push(`(declare-const ${operationId} Operation)`);
+        declaredOperations.add(operationId);
+      }
+    }
     for (const role of roles) stmts.push(`(declare-const Role__${smtId(role)} RoleType)`);
     stmts.push('');
   }

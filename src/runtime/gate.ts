@@ -5,7 +5,8 @@ import type { ArchitectureArtifact } from '../emitters/artifact.ts';
 import type { ArtifactInvariantRule, ArtifactDiPolicyRule } from '../emitters/artifact.ts';
 import type { DeltaResult } from './delta-assert.ts';
 import type { DiFact } from '../analyzers/csharp.ts';
-import type { RuntimeDiFact, ReachFact, TrustPolicyFact } from './delta-assert.ts';
+import type { RuntimeDiFact, ReachFact, RequireDataFlowViolationFact, RequireFlowViolationFact, TrustPolicyFact } from './delta-assert.ts';
+import type { AuthCounterexampleFact, DependencyFact, EncryptionCounterexampleFact } from './extraction-query.ts';
 import type { ContractViolation } from './contract-gate.ts';
 import type { WorkflowViolation } from './workflow-gate.ts';
 import type { ChangeViolation } from './change-gate.ts';
@@ -21,7 +22,7 @@ export interface Z3Proof {
 
 export interface GateViolation {
   id?: string;
-  type: 'flow_violation' | 'reach_violation' | 'dataflow_violation' | 'data_policy_violation' | 'trust_policy_violation' | 'di_violation' | 'permission_violation' | 'state_machine_violation';
+  type: 'flow_violation' | 'reach_violation' | 'require_flow_violation' | 'require_dataflow_violation' | 'require_auth_violation' | 'require_encryption_violation' | 'require_operation_violation' | 'require_dependency_violation' | 'dataflow_violation' | 'data_policy_violation' | 'trust_policy_violation' | 'di_violation' | 'permission_violation' | 'state_machine_violation';
   invariant: string;
   rule: ArtifactInvariantRule | ArtifactDiPolicyRule | { kind: 'Transition'; from: string; to: string; data: string; field: string };
   detected: {
@@ -29,6 +30,7 @@ export interface GateViolation {
     to: string;
     data?: string;
     via?: string;
+    interface?: string;
     path?: string[];
     confidence: string;
     evidence: string;
@@ -39,6 +41,8 @@ export interface GateViolation {
       file: string;
       graphFactId: string;
     };
+    operation?: string;
+    required_component?: string;
   };
   graph_evidence?: {
     graphFactId: string;
@@ -184,6 +188,11 @@ function buildSolverSlices(
   delta: DeltaResult,
   runtime: {
     blockingReachFacts: ReachFact[];
+    blockingRequireFlowFacts: RequireFlowViolationFact[];
+    blockingRequireDataFlowFacts: RequireDataFlowViolationFact[];
+    blockingAuthCounterexampleFacts: AuthCounterexampleFact[];
+    blockingEncryptionCounterexampleFacts: EncryptionCounterexampleFact[];
+    blockingDependencyFacts: DependencyFact[];
     blockingDataFlowFacts: DeltaResult['blockingDataFlowFacts'];
     blockingDiFacts: RuntimeDiFact[];
     blockingTransitionFacts: DeltaResult['blockingTransitionFacts'];
@@ -229,6 +238,27 @@ function buildSolverSlices(
             declaration: 'invariant deny reach',
             permanent: buildPermanentConstraint(rule),
             delta: `(assert (CanReach ${smtId(fact.from)} ${smtId(fact.to)}))`,
+            source_file: fact.file,
+            line: fact.line ?? fact.graphEvidence?.line,
+            components: fact.path,
+            fact_count: Math.max(1, fact.path.length - 1),
+            path_depth: fact.path.length,
+            fanout: fanoutByComponent.get(fact.from),
+          });
+        }
+      }
+    }
+  }
+
+  for (const fact of runtime.blockingRequireFlowFacts) {
+    for (const invariant of artifact.invariants) {
+      for (const rule of invariant.rules) {
+        if (rule.kind === 'RequireFlowVia' && rule.from === fact.from && rule.to === fact.to && rule.via === fact.requiredVia) {
+          push({
+            rule: invariant.name,
+            declaration: 'invariant require flow',
+            permanent: buildRequireFlowPermanentConstraint(rule),
+            delta: `(assert (PathWithoutVia ${smtId(fact.from)} ${smtId(fact.to)} ${smtId(fact.requiredVia)}))`,
             source_file: fact.file,
             line: fact.line ?? fact.graphEvidence?.line,
             components: fact.path,
@@ -342,10 +372,23 @@ function buildPermanentConstraint(rule: { kind: string; from: string; to: string
     return `(assert (=> (Flow ${from} ${to}) false))`;
   } else if (rule.kind === 'DenyReach') {
     return `(assert (=> (CanReach ${from} ${to}) false))`;
-  } else if (rule.kind === 'RequireEncryption') {
-    return `(assert (=> (Flow ${from} ${to}) (Encrypted ${from} ${to})))`;
+  } else if (rule.kind === 'DenyUnauthenticatedFlow') {
+    return `(assert (=> (UnauthenticatedFlow ${from} ${to}) false))`;
+  } else if (rule.kind === 'DenyUnencryptedFlow') {
+    return `(assert (=> (UnencryptedFlow ${from} ${to}) false))`;
   }
   return `(assert (=> (Flow ${from} ${to}) false))`;
+}
+
+function buildRequireFlowPermanentConstraint(rule: { kind: 'RequireFlowVia'; from: string; to: string; via: string }): string {
+  return `(assert (=> (PathWithoutVia ${smtId(rule.from)} ${smtId(rule.to)} ${smtId(rule.via)}) false))`;
+}
+
+function buildRequireOperationPermanentConstraint(rule: { kind: 'RequireOperationIn'; operation: string; component: string }, actualComponent?: string): string {
+  if (actualComponent && actualComponent !== rule.component) {
+    return `(assert (=> (OperationIn ${smtId(actualComponent)} Operation__${smtId(rule.operation)}) false))`;
+  }
+  return `require operation ${rule.operation} in ${rule.component}`;
 }
 
 function buildDataPermanentConstraint(rule: { kind: 'DenyDataFlow'; data: string; to: string }): string {
@@ -437,16 +480,33 @@ export async function runGate(
       evidence: f.evidence,
       file: f.file,
     })),
+    ...(delta.operationWarningFacts ?? []).map(f => ({
+      from: f.component,
+      to: f.component,
+      evidence: f.evidence,
+      file: f.file,
+    })),
   ];
 
   const blockingDataFlowFacts = delta.blockingDataFlowFacts ?? [];
   const blockingReachFacts = delta.blockingReachFacts ?? [];
+  const blockingRequireFlowFacts = delta.blockingRequireFlowFacts ?? [];
+  const blockingRequireDataFlowFacts = delta.blockingRequireDataFlowFacts ?? [];
+  const blockingAuthCounterexampleFacts = delta.blockingAuthCounterexampleFacts ?? [];
+  const blockingEncryptionCounterexampleFacts = delta.blockingEncryptionCounterexampleFacts ?? [];
+  const blockingDependencyFacts = delta.blockingDependencyFacts ?? [];
   const blockingTrustPolicyFacts = delta.blockingTrustPolicyFacts ?? [];
   const blockingDiFacts = delta.blockingDiFacts ?? [];
   const blockingPermissionFacts = delta.blockingPermissionFacts ?? [];
   const blockingTransitionFacts = delta.blockingTransitionFacts ?? [];
+  const blockingOperationFacts = delta.blockingOperationFacts ?? [];
   const solverSlices = buildSolverSlices(artifact, delta, {
     blockingReachFacts,
+    blockingRequireFlowFacts,
+    blockingRequireDataFlowFacts,
+    blockingAuthCounterexampleFacts,
+    blockingEncryptionCounterexampleFacts,
+    blockingDependencyFacts,
     blockingDataFlowFacts,
     blockingDiFacts,
     blockingTransitionFacts,
@@ -454,7 +514,7 @@ export async function runGate(
   const solverDiagnostics = await runSolverSlices(artifact, solverSlices);
   const solverHotspots = solverDiagnostics.filter(d => d.status === 'unknown' || d.status === 'error');
 
-  if (delta.blockingFacts.length === 0 && blockingReachFacts.length === 0 && blockingDataFlowFacts.length === 0 && blockingTrustPolicyFacts.length === 0 && blockingDiFacts.length === 0 && blockingPermissionFacts.length === 0 && blockingTransitionFacts.length === 0) {
+  if (delta.blockingFacts.length === 0 && blockingReachFacts.length === 0 && blockingRequireFlowFacts.length === 0 && blockingRequireDataFlowFacts.length === 0 && blockingAuthCounterexampleFacts.length === 0 && blockingEncryptionCounterexampleFacts.length === 0 && blockingDependencyFacts.length === 0 && blockingDataFlowFacts.length === 0 && blockingTrustPolicyFacts.length === 0 && blockingDiFacts.length === 0 && blockingPermissionFacts.length === 0 && blockingTransitionFacts.length === 0 && blockingOperationFacts.length === 0) {
     return { passed: true, violations: [], warnings, ...(solverDiagnostics.length > 0 ? { solver_diagnostics: solverDiagnostics } : {}) };
   }
 
@@ -502,6 +562,10 @@ export async function runGate(
   }
 
   const hasRuntimePolicyBlocks =
+    blockingRequireDataFlowFacts.length > 0 ||
+    blockingAuthCounterexampleFacts.length > 0 ||
+    blockingEncryptionCounterexampleFacts.length > 0 ||
+    blockingDependencyFacts.length > 0 ||
     blockingTrustPolicyFacts.length > 0 ||
     blockingPermissionFacts.length > 0 ||
     blockingTransitionFacts.some(f => {
@@ -529,19 +593,7 @@ export async function runGate(
     let matched = false;
     for (const invariant of artifact.invariants) {
       for (const rule of invariant.rules) {
-        if (rule.kind !== 'DenyDataFlow' && rule.from === fact.from && rule.to === fact.to) {
-          // RequireEncryption: not enforced by Z3 (no extractor emits Encrypted facts).
-          // Move to warnings so agents see them but commits aren't blocked.
-          if (rule.kind === 'RequireEncryption') {
-            warnings.push({
-              from: fact.from,
-              to: fact.to,
-              evidence: `[Advisory] RequireEncryption invariant '${invariant.name}' — encryption cannot be verified from static analysis`,
-              file: fact.file,
-            });
-            matched = true;
-            continue;
-          }
+        if (rule.kind === 'DenyFlow' && rule.from === fact.from && rule.to === fact.to) {
           const permanentConstraint = buildPermanentConstraint(rule);
           violations.push({
             type: 'flow_violation',
@@ -570,7 +622,7 @@ export async function runGate(
       }
     }
     // Generic violation only when no dataflow rule could explain UNSAT.
-    if (!matched && blockingReachFacts.length === 0 && blockingDataFlowFacts.length === 0 && blockingTrustPolicyFacts.length === 0 && blockingDiFacts.length === 0 && blockingTransitionFacts.length === 0) {
+    if (!matched && blockingReachFacts.length === 0 && blockingRequireFlowFacts.length === 0 && blockingRequireDataFlowFacts.length === 0 && blockingAuthCounterexampleFacts.length === 0 && blockingEncryptionCounterexampleFacts.length === 0 && blockingDependencyFacts.length === 0 && blockingDataFlowFacts.length === 0 && blockingTrustPolicyFacts.length === 0 && blockingDiFacts.length === 0 && blockingTransitionFacts.length === 0 && blockingOperationFacts.length === 0) {
       violations.push({
         type: 'flow_violation',
         invariant: 'unknown',
@@ -624,6 +676,135 @@ export async function runGate(
             },
           });
         }
+      }
+    }
+  }
+
+  for (const fact of blockingRequireFlowFacts) {
+    const deltaAssertion = `(assert (PathWithoutVia ${smtId(fact.from)} ${smtId(fact.to)} ${smtId(fact.requiredVia)}))`;
+    for (const invariant of artifact.invariants) {
+      for (const rule of invariant.rules) {
+        if (rule.kind === 'RequireFlowVia' && rule.from === fact.from && rule.to === fact.to && rule.via === fact.requiredVia) {
+          const permanentConstraint = buildRequireFlowPermanentConstraint(rule);
+          violations.push({
+            type: 'require_flow_violation',
+            invariant: invariant.name,
+            rule,
+            detected: {
+              from: fact.from,
+              to: fact.to,
+              via: fact.requiredVia,
+              path: fact.path,
+              confidence: fact.confidence,
+              evidence: fact.evidence,
+              file: fact.file,
+            },
+            ...(fact.graphEvidence ? { graph_evidence: fact.graphEvidence } : {}),
+            message: `Path '${fact.path.join(' -> ')}' must pass through '${fact.requiredVia}' between '${fact.from}' and '${fact.to}' (invariant: ${invariant.name})`,
+            z3_proof: {
+              permanent_constraint: permanentConstraint,
+              delta_assertion: deltaAssertion,
+              explanation:
+                `Z3 returned UNSAT because '${permanentConstraint}' (from invariant '${invariant.name}') ` +
+                `contradicts '${deltaAssertion}' (derived from reachability evidence in ${fact.file}).`,
+            },
+          });
+        }
+      }
+    }
+  }
+
+  for (const fact of blockingRequireDataFlowFacts) {
+    const deltaAssertion = `(assert (DataPathWithoutVia ${smtId(fact.data)} ${smtId(fact.to)} ${smtId(fact.requiredVia)}))`;
+    for (const invariant of artifact.invariants) {
+      for (const rule of invariant.rules) {
+        if (rule.kind !== 'RequireDataFlowVia' || rule.data !== fact.data || rule.to !== fact.to || rule.via !== fact.requiredVia) continue;
+        const permanentConstraint = `(assert (=> (DataPathWithoutVia ${smtId(rule.data)} ${smtId(rule.to)} ${smtId(rule.via)}) false))`;
+        violations.push({
+          type: 'require_dataflow_violation',
+          invariant: invariant.name,
+          rule,
+          detected: {
+            from: fact.via,
+            to: fact.to,
+            data: fact.data,
+            via: fact.requiredVia,
+            path: fact.path,
+            confidence: fact.confidence,
+            evidence: fact.evidence,
+            file: fact.file,
+          },
+          message: `Data '${fact.data}' path to '${fact.to}' must pass through '${fact.requiredVia}' (invariant: ${invariant.name})`,
+          z3_proof: {
+            permanent_constraint: permanentConstraint,
+            delta_assertion: deltaAssertion,
+            explanation: `Z3 returned UNSAT because require-dataflow invariant '${invariant.name}' forbids bypass evidence from ${fact.file}.`,
+          },
+        });
+      }
+    }
+  }
+
+  for (const fact of blockingAuthCounterexampleFacts) {
+    const deltaAssertion = `(assert (UnauthenticatedFlow ${smtId(fact.from)} ${smtId(fact.to)}))`;
+    for (const invariant of artifact.invariants) {
+      for (const rule of invariant.rules) {
+        if (rule.kind !== 'DenyUnauthenticatedFlow' || rule.from !== fact.from || rule.to !== fact.to) continue;
+        violations.push({
+          type: 'require_auth_violation',
+          invariant: invariant.name,
+          rule,
+          detected: { from: fact.from, to: fact.to, confidence: fact.confidence, evidence: fact.evidence, file: fact.file },
+          message: `Flow '${fact.from}' -> '${fact.to}' must be authenticated, but definite unauthenticated evidence was emitted (invariant: ${invariant.name})`,
+          z3_proof: {
+            permanent_constraint: `(assert (=> (UnauthenticatedFlow ${smtId(rule.from)} ${smtId(rule.to)}) false))`,
+            delta_assertion: deltaAssertion,
+            explanation: `Z3 returned UNSAT because require-auth invariant '${invariant.name}' contradicts query evidence from '${fact.query.id}' in ${fact.file}.`,
+          },
+        });
+      }
+    }
+  }
+
+  for (const fact of blockingEncryptionCounterexampleFacts) {
+    const deltaAssertion = `(assert (UnencryptedFlow ${smtId(fact.from)} ${smtId(fact.to)}))`;
+    for (const invariant of artifact.invariants) {
+      for (const rule of invariant.rules) {
+        if (rule.kind !== 'DenyUnencryptedFlow' || rule.from !== fact.from || rule.to !== fact.to) continue;
+        violations.push({
+          type: 'require_encryption_violation',
+          invariant: invariant.name,
+          rule,
+          detected: { from: fact.from, to: fact.to, confidence: fact.confidence, evidence: fact.evidence, file: fact.file },
+          message: `Flow '${fact.from}' -> '${fact.to}' must be encrypted, but definite unencrypted evidence was emitted (invariant: ${invariant.name})`,
+          z3_proof: {
+            permanent_constraint: `(assert (=> (UnencryptedFlow ${smtId(rule.from)} ${smtId(rule.to)}) false))`,
+            delta_assertion: deltaAssertion,
+            explanation: `Z3 returned UNSAT because require-encryption invariant '${invariant.name}' contradicts query evidence from '${fact.query.id}' in ${fact.file}.`,
+          },
+        });
+      }
+    }
+  }
+
+  for (const fact of blockingDependencyFacts) {
+    for (const invariant of artifact.invariants) {
+      for (const rule of invariant.rules) {
+        if (rule.kind !== 'RequireDependencyViaInterface' || rule.from !== fact.from || rule.to !== fact.to) continue;
+        if (fact.interface === rule.interface) continue;
+        const deltaAssertion = `(assert (DependencyWithoutInterface ${smtId(fact.from)} ${smtId(fact.to)} Interface__${smtId(rule.interface)}))`;
+        violations.push({
+          type: 'require_dependency_violation',
+          invariant: invariant.name,
+          rule,
+          detected: { from: fact.from, to: fact.to, interface: fact.interface, confidence: fact.confidence, evidence: fact.evidence, file: fact.file },
+          message: `Dependency '${fact.from}' -> '${fact.to}' must use interface '${rule.interface}' (invariant: ${invariant.name})`,
+          z3_proof: {
+            permanent_constraint: `(assert (=> (DependencyWithoutInterface ${smtId(rule.from)} ${smtId(rule.to)} Interface__${smtId(rule.interface)}) false))`,
+            delta_assertion: deltaAssertion,
+            explanation: `Z3 returned UNSAT because require-dependency invariant '${invariant.name}' contradicts query evidence from '${fact.query.id}' in ${fact.file}.`,
+          },
+        });
       }
     }
   }
@@ -773,6 +954,58 @@ export async function runGate(
         explanation: `The C# authorization extractor found a protected operation in ${fact.file} without a matching role check or role attribute.`,
       },
     });
+  }
+
+  for (const fact of blockingOperationFacts) {
+    const deltaAssertion = fact.data
+      ? `(assert (OperationOnDataIn ${smtId(fact.component)} Operation__${smtId(fact.operation)} ${smtId(fact.data)}))`
+      : `(assert (OperationIn ${smtId(fact.component)} Operation__${smtId(fact.operation)}))`;
+    for (const invariant of artifact.invariants) {
+      for (const rule of invariant.rules) {
+        const matchesOperation =
+          (rule.kind === 'RequireOperationIn' && rule.operation === fact.operation && rule.component !== fact.component) ||
+          (rule.kind === 'RequireOperationOnDataIn' && rule.operation === fact.operation && rule.data === fact.data && rule.component !== fact.component);
+        if (!matchesOperation) continue;
+        const permanentConstraint = rule.kind === 'RequireOperationOnDataIn'
+          ? `(assert (=> (OperationOnDataIn ${smtId(fact.component)} Operation__${smtId(rule.operation)} ${smtId(rule.data)}) false))`
+          : buildRequireOperationPermanentConstraint(rule, fact.component);
+        violations.push({
+          type: 'require_operation_violation',
+          invariant: invariant.name,
+          rule,
+          detected: {
+            from: fact.component,
+            to: rule.component,
+            confidence: fact.confidence,
+            evidence: fact.evidence,
+            file: fact.file,
+            operation: fact.operation,
+            required_component: rule.component,
+            query: {
+              id: fact.query.id,
+              version: fact.query.version,
+              file: fact.query.file,
+              graphFactId: fact.graphFactId,
+            },
+          },
+          graph_evidence: {
+            graphFactId: fact.graphFactId,
+            kind: 'operation',
+            file: fact.file,
+            line: fact.line,
+            evidence: fact.evidence,
+          },
+          message: `Operation '${fact.operation}' must occur in '${rule.component}', but was detected in '${fact.component}' (invariant: ${invariant.name})`,
+          z3_proof: {
+            permanent_constraint: permanentConstraint,
+            delta_assertion: deltaAssertion,
+            explanation:
+              `Z3 returned UNSAT because require-operation invariant '${invariant.name}' forbids '${fact.operation}' outside '${rule.component}', ` +
+              `contradicting query evidence from '${fact.query.id}' in ${fact.file}.`,
+          },
+        });
+      }
+    }
   }
 
   for (const fact of blockingTransitionFacts) {

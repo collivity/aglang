@@ -10,10 +10,13 @@ export interface SkillManifest {
   description: string;
   context_file: string;
   commands: {
+    request_scan: string;
+    request_review: string;
     check_file: string;
     check_project: string;
     check_project_diff: string;
     explain_violation: string;
+    debug_scope: string;
     emit_context: string;
   };
   violation_schema: object;
@@ -37,6 +40,10 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
       'Use check_file or check_project_diff while coding, then explain_violation to repair failed checks from stable ids.',
     context_file: 'AGENTS.md',
     commands: {
+      request_scan:
+        `aglc request-scan --project <project_root> --out .aglang/tasks/architecture-discovery.json`,
+      request_review:
+        `aglc request-review --project <project_root> --out .aglang/tasks/architecture-review.json`,
       check_file:
         `aglc check-file --arch "${absArch}" --file <absolute_path_to_file> --json`,
       check_project:
@@ -45,6 +52,8 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
         `aglc check --arch "${absArch}" --project <project_root> --diff <git_ref> --json`,
       explain_violation:
         `aglc explain --arch "${absArch}" --project <project_root> --violation <violation_id> --json`,
+      debug_scope:
+        `aglc debug --arch "${absArch}" --project <project_root> --all --out .aglang/debug`,
       emit_context:
         `aglc emit-context --arch "${absArch}" --out AGENTS.md`,
     },
@@ -87,6 +96,8 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
                 enum: [
                   'flow_violation',
                   'reach_violation',
+                  'require_flow_violation',
+                  'require_operation_violation',
                   'dataflow_violation',
                   'data_policy_violation',
                   'trust_policy_violation',
@@ -102,6 +113,9 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
                   kind: { type: 'string' },
                   from: { type: 'string', description: 'Source component' },
                   to: { type: 'string', description: 'Target component or node' },
+                  via: { type: 'string', description: 'Required intermediate component for require-flow violations' },
+                  operation: { type: 'string', description: 'Operation name for require-operation violations' },
+                  component: { type: 'string', description: 'Required component for require-operation rules' },
                   data: { type: 'string', description: 'Data type for data policy violations' },
                   field: { type: 'string', description: 'Data field for state-machine violations' },
                 },
@@ -127,6 +141,8 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
                       graphFactId: { type: 'string' },
                     },
                   },
+                  operation: { type: 'string', description: 'Detected operation name for require-operation violations' },
+                  required_component: { type: 'string', description: 'Required component for detected operation placement' },
                 },
               },
               message: { type: 'string', description: 'Human-readable violation message' },
@@ -260,7 +276,8 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
     },
     advisory_note:
       'Enforcement is declaration-specific. Flow deny invariants, state machines, and change_policy rules are Z3-backed. ' +
-      'Reachability, propagated dataflow, trust boundary, DI, contract, and workflow policies are enforced when extractors produce definite evidence. Encryption requirements remain advisory unless this manifest says otherwise.',
+      'Reachability, require-flow paths, require-operation placement, propagated dataflow, trust boundary, DI, contract, and workflow policies are enforced when extractors or reviewed queries produce definite evidence. ' +
+      'Auth, encryption, dependency, and operation facts must come from deterministic extractors or reviewed .agq.yml files, not LLM calls during check. Ask before changing .ag or .agq.yml files to satisfy a require violation.',
   };
 }
 

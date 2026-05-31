@@ -118,6 +118,31 @@ component Tests {
   paths: "tests/**/*.ts"
 }
 
+component ArchitectureSpec {
+  runs_on: node_runtime
+  paths: "architecture.ag"
+}
+
+component CompiledArchitecture {
+  runs_on: node_runtime
+  paths: "architecture.o"
+}
+
+component AgentContext {
+  runs_on: node_runtime
+  paths: "AGENTS.md"
+}
+
+component SkillManifest {
+  runs_on: node_runtime
+  paths: "skill.json"
+}
+
+component SemanticQueries {
+  runs_on: node_runtime
+  paths: ".aglang/extractors/**/*.agq.yml"
+}
+
 invariant CompilerEntrypointBoundary {
   deny flow LanguageFrontend -> CliCompiler
   deny flow SmtBackend -> CliCompiler
@@ -175,4 +200,15 @@ change_policy DocsFreshness {
   require touched AgentSkill when touched PackageMetadata
   require touched AgentSkill when touched AgentSkillInstaller
   require touched PublicDocs when touched AgentSkill
+  require touched ArchitectureSpec when touched LanguageFrontend
+  require touched ArchitectureSpec when touched RuntimeGate
+  require touched ArchitectureSpec when touched SmtBackend
+  require touched ArchitectureSpec when touched Emitters
+  require touched CompiledArchitecture when touched ArchitectureSpec
+  require touched AgentContext when touched ArchitectureSpec
+  require touched SkillManifest when touched ArchitectureSpec
+  require touched PublicDocs when touched ArchitectureSpec
+  require touched AgentSkill when touched ArchitectureSpec
+  require touched PublicDocs when touched SemanticQueries
+  require touched AgentSkill when touched SemanticQueries
 }

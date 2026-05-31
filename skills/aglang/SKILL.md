@@ -19,16 +19,17 @@ aglc install-agent-skill
 ## Core Workflow For Coding Agents
 
 1. Read `AGENTS.md` first for project-specific architecture rules.
-2. During focused edits, run `aglc check-file --arch architecture.o --file <path> --json` on files you are changing.
-3. Before finishing, run `aglc check --arch architecture.o --project . --all --json`.
-4. Treat failed JSON verdicts as blocking feedback. Use `aglc explain --arch architecture.o --project . --violation <id> --json` as the deterministic repair-loop entrypoint, then fix the reported implementation and re-run the check.
-5. Keep project-specific behavior delegated to `AGENTS.md` and `skill.json`; this packaged skill only explains the generic aglang interface.
+2. If architecture discovery or proposal work is needed, ask the engineer and use `aglc request-scan` or `aglc request-review` to create a task packet. The agent performs semantic scanning/review; aglc validates approved artifacts.
+3. During focused edits, run `aglc check-file --arch architecture.o --file <path> --json` on files you are changing.
+4. Before finishing, run `aglc check --arch architecture.o --project . --all --json`.
+5. Treat failed JSON verdicts as blocking feedback. Use `aglc explain --arch architecture.o --project . --violation <id> --json` as the deterministic repair-loop entrypoint, then fix the reported implementation and re-run the check.
+6. Keep project-specific behavior delegated to `AGENTS.md` and `skill.json`; this packaged skill only explains the generic aglang interface.
 
 ## Architecture Source Rules
 
 `.ag` files are engineer-guided architecture source, not normal implementation files. Do not create, edit, regenerate, import into, or compile changes to `.ag` specs unless the engineer explicitly asks for architecture/spec work.
 
-Semantic query files are architecture source too. `.aglang/extractors/*.agq.yml` files are reviewed artifacts that map deterministic graph facts into domain facts such as architecture flows or state-machine transitions. LLMs may help author them when requested, but `aglc check` never calls an LLM; it runs the committed `.ag`, `.agq.yml`, and source facts deterministically.
+Semantic query files are architecture source too. `.aglang/extractors/*.agq.yml` files are reviewed artifacts that map deterministic graph facts into domain facts such as architecture flows, named operations, or state-machine transitions. LLMs may help author them when requested, but `aglc check` never calls an LLM; it runs the committed `.ag`, `.agq.yml`, and source facts deterministically.
 
 Generated architecture artifacts are also permissioned:
 
@@ -41,6 +42,8 @@ Generated architecture artifacts are also permissioned:
 ## Main Commands
 
 ```bash
+aglc request-scan [--project <dir>] [--out .aglang/tasks/architecture-discovery.json]
+aglc request-review [--project <dir>] [--out .aglang/tasks/architecture-review.json]
 aglc add [projectRoot] [--name <ProjectName>] [--out <file.ag>]
 aglc generate [projectRoot] [--out <file.ag>] [--name <ProjectName>]
 aglc compile <file.ag> [--out architecture.o]
@@ -48,11 +51,16 @@ aglc check --arch architecture.o --project . [--all] [--json]
 aglc check --arch architecture.o --project . --diff <ref> [--json]
 aglc check-file --arch architecture.o --file <path> [--json] [--dump-smt]
 aglc explain --arch architecture.o --project . --violation <id> [--json] [--diff <ref>] [--all]
+aglc debug --arch architecture.o --project . [--file <path>] [--all] [--diff <ref>] [--out .aglang/debug]
 aglc emit-context --arch architecture.o --out AGENTS.md
 aglc emit-skill --arch architecture.o --out skill.json
 aglc import-openapi <swagger.json> [--out <file.ag>]
 aglc import-tf <main.tf> [--out <file.ag>]
 ```
+
+`request-scan` and `request-review` are agent task emitters. They do not infer architecture intent, edit `.ag` files, or approve generated specs. Use them when an engineer wants the agent to inspect a repo, propose architecture artifacts, or review `.ag` / `.agq.yml` changes before deterministic compile/check enforcement.
+
+Use `aglc debug` when an agent or engineer needs the evidence behind a check. It writes `debug.json`, `graph.json`, `verdict.json`, `rules.json`, `agent-tasks.json`, and `engineer.md` so the agent can inspect structured graph/rule evidence and the engineer can review the same scope in prose.
 
 ## Semantic Queries And State Machines
 
@@ -64,6 +72,8 @@ State machines and other semantic rules are enforced from extracted facts, not f
 4. The JSON violation includes `type: "state_machine_violation"`, stable `id`, source evidence, query id/version/file, graph fact id when available, and the Z3 proof.
 
 Transitions without a resolved `from` state are warning-only. Do not "fix" these by weakening the machine unless the requested architecture change is explicit.
+
+`require flow A -> B via C`, `require dataflow D -> T via C`, `require auth on flow A -> B`, `require encryption on flow A -> B`, `require dependency A -> B via interface I`, and `require operation serialization in Serializer` are blocking when definite reviewed counterexample evidence exists. These readable rules compile to deny-counterexample enforcement; teams may also write explicit forms such as `deny unauthenticated flow A -> B` or `deny dependency A -> B without interface I`. Operation, auth, encryption, and dependency facts come from deterministic extractors or reviewed `.agq.yml` files, not ad hoc LLM inference during `check`. If a require violation appears to need a changed `.ag` or `.agq.yml` rule, ask the engineer before editing architecture intent.
 
 ## Workflow Policies
 
@@ -94,7 +104,9 @@ Check commands return schema version 2. Important fields:
 
 - `passed`: overall result.
 - `diff`: checked scope metadata when running staged, `--diff`, or `--all` checks.
-- `violations`: architecture flow, reachability, data, trust, DI, and permission violations with proof details.
+- `violations`: architecture flow, reachability, require, data, trust, DI, and permission violations with proof details.
+- `require_flow_violation`: a violation type inside `violations[]` for a `require flow A -> B via C` path that bypasses `C`; inspect `detected.path` and `detected.via`.
+- `require_operation_violation`: a violation type inside `violations[]` for a reviewed query-emitted operation outside its required component; inspect `detected.operation`, `detected.required_component`, and `detected.query`.
 - `state_machine_violation`: a violation type inside `violations[]` for query-extracted transitions that violate a `machine` declaration.
 - `reach_violation`: a violation type inside `violations[]` for a transitive `deny reach` path; inspect `detected.path`.
 - `dataflow_violation`: a violation type inside `violations[]` for data reaching a denied component or node.

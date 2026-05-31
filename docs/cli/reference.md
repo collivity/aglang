@@ -1,8 +1,36 @@
 # CLI Reference
 
+## `aglc request-scan`
+
+Emit a machine-readable task packet that asks an agent to perform architecture discovery and proposal work. This command does not infer architecture intent and does not edit `.ag` files.
+
+```bash
+aglc request-scan [--project <dir>] [--out <task.json>]
+```
+
+Default output: `.aglang/tasks/architecture-discovery.json`.
+
+The task packet instructs the agent to inspect the repo semantically, separate observed facts from intended rules, draft `architecture.proposed.ag`, draft `.agq.yml` query proposals when useful, and ask for human approval before enforcement.
+
+---
+
+## `aglc request-review`
+
+Emit a machine-readable task packet that asks an agent to review proposed architecture artifacts before compile/check enforcement.
+
+```bash
+aglc request-review [--project <dir>] [--out <task.json>]
+```
+
+Default output: `.aglang/tasks/architecture-review.json`.
+
+The task packet tells the agent to review `.ag`, `.agq.yml`, generated context, weak evidence, empty query matches, ownership gaps, and approval questions. It does not approve or compile architecture changes.
+
+---
+
 ## `aglc add`
 
-One-shot verification bootstrap: generate a starter architecture spec, compile it, and emit agent context.
+Legacy one-shot starter workflow: generate a draft architecture spec, compile it, and emit agent context. Prefer `aglc request-scan` for agent-assisted semantic discovery when adopting a real repo.
 
 ```bash
 aglc add [projectRoot] [--name <ProjectName>] [--out <file.ag>] [--max-depth <n>] [--single-file]
@@ -10,7 +38,7 @@ aglc add [projectRoot] [--name <ProjectName>] [--out <file.ag>] [--max-depth <n>
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `projectRoot` | Directory to scan | `.` (current directory) |
+| `projectRoot` | Directory used for deterministic starter synthesis | `.` (current directory) |
 | `--name` | Override the project name in the generated spec | Inferred from manifests |
 | `--out` | Output path for the `.ag` file | `<projectRoot>/architecture.ag` |
 | `--max-depth` | Maximum recursive component-synthesis depth | `3` |
@@ -41,7 +69,7 @@ plugin "@collivity/aglc-roslyn"
 
 ## `aglc generate`
 
-Scan a project directory and auto-generate a deep starter `.ag` spec.
+Generate a draft `.ag` starter from deterministic repo evidence. This is not architecture intent inference; review the output with a human or agent before using it as enforcement truth.
 
 ```bash
 aglc generate [projectRoot] [--out <file.ag>] [--name <n>] [--max-depth <n>] [--single-file]
@@ -54,6 +82,8 @@ By default, generation is extractor-guided and deep:
 - uses manifests as hints, but synthesizes components from real source layout and extracted facts
 
 Use `--single-file` when you need stdout-friendly output or want one flat starter file.
+
+For agent-native adoption, use `aglc request-scan` to create an architecture discovery task instead of relying on generated starter structure as truth.
 
 ---
 
@@ -127,6 +157,29 @@ aglc explain --arch <architecture.o> --project <dir> --violation <id> [--json] [
 ```
 
 The command re-runs the selected check scope, finds the matching violation, and reports the violated rule, source evidence, graph fact chain when available, proof details, `fix_class`, and suggested fix text. Use the same `--diff` or `--all` scope that produced the violation ID.
+
+---
+
+## `aglc debug`
+
+Write a debug bundle for both agents and engineers. The command runs the same extraction and gates as `check`, then writes structured evidence plus a readable report.
+
+```bash
+aglc debug --arch <architecture.o> --project <dir> [--file <path>] [--diff <ref>] [--all] [--out <dir>] [--debug-extractors] [--require-ast]
+```
+
+Default output: `.aglang/debug`.
+
+The bundle contains:
+
+- `debug.json` — complete structured packet for agent consumption.
+- `engineer.md` — human-readable report showing scope, evidence counts, checked rules, violations, solver diagnostics, and suggested agent tasks.
+- `graph.json` — extracted graph facts and projections.
+- `verdict.json` — check verdict for the selected scope.
+- `rules.json` — architecture rules and component mappings.
+- `agent-tasks.json` — suggested follow-up tasks for an agent.
+
+Use this when a check result is unclear, a file maps unexpectedly, extractors emit weak evidence, or an agent needs the graph/rule context before proposing a fix.
 
 ---
 

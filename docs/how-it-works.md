@@ -101,9 +101,9 @@ This is what happens when an agent, human, or CI job runs `aglc check`.
 
 | Level | Used for | Meaning |
 |---|---|---|
-| `formal_z3` | `deny flow`, `deny reach`, `deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy`, `machine` | Facts are asserted into SMT and checked by Z3 when extractors produce definite evidence. |
+| `formal_z3` | `deny flow`, `deny reach`, `require flow`, `require operation`, `deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy`, `machine` | Facts are asserted into SMT and checked by Z3 when extractors or reviewed queries produce definite evidence. |
 | `deterministic_policy` | `contract`, `workflow_policy` | Extracted facts are checked by deterministic code paths with exact diagnostics. |
-| `advisory` | `require encryption` | Rules are emitted to docs/agent context, but do not block yet. |
+| `formal_z3` | `require encryption` / `deny unencrypted flow` | Rules block when deterministic extractors or reviewed `.agq.yml` files emit definite unencrypted-flow evidence. |
 
 This distinction is part of the product contract: aglang should not imply that advisory declarations are formally enforced.
 

@@ -10,6 +10,9 @@ aglang declarations have explicit enforcement levels:
 |-------------|-------|---------|
 | `invariant deny flow` | `formal_z3` | Extracted flow facts are checked against SMT-LIB constraints in Z3. |
 | `invariant deny reach` | `formal_z3` | Transitive flow reachability is checked in Z3. |
+| `invariant require flow` / `deny path_without_via` | `formal_z3` | Definite source-to-target paths must pass through the required intermediate endpoint. |
+| `invariant require dataflow` / `deny data_path_without_via` | `formal_z3` | Definite data paths must pass through the required intermediate endpoint. |
+| `invariant require auth/encryption/dependency/operation` | `formal_z3` | Reviewed counterexample facts block when they prove unauthenticated, unencrypted, wrong-interface dependency, or wrong-component operation evidence. |
 | `invariant deny dataflow` | `formal_z3` | Dataflow facts inferred from handled data and extracted reachability are checked in Z3. |
 | `data_policy` | `formal_z3` | Data classification and jurisdiction rules are checked against propagated data reachability. |
 | `trust_policy` | `formal_z3` | Trust-boundary auth and classified data boundary rules are checked from extracted facts and declared node metadata. |
@@ -18,7 +21,6 @@ aglang declarations have explicit enforcement levels:
 | `machine` | `formal_z3` | Extracted transition facts are checked against declared state-machine transitions. |
 | `contract` | `deterministic_policy` | Route facts are compared against declared implements/consumes contracts. |
 | `workflow_policy` | `deterministic_policy` | GitHub Actions facts are checked for release, deploy, publish, permission, and step-order rules. |
-| `invariant require encryption` | `advisory` | Reported as a warning because static extraction does not yet prove encryption. |
 | `permission` | `formal_z3` | Authorization intent is emitted and can be enforced when extractors produce definite operation and role-check evidence. |
 
 `formal_z3` and `deterministic_policy` violations block checks. `advisory` declarations guide agents and docs, but do not block by themselves unless a future extractor/gate promotes them.
@@ -95,6 +97,28 @@ resource ExternalNetwork : external_api { trust: untrusted protocol: https }
 
 ## Invariant
 
+`require` rules are the preferred readable syntax for positive architecture intent. Evidence-backed `require` rules compile to deny-counterexample checks, so enforcement blocks only when deterministic extractors or reviewed `.agq.yml` queries emit definite bad evidence. Teams that prefer policy-style authoring can write the equivalent `deny` counterexample form directly.
+
+```ag
+invariant EvidenceBacked {
+  require flow Api -> Db via Repository
+  require dataflow CustomerProfile -> Partner via Scrubber
+  require auth on flow Client -> Api
+  require encryption on flow Api -> Partner
+  require operation serialization on CustomerProfile in Serializer
+  require dependency Service -> Repository via interface IOrderRepository
+
+  deny path_without_via Api -> Db via Repository
+  deny data_path_without_via CustomerProfile -> Partner via Scrubber
+  deny unauthenticated flow Client -> Api
+  deny unencrypted flow Api -> Partner
+  deny operation serialization on CustomerProfile outside Serializer
+  deny dependency Service -> Repository without interface IOrderRepository
+}
+```
+
+`require contract OrdersApi implemented_by OrdersController` is deterministic: the checker validates that the component declares `implements: OrdersApi`. Auth, encryption, dependency, and operation facts come from deterministic extractors or reviewed `.agq.yml` files; `aglc check` does not call an LLM to infer them.
+
 Flow invariants declare component or node relationships that must not be violated.
 
 ```ag
@@ -104,6 +128,9 @@ invariant <Name> {
   deny flow role <RoleName> -> resource <ResourceNameOrType>
   deny flow layer <LayerName> -> resource <ResourceNameOrType>
   deny dataflow <DataType> -> <ComponentOrNode>
+  require flow <ComponentOrNode> -> <ComponentOrNode> via <ComponentOrNode>
+  require flow role <RoleName> -> resource <ResourceNameOrType> via <ComponentOrNode>
+  require operation <operationName> in <ComponentOrNode>
   require encryption on flow <ComponentOrNode> -> <ComponentOrNode>
 }
 ```
@@ -114,12 +141,29 @@ Example:
 invariant Layering {
   deny flow PublicApi -> ledger_db
   deny flow role presentation -> resource secure_storage
+  require flow PublicApi -> ledger_db via Repository
+  require operation serialization in Serializer
 }
 ```
 
-`deny flow` is direct-only for compatibility. Use `deny reach` to block transitive paths such as `UI -> Service -> Db`. `require encryption on flow` is currently advisory because extractors do not yet prove encrypted transport.
+`deny flow` is direct-only for compatibility. Use `deny reach` to block transitive paths such as `UI -> Service -> Db`.
+
+`require flow A -> B via C` blocks when a definite extracted path from `A` to `B` exists and `C` is not an intermediate node on that path. `via` must be between the source and target; using the source or target does not satisfy the requirement. The `from`, `to`, and `via` positions support the same entity, role, layer, and resource selector expansion used by `deny flow`.
+
+`require operation serialization in Serializer` blocks when a definite reviewed `.agq.yml` query emits an operation fact for `serialization` in any other component. Operation placement is query-first; `aglc check` does not call an LLM to infer operation facts.
+
+`require encryption on flow` blocks when deterministic extractors or reviewed `.agq.yml` files emit definite `encrypted: false` evidence. Missing encryption evidence does not block by itself.
 
 `deny dataflow` is also Z3-backed. It blocks when a component that `handles` a data type can reach the denied target through one or more extracted flows.
+
+Operation facts can be emitted by reviewed extraction queries:
+
+```yaml
+emit:
+  kind: operation
+  operation: serialization
+  component: "$subject"
+```
 
 ## Data Metadata And Policies
 

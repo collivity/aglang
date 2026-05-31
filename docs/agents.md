@@ -30,14 +30,23 @@ When installed from npm, aglang also attempts this step automatically during `po
 aglc add /path/to/project --name MyApp
 ```
 
-This creates:
+This legacy starter command creates:
 - `architecture.ag` — the spec (agents should read this)
 - `architecture.o` — the compiled artifact
 - `skill.json` — agent skill manifest
 
 `.ag` files are engineer-guided architecture source. Coding agents should not create, edit, regenerate, or compile changes to `.ag` specs unless the engineer explicitly asks for architecture/spec work, ideally in a planning or design session.
 
-Semantic query files in `.aglang/extractors/*.agq.yml` are also reviewed architecture source. They translate deterministic graph facts into domain facts such as state-machine transitions or architecture flows. Agents may inspect them to understand provenance, but should ask before creating or changing them.
+Semantic query files in `.aglang/extractors/*.agq.yml` are also reviewed architecture source. They translate deterministic graph facts into domain facts such as state-machine transitions, architecture flows, or named operations. Agents may inspect them to understand provenance, but should ask before creating or changing them.
+
+For agent-native adoption, prefer task packets:
+
+```bash
+aglc request-scan --project . --out .aglang/tasks/architecture-discovery.json
+aglc request-review --project . --out .aglang/tasks/architecture-review.json
+```
+
+These commands notify the agent what work is requested. The agent performs semantic scanning, proposal, and review; aglc remains the deterministic compiler/checker for approved artifacts.
 
 ### 2. Emit agent context
 
@@ -92,13 +101,15 @@ Agents can parse this JSON and decide how to fix the violation rather than readi
 
 ## Workflow for agent-managed projects
 
-1. **Setup** — an engineer or authorized setup agent runs `aglc add` and reviews the generated `.ag` spec.
+1. **Setup** — an engineer requests `aglc request-scan`, then an authorized agent proposes architecture artifacts for review.
 2. **Agent reads** — coding agents read `AGENTS.md` and `skill.json` before making implementation changes.
 3. **Agent validates while coding** — run `aglc check-file --json` for focused edits.
 4. **Agent validates before finishing** — run `aglc check --all --json` for the guarded project.
 5. **Architecture evolves deliberately** — agents ask before changing `.ag`, `.agq.yml`, `architecture.o`, `AGENTS.md`, `skill.json`, or generated context.
 
 When `reach_violation`, `data_policy_violation`, or `trust_policy_violation` entries appear in `violations[]`, use `detected.path`, `detected.data`, and the Z3 proof to remove the forbidden path or add the declared auth/trust boundary the architecture requires.
+
+When `require_flow_violation` or `require_operation_violation` entries appear in `violations[]`, fix the implementation so the required path or operation placement is satisfied. Operation facts come from reviewed `.agq.yml` files; do not edit `.ag` or `.agq.yml` to satisfy a require violation unless the engineer explicitly approves an architecture/query change.
 
 When `di_violation` entries appear in `violations[]`, fix the implementation dependency graph. Reach-based DI failures may include a transitive `detected.path`. Do not work around the gate by editing `.ag` unless the engineer explicitly asks to change the intended architecture.
 
@@ -120,3 +131,8 @@ my-project/
 ├── skill.json         ← agent skill manifest
 └── src/
 ```
+## Architecture Source Changes
+
+Agents must ask before changing `.ag`, `.agq.yml`, `architecture.o`, `AGENTS.md`, or `skill.json` to satisfy a violation. These files encode architecture intent or generated architecture surfaces, so fixes should normally change implementation code unless the engineer explicitly approves an architecture/query update.
+
+Evidence-backed `require` rules compile to deny-counterexample checks. Auth, encryption, dependency, and operation facts come from deterministic extractors or reviewed `.agq.yml` files during `check`; they are not inferred by LLM calls.

@@ -25,7 +25,7 @@ import {
   projectGraphToFlows,
   type GraphReport,
 } from './graph-projection.ts';
-import { applyExtractionQueryFacts, loadExtractionQueries, type TransitionFact } from './extraction-query.ts';
+import { applyExtractionQueryFacts, loadExtractionQueries, type AuthCounterexampleFact, type DependencyFact, type EncryptionCounterexampleFact, type OperationFact, type TransitionFact } from './extraction-query.ts';
 
 export type { FlowFact, GraphFact };
 
@@ -50,6 +50,14 @@ export interface ReachFact {
   confidence: FlowFact['confidence'];
   graphEvidence?: FlowFact['graphEvidence'];
 }
+
+export type RequireFlowViolationFact = ReachFact & {
+  requiredVia: string;
+};
+
+export type RequireDataFlowViolationFact = DataFlowFact & {
+  requiredVia: string;
+};
 
 export interface TrustPolicyFact {
   policy: string;
@@ -122,6 +130,17 @@ export interface DeltaResult {
   transitionFacts: TransitionFact[];
   blockingTransitionFacts: TransitionFact[];
   transitionWarningFacts: TransitionFact[];
+  operationFacts: OperationFact[];
+  blockingOperationFacts: OperationFact[];
+  operationWarningFacts: OperationFact[];
+  blockingRequireFlowFacts: RequireFlowViolationFact[];
+  blockingRequireDataFlowFacts: RequireDataFlowViolationFact[];
+  authCounterexampleFacts: AuthCounterexampleFact[];
+  blockingAuthCounterexampleFacts: AuthCounterexampleFact[];
+  encryptionCounterexampleFacts: EncryptionCounterexampleFact[];
+  blockingEncryptionCounterexampleFacts: EncryptionCounterexampleFact[];
+  dependencyFacts: DependencyFact[];
+  blockingDependencyFacts: DependencyFact[];
   warningFacts: FlowFact[];    // confidence=probable (non-strict)
   smtAssertions: string[];     // only for blocking facts
   // Maps "from::to" → the exact SMT assertion string fed to Z3
@@ -578,13 +597,52 @@ export async function generateDeltaAssertions(
     file: f.file,
   }, strict));
   const transitionWarningFacts = transitionFacts.filter(f => !blockingTransitionFacts.includes(f) && (!f.from || f.confidence === 'probable'));
+  const operationFacts = queryFacts.operationFacts;
+  const blockingOperationFacts = operationFacts.filter(f => isBlocking({
+    from: f.component,
+    to: f.component,
+    confidence: f.confidence,
+    evidence: f.evidence,
+    file: f.file,
+  }, strict));
+  const operationWarningFacts = operationFacts.filter(f => !blockingOperationFacts.includes(f) && f.confidence === 'probable');
+  const authCounterexampleFacts = queryFacts.authFacts;
+  const blockingAuthCounterexampleFacts = authCounterexampleFacts.filter(f => isBlocking({ from: f.from, to: f.to, confidence: f.confidence, evidence: f.evidence, file: f.file }, strict));
+  const encryptionCounterexampleFacts = queryFacts.encryptionFacts;
+  const blockingEncryptionCounterexampleFacts = encryptionCounterexampleFacts.filter(f => isBlocking({ from: f.from, to: f.to, confidence: f.confidence, evidence: f.evidence, file: f.file }, strict));
+  const dependencyFacts = queryFacts.dependencyFacts;
+  const blockingDependencyFacts = dependencyFacts.filter(f => isBlocking({ from: f.from, to: f.to, confidence: f.confidence, evidence: f.evidence, file: f.file }, strict));
   const reachFacts = computeReachFacts(flowFacts);
   const blockingReachFacts = reachFacts.filter(f =>
     artifact.invariants.some(inv => inv.rules.some(rule =>
       rule.kind === 'DenyReach' && rule.from === f.from && rule.to === f.to,
     )),
   );
+  const blockingRequireFlowFacts: RequireFlowViolationFact[] = [];
+  for (const fact of reachFacts) {
+    for (const invariant of artifact.invariants) {
+      for (const rule of invariant.rules) {
+        if (rule.kind !== 'RequireFlowVia' || rule.from !== fact.from || rule.to !== fact.to) continue;
+        const intermediate = fact.path.slice(1, -1);
+        if (!intermediate.includes(rule.via) && isBlocking(fact, strict)) {
+          blockingRequireFlowFacts.push({ ...fact, requiredVia: rule.via });
+        }
+      }
+    }
+  }
   const dataFlowFacts = inferDataFlowFacts(reachFacts, artifact);
+  const blockingRequireDataFlowFacts: RequireDataFlowViolationFact[] = [];
+  for (const fact of dataFlowFacts) {
+    for (const invariant of artifact.invariants) {
+      for (const rule of invariant.rules) {
+        if (rule.kind !== 'RequireDataFlowVia' || rule.data !== fact.data || rule.to !== fact.to) continue;
+        const intermediate = fact.path?.slice(1, -1) ?? [];
+        if (!intermediate.includes(rule.via) && isBlocking({ from: fact.via, to: fact.to, confidence: fact.confidence, evidence: fact.evidence, file: fact.file }, strict)) {
+          blockingRequireDataFlowFacts.push({ ...fact, requiredVia: rule.via });
+        }
+      }
+    }
+  }
   const blockingDataFlowFacts = dataFlowFacts.filter(f =>
     artifact.invariants.some(inv => inv.rules.some(rule =>
       rule.kind === 'DenyDataFlow' && rule.data === f.data && rule.to === f.to,
@@ -614,6 +672,21 @@ export async function generateDeltaAssertions(
   const transitionAssertions = blockingTransitionFacts.map(f => {
     return `(assert (Transition ${smtId(f.data)} Field__${smtId(f.data)}__${smtId(f.field)} ${stateSmtId(artifact, f.data, f.field, f.from!)} ${stateSmtId(artifact, f.data, f.field, f.to)}))`;
   });
+  const operationAssertions = blockingOperationFacts.flatMap(f => [
+    `(assert (OperationIn ${smtId(f.component)} Operation__${smtId(f.operation)}))`,
+    ...(f.data ? [`(assert (OperationOnDataIn ${smtId(f.component)} Operation__${smtId(f.operation)} ${smtId(f.data)}))`] : []),
+  ]);
+  const requireFlowAssertions = blockingRequireFlowFacts.map(f => `(assert (PathWithoutVia ${smtId(f.from)} ${smtId(f.to)} ${smtId(f.requiredVia)}))`);
+  const requireDataFlowAssertions = blockingRequireDataFlowFacts.map(f => `(assert (DataPathWithoutVia ${smtId(f.data)} ${smtId(f.to)} ${smtId(f.requiredVia)}))`);
+  const authCounterexampleAssertions = blockingAuthCounterexampleFacts.map(f => `(assert (UnauthenticatedFlow ${smtId(f.from)} ${smtId(f.to)}))`);
+  const encryptionCounterexampleAssertions = blockingEncryptionCounterexampleFacts.map(f => `(assert (UnencryptedFlow ${smtId(f.from)} ${smtId(f.to)}))`);
+  const dependencyAssertions = blockingDependencyFacts.flatMap(f =>
+    artifact.invariants.flatMap(inv => inv.rules.flatMap(rule =>
+      rule.kind === 'RequireDependencyViaInterface' && rule.from === f.from && rule.to === f.to && f.interface !== rule.interface
+        ? [`(assert (DependencyWithoutInterface ${smtId(f.from)} ${smtId(f.to)} Interface__${smtId(rule.interface)}))`]
+        : [],
+    )),
+  );
 
   return {
     facts: flowFacts,
@@ -631,8 +704,19 @@ export async function generateDeltaAssertions(
     transitionFacts,
     blockingTransitionFacts,
     transitionWarningFacts,
+    operationFacts,
+    blockingOperationFacts,
+    operationWarningFacts,
+    blockingRequireFlowFacts,
+    blockingRequireDataFlowFacts,
+    authCounterexampleFacts,
+    blockingAuthCounterexampleFacts,
+    encryptionCounterexampleFacts,
+    blockingEncryptionCounterexampleFacts,
+    dependencyFacts,
+    blockingDependencyFacts,
     warningFacts: warningFlowFacts,
-    smtAssertions: [...projection.smtAssertions, ...queryFlowSmtAssertions, ...reachAssertions, ...dataFlowAssertions, ...diAssertions, ...transitionAssertions],
+    smtAssertions: [...projection.smtAssertions, ...queryFlowSmtAssertions, ...reachAssertions, ...dataFlowAssertions, ...diAssertions, ...transitionAssertions, ...operationAssertions, ...requireFlowAssertions, ...requireDataFlowAssertions, ...authCounterexampleAssertions, ...encryptionCounterexampleAssertions, ...dependencyAssertions],
     factSmtMap,
     diFactSmtMap,
     graphReport,

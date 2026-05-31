@@ -14,7 +14,14 @@ export type ArtifactEndpoint =
 export type ArtifactInvariantRule =
   | { kind: 'DenyFlow'; from: string; to: string }
   | { kind: 'DenyReach'; from: string; to: string }
-  | { kind: 'RequireEncryption'; from: string; to: string }
+  | { kind: 'DenyUnauthenticatedFlow'; from: string; to: string }
+  | { kind: 'DenyUnencryptedFlow'; from: string; to: string }
+  | { kind: 'RequireFlowVia'; from: string; to: string; via: string }
+  | { kind: 'RequireDataFlowVia'; data: string; to: string; via: string }
+  | { kind: 'RequireOperationIn'; operation: string; component: string }
+  | { kind: 'RequireOperationOnDataIn'; operation: string; data: string; component: string }
+  | { kind: 'RequireContractImplementedBy'; contract: string; component: string }
+  | { kind: 'RequireDependencyViaInterface'; from: string; to: string; interface: string }
   | { kind: 'DenyDataFlow'; data: string; to: string };
 
 export type ArtifactDiPolicyRule =
@@ -212,9 +219,16 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
     if (decl.kind === 'InvariantDecl') {
       const rules = expandInvariantRules(program)
         .filter(expanded => expanded.invariant === decl.name)
-        .map<ArtifactInvariantRule>(({ rule }) => rule.kind === 'DenyDataFlow'
-          ? ({ kind: rule.kind, data: rule.data, to: rule.to })
-          : ({ kind: rule.kind, from: rule.from, to: rule.to }));
+        .map<ArtifactInvariantRule>(({ rule }) => {
+          if (rule.kind === 'DenyDataFlow') return { kind: rule.kind, data: rule.data, to: rule.to };
+          if (rule.kind === 'RequireDataFlowVia') return { kind: rule.kind, data: rule.data, to: rule.to, via: rule.via };
+          if (rule.kind === 'RequireOperationIn') return { kind: rule.kind, operation: rule.operation, component: rule.component };
+          if (rule.kind === 'RequireOperationOnDataIn') return { kind: rule.kind, operation: rule.operation, data: rule.data, component: rule.component };
+          if (rule.kind === 'RequireContractImplementedBy') return { kind: rule.kind, contract: rule.contract, component: rule.component };
+          if (rule.kind === 'RequireDependencyViaInterface') return { kind: rule.kind, from: rule.from, to: rule.to, interface: rule.interface };
+          if (rule.kind === 'RequireFlowVia') return { kind: rule.kind, from: rule.from, to: rule.to, via: rule.via };
+          return { kind: rule.kind, from: rule.from, to: rule.to };
+        });
       invariants.push({ name: decl.name, rules });
       for (const rule of rules) {
         if (rule.kind === 'DenyReach') {
@@ -341,7 +355,7 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   }
 
   return {
-    schemaVersion: 13,
+    schemaVersion: 14,
     sourcePath,
     enforcement: [
       {
@@ -358,6 +372,36 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
         declaration: 'invariant deny reach',
         level: 'formal_z3',
         mechanism: 'Transitive flow reachability facts extracted from code are asserted against SMT-LIB constraints.',
+      },
+      {
+        declaration: 'invariant require flow',
+        level: 'formal_z3',
+        mechanism: 'Definite extracted paths that bypass the required intermediate endpoint are asserted against SMT-LIB constraints.',
+      },
+      {
+        declaration: 'invariant require dataflow',
+        level: 'formal_z3',
+        mechanism: 'Definite data paths that bypass the required intermediate endpoint are asserted against SMT-LIB constraints.',
+      },
+      {
+        declaration: 'invariant require auth',
+        level: 'formal_z3',
+        mechanism: 'Reviewed unauthenticated-flow counterexample facts are asserted against SMT-LIB constraints.',
+      },
+      {
+        declaration: 'invariant require encryption',
+        level: 'formal_z3',
+        mechanism: 'Reviewed unencrypted-flow counterexample facts are asserted against SMT-LIB constraints.',
+      },
+      {
+        declaration: 'invariant require dependency',
+        level: 'formal_z3',
+        mechanism: 'Reviewed dependency facts without the required interface are asserted against SMT-LIB constraints.',
+      },
+      {
+        declaration: 'invariant require operation',
+        level: 'formal_z3',
+        mechanism: 'Reviewed operation facts are asserted against required component placement constraints.',
       },
       {
         declaration: 'data_policy',
@@ -393,11 +437,6 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
         declaration: 'workflow_policy',
         level: 'deterministic_policy',
         mechanism: 'GitHub Actions facts are checked for publish/deploy/release, permissions, and step order.',
-      },
-      {
-        declaration: 'invariant require encryption',
-        level: 'advisory',
-        mechanism: 'Reported as warnings because extractors do not yet prove encryption.',
       },
       {
         declaration: 'machine',

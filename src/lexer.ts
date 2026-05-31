@@ -19,6 +19,7 @@ const KEYWORDS = new Set([
   'node', 'component', 'data', 'enum', 'service', 'invariant', 'test',
   'resource', 'role', 'layer',
   'deny', 'allow', 'flow', 'dataflow', 'require', 'encryption', 'on',
+  'via', 'operation', 'in',
   'reach',
   'runs_on', 'paths', 'trust', 'connectivity', 'latency', 'failure_mode',
   'protocol', 'auth', 'rate_limit',

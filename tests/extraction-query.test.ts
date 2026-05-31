@@ -200,4 +200,45 @@ emit:
       query: { id: 'SharedPersistenceAuthFlow' },
     });
   });
+
+  it('emits query-derived operation facts', () => {
+    const project = tempProject();
+    writeQuery(project, 'operation.agq.yml', `
+id: SerializationOperations
+owner: platform
+version: 1
+confidence: definite
+match:
+  kind: call
+  method: serialize
+emit:
+  kind: operation
+  operation: serialization
+  component: "$subject"
+`);
+    const queries = loadExtractionQueries(project);
+
+    const facts = applyExtractionQueryFacts(queries, [{
+      id: 'graph-3',
+      kind: 'call',
+      subject: 'Api',
+      properties: { method: 'serialize' },
+      confidence: 'definite',
+      evidence: {
+        extractor: 'test',
+        strategy: 'graph',
+        file: 'api.ts',
+        line: 8,
+        message: 'serialize call',
+      },
+    }]);
+
+    expect(facts.operationFacts).toHaveLength(1);
+    expect(facts.operationFacts[0]).toMatchObject({
+      operation: 'serialization',
+      component: 'Api',
+      graphFactId: 'graph-3',
+      query: { id: 'SerializationOperations' },
+    });
+  });
 });

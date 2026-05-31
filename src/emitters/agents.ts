@@ -13,8 +13,29 @@ function ruleDescription(rule: ArtifactInvariantRule): string {
   if (rule.kind === 'DenyDataFlow') {
     return `**FORBIDDEN**: data \`${rule.data}\` must NOT flow to \`${rule.to}\``;
   }
-  if (rule.kind === 'RequireEncryption') {
+  if (rule.kind === 'DenyUnauthenticatedFlow') {
+    return `**REQUIRED**: Flow \`${rule.from}\` -> \`${rule.to}\` must be authenticated`;
+  }
+  if (rule.kind === 'DenyUnencryptedFlow') {
     return `**REQUIRED**: All flows from \`${rule.from}\` to \`${rule.to}\` must be encrypted`;
+  }
+  if (rule.kind === 'RequireFlowVia') {
+    return `**REQUIRED**: Paths from \`${rule.from}\` to \`${rule.to}\` must pass through \`${rule.via}\``;
+  }
+  if (rule.kind === 'RequireDataFlowVia') {
+    return `**REQUIRED**: Data \`${rule.data}\` paths to \`${rule.to}\` must pass through \`${rule.via}\``;
+  }
+  if (rule.kind === 'RequireOperationIn') {
+    return `**REQUIRED**: Operation \`${rule.operation}\` must occur in \`${rule.component}\``;
+  }
+  if (rule.kind === 'RequireOperationOnDataIn') {
+    return `**REQUIRED**: Operation \`${rule.operation}\` on \`${rule.data}\` must occur in \`${rule.component}\``;
+  }
+  if (rule.kind === 'RequireContractImplementedBy') {
+    return `**REQUIRED**: Contract \`${rule.contract}\` must be implemented by \`${rule.component}\``;
+  }
+  if (rule.kind === 'RequireDependencyViaInterface') {
+    return `**REQUIRED**: Dependency \`${rule.from}\` -> \`${rule.to}\` must use interface \`${rule.interface}\``;
   }
   return `${(rule as { kind: string }).kind}: ${JSON.stringify(rule)}`;
 }
@@ -96,7 +117,12 @@ export function emitAgentsMarkdown(artifact: ArchitectureArtifact): string {
       if (meta?.layer) lines.push(`- **Layer**: \`${meta.layer}\``);
       const relatedRules = artifact.invariants.flatMap(inv =>
         inv.rules
-          .filter(r => r.kind === 'DenyDataFlow' ? r.to === comp : r.from === comp || r.to === comp)
+          .filter(r => {
+            if (r.kind === 'DenyDataFlow') return r.to === comp;
+            if (r.kind === 'RequireDataFlowVia') return r.to === comp || r.via === comp;
+            if (r.kind === 'RequireOperationIn' || r.kind === 'RequireOperationOnDataIn' || r.kind === 'RequireContractImplementedBy') return r.component === comp;
+            return r.from === comp || r.to === comp || (r.kind === 'RequireFlowVia' && r.via === comp);
+          })
           .map(r => ({ invName: inv.name, rule: r }))
       );
       const relatedDiRules = (artifact.diPolicies ?? []).flatMap(policy =>

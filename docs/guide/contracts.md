@@ -47,7 +47,7 @@ The importer generates contract blocks from OpenAPI paths and response schemas.
 
 Contracts are currently used for:
 
-- **Spec generation**: `aglc generate` auto-detects API routes.
+- **Spec drafts**: `aglc generate` can include API route evidence in a draft spec, but route intent should still be reviewed.
 - **Context emission**: `aglc emit-context` includes contract endpoints in `AGENTS.md`.
 - **Commit-time contract gate**: implementing components must expose declared routes, and consuming components warn on undeclared or method-mismatched calls.
 

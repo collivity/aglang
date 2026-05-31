@@ -263,7 +263,7 @@ export function parse(tokens: Token[]): Program {
     return { kind: 'entity', name: t.value };
   }
 
-  // invariant NAME { deny flow A -> B; | require encryption on flow A -> B; }
+  // invariant NAME { deny flow A -> B; | require flow A -> B via C; | require operation op in Component; | require encryption on flow A -> B; }
   function parseInvariantDecl(): InvariantDecl {
     expect('KEYWORD', 'invariant');
     const name = expect('IDENT').value;
@@ -291,24 +291,156 @@ export function parse(tokens: Token[]): Program {
           const to = expect('IDENT').value;
           consume('SEMICOLON');
           rules.push({ kind: 'DenyDataFlow', data, to });
+        } else if (denied.value === 'path_without_via') {
+          const fromEndpoint = parseInvariantEndpoint();
+          expect('ARROW');
+          const toEndpoint = parseInvariantEndpoint();
+          expect('KEYWORD', 'via');
+          const viaEndpoint = parseInvariantEndpoint();
+          consume('SEMICOLON');
+          rules.push({
+            kind: 'RequireFlowVia',
+            from: endpointName(fromEndpoint),
+            to: endpointName(toEndpoint),
+            via: endpointName(viaEndpoint),
+            fromEndpoint,
+            toEndpoint,
+            viaEndpoint,
+          });
+        } else if (denied.value === 'data_path_without_via') {
+          const data = expect('IDENT').value;
+          expect('ARROW');
+          const toEndpoint = parseInvariantEndpoint();
+          expect('KEYWORD', 'via');
+          const viaEndpoint = parseInvariantEndpoint();
+          consume('SEMICOLON');
+          rules.push({ kind: 'RequireDataFlowVia', data, to: endpointName(toEndpoint), via: endpointName(viaEndpoint), toEndpoint, viaEndpoint });
+        } else if (denied.value === 'unauthenticated') {
+          expect('KEYWORD', 'flow');
+          const fromEndpoint = parseInvariantEndpoint();
+          expect('ARROW');
+          const toEndpoint = parseInvariantEndpoint();
+          consume('SEMICOLON');
+          rules.push({ kind: 'DenyUnauthenticatedFlow', from: endpointName(fromEndpoint), to: endpointName(toEndpoint), fromEndpoint, toEndpoint });
+        } else if (denied.value === 'unencrypted') {
+          expect('KEYWORD', 'flow');
+          const fromEndpoint = parseInvariantEndpoint();
+          expect('ARROW');
+          const toEndpoint = parseInvariantEndpoint();
+          consume('SEMICOLON');
+          rules.push({ kind: 'DenyUnencryptedFlow', from: endpointName(fromEndpoint), to: endpointName(toEndpoint), fromEndpoint, toEndpoint });
+        } else if (denied.value === 'operation') {
+          const operation = expectIdent().value;
+          let data: string | undefined;
+          if (consume('KEYWORD', 'on')) data = expectIdent().value;
+          const outside = expectIdent();
+          if (outside.value !== 'outside') throw new ParseError(`expected 'outside' after deny operation`, outside);
+          const component = expectIdent().value;
+          consume('SEMICOLON');
+          if (data) rules.push({ kind: 'RequireOperationOnDataIn', operation, data, component });
+          else rules.push({ kind: 'RequireOperationIn', operation, component });
+        } else if (denied.value === 'dependency') {
+          const fromEndpoint = parseInvariantEndpoint();
+          expect('ARROW');
+          const toEndpoint = parseInvariantEndpoint();
+          const without = expectIdent();
+          if (without.value !== 'without') throw new ParseError(`expected 'without' after deny dependency`, without);
+          const interfaceKeyword = expectIdent();
+          if (interfaceKeyword.value !== 'interface') throw new ParseError(`expected 'interface' after deny dependency without`, interfaceKeyword);
+          const interfaceName = expectIdent().value;
+          consume('SEMICOLON');
+          rules.push({ kind: 'RequireDependencyViaInterface', from: endpointName(fromEndpoint), to: endpointName(toEndpoint), interface: interfaceName, fromEndpoint, toEndpoint });
         } else {
-          throw new ParseError(`expected 'flow', 'reach', or 'dataflow' after deny`, denied);
+          throw new ParseError(`expected 'flow', 'reach', 'dataflow', or counterexample kind after deny`, denied);
         }
       } else if (action === 'require') {
-        expect('KEYWORD', 'encryption');
-        expect('KEYWORD', 'on');
-        expect('KEYWORD', 'flow');
-        const fromEndpoint = parseInvariantEndpoint();
-        expect('ARROW');
-        const toEndpoint = parseInvariantEndpoint();
-        consume('SEMICOLON');
-        rules.push({
-          kind: 'RequireEncryption',
-          from: endpointName(fromEndpoint),
-          to: endpointName(toEndpoint),
-          fromEndpoint,
-          toEndpoint,
-        });
+        const required = advance();
+        if (required.value === 'encryption') {
+          expect('KEYWORD', 'on');
+          expect('KEYWORD', 'flow');
+          const fromEndpoint = parseInvariantEndpoint();
+          expect('ARROW');
+          const toEndpoint = parseInvariantEndpoint();
+          consume('SEMICOLON');
+          rules.push({
+            kind: 'DenyUnencryptedFlow',
+            from: endpointName(fromEndpoint),
+            to: endpointName(toEndpoint),
+            fromEndpoint,
+            toEndpoint,
+          });
+        } else if (required.value === 'auth') {
+          expect('KEYWORD', 'on');
+          expect('KEYWORD', 'flow');
+          const fromEndpoint = parseInvariantEndpoint();
+          expect('ARROW');
+          const toEndpoint = parseInvariantEndpoint();
+          consume('SEMICOLON');
+          rules.push({
+            kind: 'DenyUnauthenticatedFlow',
+            from: endpointName(fromEndpoint),
+            to: endpointName(toEndpoint),
+            fromEndpoint,
+            toEndpoint,
+          });
+        } else if (required.value === 'flow') {
+          const fromEndpoint = parseInvariantEndpoint();
+          expect('ARROW');
+          const toEndpoint = parseInvariantEndpoint();
+          expect('KEYWORD', 'via');
+          const viaEndpoint = parseInvariantEndpoint();
+          consume('SEMICOLON');
+          rules.push({
+            kind: 'RequireFlowVia',
+            from: endpointName(fromEndpoint),
+            to: endpointName(toEndpoint),
+            via: endpointName(viaEndpoint),
+            fromEndpoint,
+            toEndpoint,
+            viaEndpoint,
+          });
+        } else if (required.value === 'operation') {
+          const operation = expectIdent().value;
+          if (consume('KEYWORD', 'on')) {
+            const data = expectIdent().value;
+            expect('KEYWORD', 'in');
+            const component = expectIdent().value;
+            consume('SEMICOLON');
+            rules.push({ kind: 'RequireOperationOnDataIn', operation, data, component });
+            continue;
+          }
+          expect('KEYWORD', 'in');
+          const component = expectIdent().value;
+          consume('SEMICOLON');
+          rules.push({ kind: 'RequireOperationIn', operation, component });
+        } else if (required.value === 'dataflow') {
+          const data = expect('IDENT').value;
+          expect('ARROW');
+          const toEndpoint = parseInvariantEndpoint();
+          expect('KEYWORD', 'via');
+          const viaEndpoint = parseInvariantEndpoint();
+          consume('SEMICOLON');
+          rules.push({ kind: 'RequireDataFlowVia', data, to: endpointName(toEndpoint), via: endpointName(viaEndpoint), toEndpoint, viaEndpoint });
+        } else if (required.value === 'contract') {
+          const contract = expectIdent().value;
+          const implementedBy = expectIdent();
+          if (implementedBy.value !== 'implemented_by') throw new ParseError(`expected 'implemented_by' after require contract`, implementedBy);
+          const component = expectIdent().value;
+          consume('SEMICOLON');
+          rules.push({ kind: 'RequireContractImplementedBy', contract, component });
+        } else if (required.value === 'dependency') {
+          const fromEndpoint = parseInvariantEndpoint();
+          expect('ARROW');
+          const toEndpoint = parseInvariantEndpoint();
+          expect('KEYWORD', 'via');
+          const interfaceKeyword = expectIdent();
+          if (interfaceKeyword.value !== 'interface') throw new ParseError(`expected 'interface' after require dependency via`, interfaceKeyword);
+          const interfaceName = expectIdent().value;
+          consume('SEMICOLON');
+          rules.push({ kind: 'RequireDependencyViaInterface', from: endpointName(fromEndpoint), to: endpointName(toEndpoint), interface: interfaceName, fromEndpoint, toEndpoint });
+        } else {
+          throw new ParseError(`expected 'auth', 'encryption', 'flow', 'dataflow', 'operation', 'contract', or 'dependency' after require`, required);
+        }
       }
     }
     expect('RBRACE');

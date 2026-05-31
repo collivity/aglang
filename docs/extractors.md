@@ -68,7 +68,7 @@ Extraction prints normalized `FlowFact[]` JSON. Graph-native extractors may also
 
 ## Auditable semantic queries
 
-Project-specific semantic extraction can live in committed `.aglang/extractors/*.agq.yml` files. These queries match deterministic graph facts and emit domain facts such as state-machine transitions or architecture flows. LLMs may help author these files, but `aglc check` only runs the reviewed query files.
+Project-specific semantic extraction can live in committed `.aglang/extractors/*.agq.yml` files. These queries match deterministic graph facts and emit domain facts such as state-machine transitions, architecture flows, or named operations. LLMs may help author these files, but `aglc check` only runs the reviewed query files.
 
 ```yaml
 id: OrderLifecycleTransitions
@@ -103,6 +103,22 @@ emit:
   to: SharedAuth
 ```
 
+Operation facts support placement requirements such as `require operation serialization in Serializer`:
+
+```yaml
+id: SerializationOperations
+owner: platform
+version: 1
+confidence: definite
+match:
+  kind: call
+  method: serialize
+emit:
+  kind: operation
+  operation: serialization
+  component: "$subject"
+```
+
 When a query emits a blocking fact, JSON verdicts include the query id, version, query file, and matched graph fact id when available so the extraction result is auditable. Transition facts without a resolved `from` state are warning-only: they are reported as evidence, but are not asserted into Z3.
 
 ## OpenAPI import
@@ -114,3 +130,40 @@ aglc import-openapi swagger.json --out contracts.ag
 ```
 
 This generates contract blocks for all paths, which you can merge into your main `.ag` file.
+## Counterexample Emit Kinds
+
+Reviewed `.aglang/extractors/*.agq.yml` files can emit counterexample facts for evidence-backed `require` rules. `aglc check` evaluates committed query files deterministically; it does not call an LLM.
+
+```yaml
+emit:
+  kind: auth
+  from: "$caller"
+  to: "$target"
+  authenticated: false
+```
+
+```yaml
+emit:
+  kind: encryption
+  from: "$caller"
+  to: "$target"
+  encrypted: false
+```
+
+```yaml
+emit:
+  kind: operation
+  operation: serialization
+  data: CustomerProfile # optional
+  component: "$subject"
+```
+
+```yaml
+emit:
+  kind: dependency
+  from: "$subject"
+  to: "$target"
+  interface: IOrderRepository # optional
+```
+
+Only definite bad evidence blocks by default. Missing auth, encryption, dependency, or operation evidence is not treated as a violation.

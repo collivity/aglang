@@ -97,6 +97,8 @@ Architecture violations use these `type` values:
 
 - `flow_violation` for direct `deny flow`.
 - `reach_violation` for transitive `deny reach`; `detected.path` contains the proof path.
+- `require_flow_violation` for `require flow A -> B via C`; `detected.path` contains the bypassing path and `detected.via` names the required intermediate component.
+- `require_operation_violation` for `require operation <name> in <component>`; `detected.operation`, `detected.required_component`, and `detected.query` identify the reviewed query evidence.
 - `dataflow_violation` for `deny dataflow`; `detected.data` and `detected.via` identify the propagated data.
 - `data_policy_violation` for `data_policy` classification or jurisdiction rules.
 - `trust_policy_violation` for `trust_policy` auth or classified trust-boundary rules.
@@ -310,3 +312,8 @@ if (!verdict.passed) {
   console.log(verdict.agent_context)
 }
 ```
+## Counterexample Violations
+
+Evidence-backed `require` rules lower to deny-counterexample enforcement. JSON verdicts may include `require_flow_violation`, `require_dataflow_violation`, `require_auth_violation`, `require_encryption_violation`, `require_operation_violation`, and `require_dependency_violation` entries in `violations[]`.
+
+Auth, encryption, dependency, and operation violations are based on deterministic extractor output or reviewed `.agq.yml` facts. Missing evidence does not block; only definite bad facts are reported.

@@ -4,6 +4,8 @@
 
 Agents are a primary workflow: they read `AGENTS.md`, validate focused edits with `aglc check-file --json`, validate the full guarded project with `aglc check --all --json`, and ask before changing `.ag` or `.agq.yml` architecture source. Under the hood, hard rules are compiled into solver-backed constraints and deterministic policy gates so violations come with source evidence, stable ids, query provenance, and proof details instead of vague warnings.
 
+Readable `require` invariants compile to deny-counterexample enforcement. For example, `require auth on flow Client -> Api` blocks only when deterministic extractors or reviewed `.agq.yml` files emit definite unauthenticated evidence; teams can also author the explicit `deny unauthenticated flow Client -> Api` form. The same model applies to dataflow-via, encryption, dependency-interface, and operation-placement rules.
+
 aglang is also an anti-drift layer for multi-repo systems: once architecture intent is encoded in reviewed `.ag` and `.agq.yml` artifacts, engineers, CI, parent agents, and subagents can check the same boundaries without relying on prompt memory or stale documentation.
 
 ---
@@ -37,7 +39,7 @@ aglang is also an anti-drift layer for multi-repo systems: once architecture int
 1. **Architecture build** — `aglc compile spec.ag` produces `architecture.o` (a JSON artifact with SMT-LIB2 constraints + component→path mappings).
 2. **Work-in-progress validation** — agents run `aglc check-file --json` while editing and `aglc check --all --json` before finishing.
 3. **Local and CI enforcement** — `aglc check` extracts flow, reachability, propagated dataflow, trust-boundary, dependency-injection, workflow, and contract facts, feeds formal facts with the compiled constraints to the solver, and fails if any hard rule is violated.
-4. **Agent bootstrap** — `aglc add` can create a starter `.ag` spec, compiled artifact, and agent files for engineer review.
+4. **Agent-assisted discovery** — `aglc request-scan` and `aglc request-review` emit task packets so agents can propose and review architecture artifacts while aglc remains the deterministic verifier.
 
 
 
@@ -109,12 +111,11 @@ For broad query health against a real repo, run `npx tsx scripts/tree-sitter-cor
 ### Option A — Agent bootstrap (recommended for existing codebases)
 
 ```bash
-# 1. Scan your project and generate a deep starter spec (one-shot setup)
-npx @collivity/aglang add ./my-project --name MyProject
+# 1. Ask an agent to perform semantic architecture discovery
+npx @collivity/aglang request-scan --project ./my-project
 
-# The add command runs: deep generate → compile → emit skill.json
-# Use a planning/design session to review the generated architecture,
-# refine invariants, then compile the approved change:
+# The task packet tells the agent what to inspect and what proposals to produce.
+# Humans approve architecture intent before aglc compiles or checks it:
 aglc compile my-project/architecture.ag
 ```
 
@@ -185,7 +186,8 @@ Commit aborted.
 | **Permissions** | ✅ | Declare role-based access rules per state |
 | **Data & enums** | ✅ | Define domain types for documentation |
 | **Multi-file specs** | ✅ | Split large specs with `import "other.ag"` — shared DAG imports are deduplicated |
-| **`aglc generate`** | ✅ | Scan any codebase and auto-emit a deep starter `.ag` spec with imported sub-specs when needed |
+| **`aglc request-scan`** | ✅ | Emit an agent task packet for semantic architecture discovery and proposal work |
+| **`aglc generate`** | ✅ | Legacy deterministic draft generator; review output before use |
 | **Import OpenAPI** | ✅ | `aglc import-openapi swagger.json` → `.ag` contract blocks |
 | **Import Terraform** | ✅ | `aglc import-tf main.tf` → `.ag` node declarations |
 | **Plugin protocol** | ✅ | Extend extraction via npm packages implementing the `aglc-plugin` protocol |
@@ -207,7 +209,7 @@ Not every declaration is enforced the same way:
 |---|---|---|
 | `formal_z3` | `invariant deny flow`, `invariant deny reach`, `invariant deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy`, `machine` | Facts are asserted into SMT and checked by Z3 when extractors produce definite evidence. |
 | `deterministic_policy` | `contract`, `workflow_policy` | Extracted route/workflow facts are checked by deterministic gates. |
-| `advisory` | `require encryption` | Emitted to docs and agent context; not blocking until an extractor/gate enforces them. |
+| `formal_z3` | `require encryption` / `deny unencrypted flow` | Blocks only when deterministic extractors or reviewed `.agq.yml` files emit definite unencrypted-flow evidence. |
 
 This taxonomy is emitted into `architecture.o`, `AGENTS.md`, and `skill.json` so agents know which rules are proof-backed, policy-backed, or guidance-only.
 
@@ -368,7 +370,7 @@ invariant <name> {
   deny flow <ComponentOrNode> -> <ComponentOrNode>
   deny reach <ComponentOrNode> -> <ComponentOrNode>
   deny dataflow <DataType> -> <ComponentOrNode>
-  require encryption on flow <ComponentOrNode> -> <ComponentOrNode>  // advisory
+  require encryption on flow <ComponentOrNode> -> <ComponentOrNode>
 }
 
 // Change policy
@@ -442,11 +444,14 @@ import "relative/path/other.ag"
 | Command | Description |
 |---|---|
 | `aglc compile <file.ag>` | Compile spec → `architecture.o` |
-| `aglc generate [dir] [--out <file.ag>] [--name <n>] [--max-depth <n>] [--single-file]` | Scan codebase → deep starter `.ag` spec |
+| `aglc request-scan [--project <dir>] [--out <task.json>]` | Ask an agent to discover architecture evidence and propose artifacts |
+| `aglc request-review [--project <dir>] [--out <task.json>]` | Ask an agent to review proposed `.ag` / `.agq.yml` artifacts |
+| `aglc generate [dir] [--out <file.ag>] [--name <n>] [--max-depth <n>] [--single-file]` | Legacy deterministic draft generator |
 | `aglc check --arch <arch.o> --project <dir>` | Check staged git diff |
 | `aglc check --arch <arch.o> --project <dir> --diff <ref>` | Check files changed in `<ref>...HEAD` |
 | `aglc check-file --arch <arch.o> --file <path>` | Check a single file (dev/debug) |
 | `aglc explain --arch <arch.o> --project <dir> --violation <id>` | Explain a stable violation ID with evidence and suggested fix class |
+| `aglc debug --arch <arch.o> --project <dir> [--file <path>] [--out <dir>]` | Write graph/verdict/rule evidence plus an engineer-readable debug report |
 | `aglc emit-context --arch <arch.o> [--out <path>]` | Write `AGENTS.md` (agent context brief) |
 | `aglc emit-skill --arch <arch.o> [--out <path>]` | Write `skill.json` (agent skill manifest) |
 | `aglc install-agent-skill [--path <skills-dir>]` | Install the packaged generic Codex skill |
@@ -558,7 +563,8 @@ Use `aglc explain --violation <id> --json` with the same check scope to get the 
 
 aglang is designed as a first-class tool for AI coding agents:
 
-- **`aglc generate`** — a setup agent runs this once to bootstrap guardrails for any codebase; outputs a compilable `.ag` file to review and extend.
+- **`aglc request-scan`** — creates a task packet for an agent to inspect the repo semantically and propose architecture artifacts for review.
+- **`aglc generate`** — legacy deterministic draft generator; useful for hints, not architecture intent.
 - **`AGENTS.md`** — generated by `aglc emit-context`, gives agents a precise brief: topology, component paths, allowed flows, contracts, state machines, and permission rules. Fits in any context window.
 - **`skill.json`** — a machine-readable skill descriptor agents can register as a tool.
 - **Packaged Codex skill** — `aglc install-agent-skill` installs the generic aglang interface so agents know the CLI workflows after npm install.
@@ -570,7 +576,7 @@ aglang is designed as a first-class tool for AI coding agents:
 ### Typical agent workflow
 
 ```
-1. Setup/design session: aglc generate . --out architecture.ag
+1. Setup/design session: aglc request-scan --project .
    → engineer reviews intended architecture rules
    → authorized run: aglc compile architecture.ag
    → authorized run: aglc check --arch architecture.o --project . --all

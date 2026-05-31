@@ -36,9 +36,11 @@ function usage() {
 aglc — Architecture Ground Language Compiler
 
 Commands:
-  aglc add [projectRoot] [--name <n>] [--out <file.ag>] [--max-depth <n>] [--single-file]     One-shot setup: generate → compile → skill.json
+  aglc request-scan [--project <dir>] [--out <task.json>]       Emit an agent task packet for architecture evidence scanning
+  aglc request-review [--project <dir>] [--out <task.json>]     Emit an agent task packet for architecture/spec/query review
+  aglc add [projectRoot] [--name <n>] [--out <file.ag>] [--max-depth <n>] [--single-file]     Legacy starter: generate draft → compile → skill.json
   aglc compile <file.ag> [--out <arch.o>]                    Compile .ag spec → architecture.o
-  aglc generate [projectRoot] [--out <file.ag>] [--max-depth <n>] [--single-file]  Scan codebase → auto-generate starter .ag spec
+  aglc generate [projectRoot] [--out <file.ag>] [--max-depth <n>] [--single-file]  Legacy draft generator; review before use
   aglc emit-context --arch <arch.o> [--out <path>]          Emit AGENTS.md for AI agents
   aglc emit-skill   --arch <arch.o> [--out <path>]          Emit skill.json manifest for AI agents
   aglc install-agent-skill [--path <skills-dir>]            Install packaged aglang Codex skill for local agents
@@ -46,6 +48,7 @@ Commands:
   aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt] [--workflow-z3] [--dump-workflow-smt] [--debug-extractors] [--require-ast]  Analyze a specific file
   aglc explain --arch <arch.o> --project <dir> --violation <id> [--json] [--diff <ref>] [--all]  Explain a violation from the current check scope
   aglc graph --arch <arch.o> [--file <f> | --project <dir>] [--json] [--debug-extractors] [--require-ast]  Emit graph facts and Z3 flow projections
+  aglc debug --arch <arch.o> --project <dir> [--file <f>] [--diff <ref>] [--all] [--out <dir>] [--debug-extractors]  Write debug bundle for agents and engineers
   aglc import-openapi <swagger.json> [--out <file.ag>]       Import OpenAPI 3.x spec → .ag contracts
   aglc import-tf <main.tf> [--out <file.ag>]                Import Terraform → .ag node declarations
 
@@ -216,13 +219,31 @@ function buildRuleCoverage(artifact: ArchitectureArtifact, changed: ChangedCompo
     const components = new Set<string>();
     const evidence: string[] = [];
     for (const rule of invariant.rules) {
-      const values = rule.kind === 'DenyDataFlow' ? [rule.to] : [rule.from, rule.to];
+      const values = rule.kind === 'DenyDataFlow'
+        ? [rule.to]
+        : rule.kind === 'RequireDataFlowVia'
+          ? [rule.to, rule.via]
+        : rule.kind === 'RequireOperationIn' || rule.kind === 'RequireOperationOnDataIn' || rule.kind === 'RequireContractImplementedBy'
+          ? [rule.component]
+        : rule.kind === 'RequireFlowVia'
+          ? [rule.from, rule.to, rule.via]
+        : rule.kind === 'RequireDependencyViaInterface'
+          ? [rule.from, rule.to]
+          : [rule.from, rule.to];
       if (values.some(v => changedComponents.has(v))) {
         values.forEach(v => { if (changedComponents.has(v)) components.add(v); });
       }
     }
     for (const fact of [...delta.facts, ...delta.reachFacts]) {
-      if (fact.from && fact.to && invariant.rules.some(rule => rule.kind !== 'DenyDataFlow' && rule.from === fact.from && rule.to === fact.to)) {
+      if (fact.from && fact.to && invariant.rules.some(rule =>
+        rule.kind !== 'DenyDataFlow' &&
+        rule.kind !== 'RequireOperationIn' &&
+        rule.kind !== 'RequireOperationOnDataIn' &&
+        rule.kind !== 'RequireContractImplementedBy' &&
+        rule.kind !== 'RequireDataFlowVia' &&
+        rule.from === fact.from &&
+        rule.to === fact.to
+      )) {
         components.add(fact.from);
         components.add(fact.to);
         evidence.push(fact.evidence);
@@ -821,6 +842,246 @@ async function graphCommand(archPath: string, filePath: string | undefined, proj
 }
 
 // ─────────────────────────────────────────────────────────────
+// DEBUG (agent + engineer evidence bundle)
+// ─────────────────────────────────────────────────────────────
+function architectureRulesSummary(artifact: ArchitectureArtifact) {
+  return {
+    sourcePath: artifact.sourcePath,
+    components: Object.entries(artifact.mappings ?? {}).map(([name, paths]) => ({
+      name,
+      paths,
+      repo: artifact.componentRepos?.[name],
+    })),
+    invariants: artifact.invariants ?? [],
+    dataPolicies: artifact.dataPolicies ?? [],
+    trustPolicies: artifact.trustPolicies ?? [],
+    diPolicies: artifact.diPolicies ?? [],
+    changePolicies: artifact.changePolicies ?? [],
+    contracts: artifact.contracts ?? [],
+    workflowPolicies: artifact.workflowPolicies ?? [],
+    stateMachines: artifact.stateMachines ?? [],
+    permissions: artifact.permissions ?? [],
+    enforcement: artifact.enforcement ?? [],
+  };
+}
+
+function debugAgentTasks(payload: Record<string, unknown>, changed: ChangedComponent[], delta: Awaited<ReturnType<typeof generateDeltaAssertions>>) {
+  const violations = [
+    ...((payload.violations as unknown[]) ?? []),
+    ...((payload.contract_violations as unknown[]) ?? []),
+    ...((payload.workflow_violations as unknown[]) ?? []),
+    ...((payload.change_violations as unknown[]) ?? []),
+  ];
+  const tasks = [
+    {
+      id: 'explain_blocking_violations',
+      when: 'violations_present',
+      instruction: 'For each stable violation id, run aglc explain with the same scope and summarize the implementation repair before editing.',
+      violation_ids: violations
+        .map(v => typeof v === 'object' && v ? (v as Record<string, unknown>).id : undefined)
+        .filter(Boolean),
+    },
+    {
+      id: 'review_weak_or_missing_evidence',
+      when: 'warnings_or_empty_graph',
+      instruction: 'Review warnings, empty graph projections, and unmapped files. Ask the engineer before changing .ag or .agq.yml.',
+      warning_count: ((payload.warnings as unknown[]) ?? []).length,
+      graph_fact_count: delta.graphFacts.length,
+    },
+    {
+      id: 'report_scope_to_engineer',
+      when: 'always',
+      instruction: 'Show the engineer which files mapped to which components, which rules were checked, and which evidence was extracted.',
+      changed_components: changed.map(c => c.componentName),
+    },
+  ];
+  return tasks;
+}
+
+function markdownList(items: string[]): string {
+  return items.length > 0 ? items.map(item => `- ${item}`).join('\n') : '- None';
+}
+
+function writeEngineerDebugReport(outDir: string, bundle: Record<string, unknown>) {
+  const changed = bundle.changed as ChangedComponent[];
+  const payload = bundle.verdict as Record<string, unknown>;
+  const delta = bundle.delta_summary as Record<string, unknown>;
+  const rules = bundle.rules as ReturnType<typeof architectureRulesSummary>;
+  const tasks = bundle.agent_tasks as Array<Record<string, unknown>>;
+  const violations = [
+    ...((payload.violations as unknown[]) ?? []),
+    ...((payload.contract_violations as unknown[]) ?? []),
+    ...((payload.workflow_violations as unknown[]) ?? []),
+    ...((payload.change_violations as unknown[]) ?? []),
+  ] as Array<Record<string, unknown>>;
+  const md = [
+    '# aglc Debug Report',
+    '',
+    `- Artifact: \`${String(bundle.artifact)}\``,
+    `- Project: \`${String(bundle.project_root)}\``,
+    `- Scope: \`${String(bundle.scope)}\``,
+    `- Passed: \`${String(payload.passed)}\``,
+    '',
+    '## Files And Components',
+    '',
+    markdownList(changed.map(c => `${c.componentName}: ${c.files.map(f => relative(String(bundle.project_root), f).replace(/\\/g, '/')).join(', ')}`)),
+    '',
+    '## Evidence Summary',
+    '',
+    `- Flow facts: ${String(delta.flow_facts)}`,
+    `- Graph facts: ${String(delta.graph_facts)}`,
+    `- Reach facts: ${String(delta.reach_facts)}`,
+    `- DI facts: ${String(delta.di_facts)}`,
+    `- Blocking transition facts: ${String(delta.blocking_transition_facts)}`,
+    `- Warnings: ${String(delta.warnings)}`,
+    '',
+    '## Rule Surface',
+    '',
+    `- Components: ${rules.components.length}`,
+    `- Invariants: ${rules.invariants.length}`,
+    `- Data policies: ${rules.dataPolicies.length}`,
+    `- Trust policies: ${rules.trustPolicies.length}`,
+    `- DI policies: ${rules.diPolicies.length}`,
+    `- Change policies: ${rules.changePolicies.length}`,
+    `- Workflow policies: ${rules.workflowPolicies.length}`,
+    `- State machines: ${rules.stateMachines.length}`,
+    '',
+    '## Violations',
+    '',
+    markdownList(violations.map(v => {
+      const id = v.id ? ` ${String(v.id)}` : '';
+      const rule = v.invariant ?? v.policy ?? v.contract ?? 'unknown rule';
+      const message = v.message ?? v.evidence ?? '';
+      return `${String(v.type ?? 'violation')}${id}: ${String(rule)} - ${String(message)}`;
+    })),
+    '',
+    '## Solver Diagnostics',
+    '',
+    markdownList(((payload.solver_diagnostics as Array<Record<string, unknown>> | undefined) ?? []).map(d =>
+      `${String(d.status)} ${String(d.rule)} (${String(d.declaration)}) ${d.reason ? `- ${String(d.reason)}` : ''}`,
+    )),
+    '',
+    '## Agent Tasks',
+    '',
+    markdownList(tasks.map(t => `${String(t.id)}: ${String(t.instruction)}`)),
+    '',
+    '## Files Written',
+    '',
+    '- `debug.json` - complete structured packet',
+    '- `graph.json` - extracted graph/projection evidence',
+    '- `verdict.json` - check verdict for the selected scope',
+    '- `rules.json` - architecture rules and component mappings',
+    '- `agent-tasks.json` - suggested agent follow-up tasks',
+  ].join('\n');
+  writeFileSync(resolve(outDir, 'engineer.md'), md + '\n', 'utf8');
+}
+
+async function debugCommand(archPath: string, projectRoot: string, filePath: string | undefined, all = false, diffBase?: string, outPath?: string) {
+  if (!existsSync(archPath)) {
+    logErr(`Error: architecture.o not found: ${archPath}`);
+    process.exit(1);
+  }
+  const artifact: ArchitectureArtifact = loadArtifact(readFileSync(archPath, 'utf8'));
+  const absProject = resolve(projectRoot);
+  const outDir = resolve(outPath ?? resolve('.aglang', 'debug'));
+  const mode: DiffSelection['mode'] = filePath ? 'all' : all ? 'all' : diffBase ? 'git_ref' : 'staged';
+
+  let changed: ChangedComponent[];
+  let scope: string;
+  if (filePath) {
+    if (!existsSync(filePath)) {
+      logErr(`Error: file not found: ${filePath}`);
+      process.exit(1);
+    }
+    const absFile = resolve(filePath);
+    const componentName = await componentForFile(artifact, absFile);
+    if (!componentName) {
+      changed = [];
+      scope = `file:${absFile}`;
+    } else {
+      changed = [{ componentName, files: [absFile] }];
+      scope = `file:${absFile}`;
+    }
+  } else {
+    changed = all
+      ? parseProjectFiles(absProject, artifact)
+      : diffBase
+        ? parseDiffAgainst(absProject, artifact, diffBase)
+        : parseDiff(absProject, artifact);
+    scope = all ? 'all' : diffBase ? `diff:${diffBase}...HEAD` : 'staged';
+  }
+
+  let delta;
+  try {
+    delta = await generateDeltaAssertions(changed, artifact, { debugExtractors: true, requireAst, projectRoot: absProject });
+  } catch (error) {
+    const message = (error as Error).message;
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(resolve(outDir, 'debug.json'), extractorErrorJson(archPath, message) + '\n', 'utf8');
+    logErr(`[aglc] Extractor failure: ${message}`);
+    process.exit(1);
+  }
+
+  const allChangedFiles = changed.flatMap(c => c.files);
+  const contractResult = await runContractGate(artifact, allChangedFiles, { projectRoot: absProject, checkCompleteness: true });
+  const workflowResult = runWorkflowGate(artifact, allChangedFiles, { projectRoot: absProject });
+  const changeResult = await runChangeGate(artifact, changed);
+  const verdict = await runGate(artifact, delta);
+  verdict.contract_violations = contractResult.violations;
+  verdict.contract_warnings = contractResult.warnings;
+  verdict.workflow_violations = workflowResult.violations;
+  verdict.workflow_warnings = workflowResult.warnings;
+  verdict.change_violations = changeResult.violations;
+  verdict.passed = verdict.passed && contractResult.violations.length === 0 && workflowResult.violations.length === 0 && changeResult.violations.length === 0;
+
+  const verdictPayload = JSON.parse(formatVerdictJson(verdict, archPath)) as Record<string, unknown>;
+  verdictPayload.diff = buildDiffSelection(absProject, changed, mode, diffBase ?? (all ? 'workspace' : filePath ? 'file' : 'staged'));
+  verdictPayload.rule_coverage = buildRuleCoverage(artifact, changed, delta);
+  annotateBaselineStatus(verdictPayload, diffBase ? 'new' : 'unchanged');
+  verdictPayload.extractor_debug = delta.extractorDebug;
+
+  const rules = architectureRulesSummary(artifact);
+  const deltaSummary = {
+    flow_facts: delta.facts.length,
+    graph_facts: delta.graphFacts.length,
+    reach_facts: delta.reachFacts.length,
+    di_facts: delta.diFacts.length,
+    blocking_facts: delta.blockingFacts.length,
+    blocking_reach_facts: delta.blockingReachFacts.length,
+    blocking_dataflow_facts: delta.blockingDataFlowFacts.length,
+    blocking_di_facts: delta.blockingDiFacts.length,
+    blocking_transition_facts: delta.blockingTransitionFacts.length,
+    warnings: delta.warningFacts.length + delta.transitionWarningFacts.length + delta.graphWarnings.length,
+  };
+  const agentTasks = debugAgentTasks(verdictPayload, changed, delta);
+  const bundle = {
+    schema_version: 1,
+    generated_at: new Date().toISOString(),
+    artifact: resolve(archPath),
+    project_root: absProject,
+    scope,
+    changed,
+    delta_summary: deltaSummary,
+    verdict: verdictPayload,
+    graph: delta.graphReport,
+    rules,
+    agent_tasks: agentTasks,
+  };
+
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(resolve(outDir, 'debug.json'), JSON.stringify(bundle, null, 2) + '\n', 'utf8');
+  writeFileSync(resolve(outDir, 'graph.json'), JSON.stringify(delta.graphReport, null, 2) + '\n', 'utf8');
+  writeFileSync(resolve(outDir, 'verdict.json'), JSON.stringify(verdictPayload, null, 2) + '\n', 'utf8');
+  writeFileSync(resolve(outDir, 'rules.json'), JSON.stringify(rules, null, 2) + '\n', 'utf8');
+  writeFileSync(resolve(outDir, 'agent-tasks.json'), JSON.stringify(agentTasks, null, 2) + '\n', 'utf8');
+  writeEngineerDebugReport(outDir, bundle);
+
+  log(`✓ Wrote aglc debug bundle → ${outDir}`);
+  log(`  Verdict: ${verdictPayload.passed ? 'passed' : 'failed'}`);
+  log(`  Files: debug.json, engineer.md, graph.json, verdict.json, rules.json, agent-tasks.json`);
+}
+
+// ─────────────────────────────────────────────────────────────
 // IMPORT-OPENAPI
 // ─────────────────────────────────────────────────────────────
 async function importOpenApiCmd(specPath: string, outPath: string | undefined) {
@@ -877,7 +1138,7 @@ async function addProject(projectRoot: string, opts: { name?: string; out?: stri
   const skillOut = resolve(absProject, 'skill.json');
 
   // 1. Generate starter .ag spec
-  log(`[aglc add] Scanning ${absProject} for source roots and extractor facts...`);
+  log(`[aglc add] Generating draft spec from deterministic repo evidence in ${absProject}...`);
   const result = await generateSpec(absProject, {
     projectName: opts.name,
     maxDepth: getNumberArg('--max-depth') ?? 3,
@@ -961,8 +1222,96 @@ function writeGeneratedSpecFiles(outDir: string, rootFileName: string, files: Ar
   }
 }
 
+type AgentTaskKind = 'architecture_discovery' | 'architecture_review';
+
+function defaultTaskPath(kind: AgentTaskKind): string {
+  return kind === 'architecture_discovery'
+    ? resolve('.aglang', 'tasks', 'architecture-discovery.json')
+    : resolve('.aglang', 'tasks', 'architecture-review.json');
+}
+
+function buildAgentTask(kind: AgentTaskKind, projectRoot: string) {
+  const absProject = resolve(projectRoot);
+  const now = new Date().toISOString();
+  if (kind === 'architecture_discovery') {
+    return {
+      schema_version: 1,
+      task: kind,
+      created_at: now,
+      project_root: absProject,
+      intent:
+        'Agent should inspect the project semantically and propose architecture evidence. aglc does not infer architecture intent.',
+      required_outputs: {
+        review_notes: 'architecture-review.md',
+        architecture_proposal: 'architecture.proposed.ag',
+        semantic_queries: '.aglang/extractors/*.agq.yml',
+      },
+      rules: [
+        'Do not overwrite architecture.ag, architecture.o, AGENTS.md, or skill.json.',
+        'Separate observed facts from intended architecture rules.',
+        'Mark uncertain findings as questions instead of enforcement.',
+        'Propose .ag and .agq.yml changes only for human review.',
+        'Do not claim aglc discovered intent automatically.',
+      ],
+      suggested_agent_steps: [
+        'Read repository docs, manifests, CI workflows, and existing architecture files if present.',
+        'Identify candidate components, owners, runtime nodes, contracts, data types, and state machines.',
+        'Record observed dependencies and unknown/unmapped areas with evidence.',
+        'Draft candidate .ag and .agq.yml artifacts for review, not enforcement.',
+        'Ask the human to approve architecture intent before compile/check enforcement.',
+      ],
+    };
+  }
+  return {
+    schema_version: 1,
+    task: kind,
+    created_at: now,
+    project_root: absProject,
+    intent:
+      'Agent should review proposed architecture artifacts and produce approval questions before aglc compiles or checks them.',
+    inputs: {
+      architecture_source: 'architecture.ag',
+      proposed_architecture: 'architecture.proposed.ag',
+      semantic_queries: '.aglang/extractors/*.agq.yml',
+      generated_context: ['AGENTS.md', 'skill.json'],
+    },
+    required_outputs: {
+      review_notes: 'architecture-review.md',
+      approval_questions: 'architecture-approval-questions.md',
+    },
+    rules: [
+      'Do not edit architecture intent unless explicitly authorized.',
+      'Validate that proposed rules are backed by evidence and are intended policy, not incidental implementation.',
+      'Flag weak extractor/query evidence and empty query matches.',
+      'Recommend aglc compile only after human approval.',
+    ],
+    suggested_agent_steps: [
+      'Compare proposed .ag rules with observed code and docs.',
+      'Review .agq.yml queries for overbroad or underbroad matches.',
+      'List rules that need an owner, rationale, or test fixture.',
+      'Produce concise approval questions for uncertain architecture intent.',
+    ],
+  };
+}
+
+function writeAgentTask(kind: AgentTaskKind, projectRoot: string, outPath: string | undefined) {
+  const task = buildAgentTask(kind, projectRoot);
+  const target = resolve(outPath ?? defaultTaskPath(kind));
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, JSON.stringify(task, null, 2) + '\n', 'utf8');
+  log(`✓ Wrote agent task packet → ${target}`);
+  log(`  Task: ${kind}`);
+  log(`  Project: ${resolve(projectRoot)}`);
+}
+
 (async () => {
-  if (command === 'add') {
+  if (command === 'request-scan') {
+    writeAgentTask('architecture_discovery', getArg('--project') ?? '.', getArg('--out'));
+
+  } else if (command === 'request-review') {
+    writeAgentTask('architecture_review', getArg('--project') ?? '.', getArg('--out'));
+
+  } else if (command === 'add') {
     const projectRoot = args[1] && !args[1].startsWith('--') ? args[1] : '.';
     const name = getArg('--name');
     const out = getArg('--out');
@@ -1010,6 +1359,11 @@ function writeGeneratedSpecFiles(outDir: string, rootFileName: string, files: Ar
     const filePath = getArg('--file');
     const projectRoot = getArg('--project');
     await graphCommand(archPath, filePath, projectRoot);
+
+  } else if (command === 'debug') {
+    const archPath = getArg('--arch') ?? 'architecture.o';
+    const projectRoot = getArg('--project') ?? '.';
+    await debugCommand(archPath, projectRoot, getArg('--file'), args.includes('--all'), getArg('--diff'), getArg('--out'));
 
   } else if (command === 'import-openapi') {
     const specPath = args[1];

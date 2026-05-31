@@ -70,7 +70,14 @@ export type InvariantEndpoint =
 export type InvariantRule =
   | { kind: 'DenyFlow'; from: string; to: string; fromEndpoint?: InvariantEndpoint; toEndpoint?: InvariantEndpoint }
   | { kind: 'DenyReach'; from: string; to: string; fromEndpoint?: InvariantEndpoint; toEndpoint?: InvariantEndpoint }
-  | { kind: 'RequireEncryption'; from: string; to: string; fromEndpoint?: InvariantEndpoint; toEndpoint?: InvariantEndpoint }
+  | { kind: 'DenyUnauthenticatedFlow'; from: string; to: string; fromEndpoint?: InvariantEndpoint; toEndpoint?: InvariantEndpoint }
+  | { kind: 'DenyUnencryptedFlow'; from: string; to: string; fromEndpoint?: InvariantEndpoint; toEndpoint?: InvariantEndpoint }
+  | { kind: 'RequireFlowVia'; from: string; to: string; via: string; fromEndpoint?: InvariantEndpoint; toEndpoint?: InvariantEndpoint; viaEndpoint?: InvariantEndpoint }
+  | { kind: 'RequireDataFlowVia'; data: string; to: string; via: string; toEndpoint?: InvariantEndpoint; viaEndpoint?: InvariantEndpoint }
+  | { kind: 'RequireOperationIn'; operation: string; component: string }
+  | { kind: 'RequireOperationOnDataIn'; operation: string; data: string; component: string }
+  | { kind: 'RequireContractImplementedBy'; contract: string; component: string }
+  | { kind: 'RequireDependencyViaInterface'; from: string; to: string; interface: string; fromEndpoint?: InvariantEndpoint; toEndpoint?: InvariantEndpoint }
   | { kind: 'DenyDataFlow'; data: string; to: string };
 
 export interface InvariantDecl {

@@ -8,7 +8,7 @@ import { check } from '../src/checker.ts';
 import { emitArtifact } from '../src/emitters/artifact.ts';
 import { generateDeltaAssertions } from '../src/runtime/delta-assert.ts';
 import { runGate } from '../src/runtime/gate.ts';
-import type { ExtractorPlugin, FlowFact } from '../src/analyzers/plugin.ts';
+import type { ExtractorPlugin, FlowFact, GraphFact } from '../src/analyzers/plugin.ts';
 
 function compile(source: string) {
   const program = parse(tokenize(source));
@@ -37,6 +37,36 @@ const textFlowPlugin: ExtractorPlugin = {
             file,
           });
         }
+      }
+    }
+    return facts;
+  },
+};
+
+const serializationGraphPlugin: ExtractorPlugin = {
+  name: 'test serialization graph extractor',
+  extensions: ['.ops'],
+  extractGraph(input): GraphFact[] {
+    const facts: GraphFact[] = [];
+    for (const file of input.files) {
+      const content = readFileSync(file, 'utf8');
+      for (const [index, line] of content.split(/\r?\n/).entries()) {
+        const match = /^\s*(\w+)\s+serialization\s*$/.exec(line);
+        if (!match) continue;
+        facts.push({
+          id: `${file}:${index + 1}`,
+          kind: 'call',
+          subject: match[1]!,
+          properties: { method: 'serialize' },
+          confidence: 'definite',
+          evidence: {
+            extractor: 'test',
+            strategy: 'graph',
+            file,
+            line: index + 1,
+            message: line.trim(),
+          },
+        });
       }
     }
     return facts;
@@ -88,6 +118,218 @@ describe('enterprise Z3 hardening tranche', () => {
       d.rule === 'Layers' &&
       d.components.join(' -> ') === 'UI -> Service -> Db'
     )).toBe(true);
+  });
+
+  it('passes require flow via when the path includes the required intermediate', async () => {
+    const dir = tempDir();
+    const f = join(dir, 'flows.flow');
+    writeFileSync(f, 'Api -> Repository\nRepository -> Db\n');
+
+    const artifact = compile(`
+      node runtime : agent_runtime { trust: trusted }
+      component Api { runs_on: runtime paths: "*.flow" }
+      component Repository { runs_on: runtime paths: "*.flow" }
+      component Db { runs_on: runtime paths: "*.flow" }
+      invariant RepositoryBoundary { require flow Api -> Db via Repository }
+    `);
+
+    const delta = await generateDeltaAssertions([
+      { componentName: 'Api', files: [f] },
+      { componentName: 'Repository', files: [f] },
+    ], artifact, { plugins: [textFlowPlugin] });
+    const verdict = await runGate(artifact, delta);
+
+    expect(delta.blockingRequireFlowFacts).toHaveLength(0);
+    expect(verdict.passed).toBe(true);
+  });
+
+  it('blocks require flow via when the path bypasses the required intermediate', async () => {
+    const dir = tempDir();
+    const f = join(dir, 'flows.flow');
+    writeFileSync(f, 'Api -> Db\n');
+
+    const artifact = compile(`
+      node runtime : agent_runtime { trust: trusted }
+      component Api { runs_on: runtime paths: "*.flow" }
+      component Repository { runs_on: runtime paths: "*.flow" }
+      component Db { runs_on: runtime paths: "*.flow" }
+      invariant RepositoryBoundary { require flow Api -> Db via Repository }
+    `);
+
+    const delta = await generateDeltaAssertions([
+      { componentName: 'Api', files: [f] },
+    ], artifact, { plugins: [textFlowPlugin] });
+    const verdict = await runGate(artifact, delta);
+
+    expect(delta.blockingRequireFlowFacts[0]!.path).toEqual(['Api', 'Db']);
+    expect(verdict.passed).toBe(false);
+    expect(verdict.violations[0]!.type).toBe('require_flow_violation');
+    expect(verdict.violations[0]!.detected.via).toBe('Repository');
+  });
+
+  it('enforces query-emitted operation placement requirements', async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, '.aglang', 'extractors'), { recursive: true });
+    writeFileSync(join(dir, '.aglang', 'extractors', 'serialization.agq.yml'), `
+id: SerializationOperations
+owner: platform
+version: 1
+confidence: definite
+match:
+  kind: call
+  method: serialize
+emit:
+  kind: operation
+  operation: serialization
+  component: "$subject"
+`);
+    const f = join(dir, 'ops.ops');
+    writeFileSync(f, 'Api serialization\n');
+
+    const artifact = compile(`
+      node runtime : agent_runtime { trust: trusted }
+      component Api { runs_on: runtime paths: "*.ops" }
+      component Serializer { runs_on: runtime paths: "*.ops" }
+      invariant SerializationBoundary {
+        require operation serialization in Serializer
+      }
+    `);
+
+    const delta = await generateDeltaAssertions([
+      { componentName: 'Api', files: [f] },
+    ], artifact, { projectRoot: dir, plugins: [serializationGraphPlugin] });
+    const verdict = await runGate(artifact, delta);
+
+    expect(delta.blockingOperationFacts).toHaveLength(1);
+    expect(verdict.passed).toBe(false);
+    expect(verdict.violations[0]!.type).toBe('require_operation_violation');
+    expect(verdict.violations[0]!.detected.query?.id).toBe('SerializationOperations');
+  });
+
+  it('allows query-emitted operations in the required component', async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, '.aglang', 'extractors'), { recursive: true });
+    writeFileSync(join(dir, '.aglang', 'extractors', 'serialization.agq.yml'), `
+id: SerializationOperations
+owner: platform
+version: 1
+confidence: definite
+match:
+  kind: call
+  method: serialize
+emit:
+  kind: operation
+  operation: serialization
+  component: "$subject"
+`);
+    const f = join(dir, 'ops.ops');
+    writeFileSync(f, 'Serializer serialization\n');
+
+    const artifact = compile(`
+      node runtime : agent_runtime { trust: trusted }
+      component Api { runs_on: runtime paths: "*.ops" }
+      component Serializer { runs_on: runtime paths: "*.ops" }
+      invariant SerializationBoundary {
+        require operation serialization in Serializer
+      }
+    `);
+
+    const delta = await generateDeltaAssertions([
+      { componentName: 'Serializer', files: [f] },
+    ], artifact, { projectRoot: dir, plugins: [serializationGraphPlugin] });
+    const verdict = await runGate(artifact, delta);
+
+    expect(delta.blockingOperationFacts).toHaveLength(1);
+    expect(verdict.passed).toBe(true);
+  });
+
+  it('blocks definite query-emitted require counterexamples', async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, '.aglang', 'extractors'), { recursive: true });
+    writeFileSync(join(dir, '.aglang', 'extractors', 'counterexamples.agq.yml'), `
+id: CounterexampleFacts
+owner: arch
+version: 1
+confidence: definite
+match:
+  kind: call
+emit:
+  kind: auth
+  from: Client
+  to: Api
+  authenticated: false
+`);
+    writeFileSync(join(dir, '.aglang', 'extractors', 'unencrypted.agq.yml'), `
+id: UnencryptedFacts
+owner: arch
+version: 1
+confidence: definite
+match:
+  kind: call
+emit:
+  kind: encryption
+  from: Api
+  to: Partner
+  encrypted: false
+`);
+    writeFileSync(join(dir, '.aglang', 'extractors', 'dependency.agq.yml'), `
+id: DependencyFacts
+owner: arch
+version: 1
+confidence: definite
+match:
+  kind: call
+emit:
+  kind: dependency
+  from: Service
+  to: Repository
+  interface: ConcreteRepository
+`);
+    writeFileSync(join(dir, '.aglang', 'extractors', 'operation.agq.yml'), `
+id: OperationFacts
+owner: arch
+version: 1
+confidence: definite
+match:
+  kind: call
+emit:
+  kind: operation
+  operation: serialization
+  data: CustomerProfile
+  component: Client
+`);
+    const f = join(dir, 'ops.ops');
+    writeFileSync(f, 'Client serialization\n');
+
+    const artifact = compile(`
+      node runtime : agent_runtime { trust: trusted }
+      data CustomerProfile { id: String }
+      component Client { runs_on: runtime paths: "*.ops" }
+      component Api { runs_on: runtime paths: "*.ops" }
+      component Partner { runs_on: runtime paths: "*.ops" }
+      component Serializer { runs_on: runtime paths: "*.ops" }
+      component Service { runs_on: runtime paths: "*.ops" }
+      component Repository { runs_on: runtime paths: "*.ops" }
+      invariant Counterexamples {
+        require auth on flow Client -> Api
+        require encryption on flow Api -> Partner
+        require operation serialization on CustomerProfile in Serializer
+        require dependency Service -> Repository via interface IOrderRepository
+      }
+    `);
+
+    const delta = await generateDeltaAssertions([
+      { componentName: 'Client', files: [f] },
+    ], artifact, { projectRoot: dir, plugins: [serializationGraphPlugin] });
+    const verdict = await runGate(artifact, delta);
+
+    expect(verdict.passed).toBe(false);
+    expect(verdict.violations.map(v => v.type)).toEqual(expect.arrayContaining([
+      'require_auth_violation',
+      'require_encryption_violation',
+      'require_operation_violation',
+      'require_dependency_violation',
+    ]));
   });
 
   it('blocks classified data reaching an untrusted target through multiple hops', async () => {

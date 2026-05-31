@@ -122,13 +122,13 @@ If you want maximum value from aglang, treat generated specs and queries as draf
 
 ## Practical Workflow
 
-### 1. Bootstrap or write a spec
+### 1. Ask for architecture discovery or write a spec
 
 ```bash
-aglc add /path/to/project
+aglc request-scan --project /path/to/project
 ```
 
-or write `architecture.ag` by hand.
+An agent can use the emitted task packet to inspect the repo, propose `architecture.proposed.ag`, propose `.agq.yml` semantic queries, and write review notes. Humans approve architecture intent before enforcement. You can also write `architecture.ag` by hand.
 
 ### 2. Review the architecture draft
 
@@ -159,9 +159,9 @@ Not every declaration is enforced the same way.
 
 | Level | Used for | Meaning |
 |---|---|---|
-| `formal_z3` | `deny flow`, `deny reach`, `deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy`, `machine` | Checked with solver-backed constraints when extractors produce definite evidence. |
+| `formal_z3` | `deny flow`, `deny reach`, `require flow`, `require operation`, `deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy`, `machine` | Checked with solver-backed constraints when extractors or reviewed queries produce definite evidence. |
 | `deterministic_policy` | `contract`, `workflow_policy` | Checked by deterministic gates with exact diagnostics. |
-| `advisory` | `require encryption` | Emitted to docs and agent context, but not blocking by themselves yet. |
+| `formal_z3` | `require encryption` / `deny unencrypted flow` | Blocks only when deterministic extractors or reviewed `.agq.yml` files emit definite unencrypted-flow evidence. |
 
 That distinction is part of the contract with users: aglang should say clearly what is proven, what is policy-checked, and what is only guidance.
 
@@ -189,13 +189,13 @@ npm install -g @collivity/aglang
 aglc install-agent-skill
 ```
 
-Then bootstrap a project:
+Then request agent-assisted discovery:
 
 ```bash
-aglc add /path/to/your/project
+aglc request-scan --project /path/to/your/project
 ```
 
-`aglc add` creates a starter architecture spec, compiles it, and emits the agent manifest files. The next step is review, not blind trust. [Full getting-started guide →](./guide/getting-started)
+`aglc request-scan` writes an agent task packet. The agent does semantic scanning and proposal work; aglc validates only approved `.ag` and `.agq.yml` artifacts. [Full getting-started guide →](./guide/getting-started)
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## `aglc add` — One-shot bootstrap
 
-The `add` command is the recommended way to set up aglang in any project. It does everything in one step:
+The `add` command is a legacy deterministic starter workflow. For agent-native adoption, prefer `aglc request-scan` so an agent performs semantic discovery and humans approve architecture intent.
 
 ```bash
 aglc add [projectRoot] [--name <ProjectName>] [--out <architecture.ag>] [--max-depth <n>] [--single-file]
@@ -18,7 +18,7 @@ aglc add [projectRoot] [--name <ProjectName>] [--out <architecture.ag>] [--max-d
 **Output:**
 
 ```
-[aglc add] Scanning /my-project for source roots and extractor facts...
+[aglc add] Generating draft spec from deterministic repo evidence in /my-project...
   ✓ Generated spec → /my-project/architecture.ag
     Imported sub-specs: 2
     Components: 3 | Infra nodes: 2 | Contracts: 1
@@ -40,13 +40,13 @@ aglc add [projectRoot] [--name <ProjectName>] [--out <architecture.ag>] [--max-d
 
 ## `aglc generate` — Spec generation only
 
-If you want just the spec without compiling or emitting agent files:
+If you want a deterministic draft spec without compiling or emitting agent files:
 
 ```bash
 aglc generate [projectRoot] [--out architecture.ag] [--name MyApp] [--max-depth 3] [--single-file]
 ```
 
-This is useful for reviewing the auto-generated spec before committing to it. Generation is deep by default, keeps mixed-language roots, and emits imported component files when the repo is too broad for one flat starter. Use `--single-file` when you want one flat output.
+This is useful for hints, not architecture truth. Generation is deep by default, keeps mixed-language roots, and emits imported component files when the repo is too broad for one flat starter. Use `--single-file` when you want one flat output. Review generated output with a human or agent before compiling it into enforcement.
 
 ## After setup: Adding invariants
 
@@ -70,7 +70,7 @@ See [Language Reference](./language-reference) for the full invariant syntax.
 
 ## For AI Agents
 
-After running `aglc add`, emit the context file so agents understand the boundaries:
+After approved architecture artifacts are compiled, emit the context file so agents understand the boundaries:
 
 ```bash
 aglc emit-context --arch architecture.o --out AGENTS.md

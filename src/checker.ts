@@ -294,16 +294,39 @@ export function check(program: Program): CheckError[] {
 
     if (decl.kind === 'InvariantDecl') {
       for (const rule of decl.rules) {
-        if (rule.kind === 'DenyDataFlow') {
+        if (rule.kind === 'DenyDataFlow' || rule.kind === 'RequireDataFlowVia') {
           if (!declaredData.has(rule.data)) {
             errors.push({ message: `Invariant '${decl.name}': unknown data type '${rule.data}'` });
           }
           if (!validFlowEndpoints.has(rule.to)) {
             errors.push({ message: `Invariant '${decl.name}': unknown dataflow target '${rule.to}'` });
           }
+          if (rule.kind === 'RequireDataFlowVia') {
+            validateInvariantEndpoint(decl.name, rule.viaEndpoint, rule.via, 'via');
+          }
+        } else if (rule.kind === 'RequireOperationIn' || rule.kind === 'RequireOperationOnDataIn') {
+          if (!validFlowEndpoints.has(rule.component)) {
+            errors.push({ message: `Invariant '${decl.name}': unknown operation placement target '${rule.component}'` });
+          }
+          if (rule.kind === 'RequireOperationOnDataIn' && !declaredData.has(rule.data)) {
+            errors.push({ message: `Invariant '${decl.name}': unknown data type '${rule.data}'` });
+          }
+        } else if (rule.kind === 'RequireContractImplementedBy') {
+          const component = declaredComponents.get(rule.component);
+          if (!declaredContracts.has(rule.contract)) {
+            errors.push({ message: `Invariant '${decl.name}': unknown contract '${rule.contract}'` });
+          }
+          if (!component) {
+            errors.push({ message: `Invariant '${decl.name}': unknown contract implementation component '${rule.component}'` });
+          } else if (!(component.implements ?? []).includes(rule.contract)) {
+            errors.push({ message: `Invariant '${decl.name}': contract '${rule.contract}' is not implemented_by '${rule.component}'` });
+          }
         } else {
           validateInvariantEndpoint(decl.name, rule.fromEndpoint, rule.from, 'source');
           validateInvariantEndpoint(decl.name, rule.toEndpoint, rule.to, 'target');
+          if (rule.kind === 'RequireFlowVia') {
+            validateInvariantEndpoint(decl.name, rule.viaEndpoint, rule.via, 'via');
+          }
         }
       }
     }
