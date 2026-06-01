@@ -61,6 +61,30 @@ export interface GraphFactEvidence {
   file?: string;
   line?: number;
   message?: string;
+  ast?: {
+    parser?: string;
+    language?: string;
+    query?: string;
+    captures?: Array<{
+      name: string;
+      nodeKind?: string;
+      text?: string;
+      startByte?: number;
+      endByte?: number;
+      startLine?: number;
+      startColumn?: number;
+      endLine?: number;
+      endColumn?: number;
+    }>;
+    nodeKind?: string;
+    text?: string;
+    startByte?: number;
+    endByte?: number;
+    startLine?: number;
+    startColumn?: number;
+    endLine?: number;
+    endColumn?: number;
+  };
 }
 
 export interface GraphFact {

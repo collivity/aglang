@@ -68,7 +68,9 @@ Extraction prints normalized `FlowFact[]` JSON. Graph-native extractors may also
 
 ## Auditable semantic queries
 
-Project-specific semantic extraction can live in committed `.aglang/extractors/*.agq.yml` files. These queries match deterministic graph facts and emit domain facts such as state-machine transitions, architecture flows, or named operations. LLMs may help author these files, but `aglc check` only runs the reviewed query files.
+Project-specific semantic extraction can live in committed `.aglang/extractors/*.agq.yml` files. These queries match deterministic graph facts and emit domain facts such as state-machine transitions, architecture flows, named operations, value facts, operation before/after facts, or scoped events. LLMs may help author these files, but `aglc check` only runs the reviewed query files.
+
+Root self-spec queries should be scoped to the component that owns the evidence, usually with an exact `subject` filter. Do not target tests, generated site output, or intentional violation fixtures unless the goal is to make those files block normal checks.
 
 ```yaml
 id: OrderLifecycleTransitions
@@ -167,3 +169,36 @@ emit:
 ```
 
 Only definite bad evidence blocks by default. Missing auth, encryption, dependency, or operation evidence is not treated as a violation.
+
+## Rich Policy Emit Kinds
+
+`value_policy`, `operation_policy`, and `event_policy` consume reviewed semantic query facts.
+
+```yaml
+emit:
+  kind: value
+  subject: Cart
+  path: items.length
+  relation: "=="
+  value: "$actualLength"
+```
+
+```yaml
+emit:
+  kind: operation_event
+  operation: submitOrder
+  phase: before # or after
+  subject: Cart
+  path: phase
+  relation: "=="
+  value: "$phase"
+```
+
+```yaml
+emit:
+  kind: event
+  event: "$eventName"
+  scope: UserSession
+```
+
+These facts carry the same provenance fields as transitions: query id, version, query file, source file, line, and matched graph fact id.

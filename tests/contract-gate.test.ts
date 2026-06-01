@@ -87,4 +87,66 @@ describe('runContractGate', () => {
 
     rmSync(tmpDir, { recursive: true });
   });
+
+  it('extracts Node createServer url.pathname routes for contract coverage', async () => {
+    const tmpDir = join(tmpdir(), 'aglang-node-http-test-' + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const tsFile = join(tmpDir, 'ui-server.ts');
+    writeFileSync(tsFile, `
+      import { createServer } from 'http';
+      createServer((req, res) => {
+        const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+        if (req.method === 'GET' && url.pathname === '/api/config') res.end('{}');
+        else if (req.method === 'GET' && url.pathname === '/api/runs') res.end('[]');
+        else if (req.method === 'GET' && url.pathname.startsWith('/api/runs/')) res.end('{}');
+        else if (req.method === 'GET' && url.pathname === '/api/files') res.end('{}');
+        else if (req.method === 'POST' && url.pathname === '/api/runs') res.end('{}');
+      });
+    `);
+
+    const artifact = compileSpec(`
+      node n : agent_runtime { trust: trusted }
+      data UiConfig { id: String }
+      data UiRun { id: String }
+      data UiFile { path: String }
+      data UiCreated { id: String }
+      contract UiApi {
+        GET "/api/config" -> UiConfig
+        GET "/api/runs" -> UiRun[]
+        GET "/api/runs/:id" -> UiRun
+        GET "/api/files" -> UiFile
+        POST "/api/runs" -> UiCreated
+      }
+      component Ui { runs_on: n paths: "${tmpDir.replace(/\\/g, '/')}/**/*.ts" implements: UiApi }
+    `);
+
+    const result = await runContractGate(artifact, [tsFile]);
+    expect(result.violations.filter(v => v.severity === 'error')).toHaveLength(0);
+
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  it('checks contract completeness for exact single-file component mappings', async () => {
+    const tmpDir = join(tmpdir(), 'aglang-exact-file-contract-test-' + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const tsFile = join(tmpDir, 'server.ts');
+    writeFileSync(tsFile, `
+      const app = { get(_path: string) {} };
+      app.get('/api/config');
+    `);
+
+    const artifact = compileSpec(`
+      node n : agent_runtime { trust: trusted }
+      data UiConfig { id: String }
+      contract UiApi {
+        GET "/api/config" -> UiConfig
+      }
+      component Ui { runs_on: n paths: "${tsFile.replace(/\\/g, '/')}" implements: UiApi }
+    `);
+
+    const result = await runContractGate(artifact, [tsFile], { projectRoot: tmpDir, checkCompleteness: true });
+    expect(result.violations.filter(v => v.severity === 'error')).toHaveLength(0);
+
+    rmSync(tmpDir, { recursive: true });
+  });
 });

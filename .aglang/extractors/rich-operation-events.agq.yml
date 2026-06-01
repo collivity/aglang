@@ -1,0 +1,15 @@
+id: ConsentExampleReviewedOperationEvents
+owner: examples
+version: 1
+confidence: definite
+match:
+  subject: ConsentExampleCheckout
+  kind: operation_event
+emit:
+  kind: operation_event
+  operation: "$operation"
+  phase: "$phase"
+  subject: "$dataSubject"
+  path: "$path"
+  relation: "$relation"
+  value: "$value"

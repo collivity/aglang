@@ -10,6 +10,12 @@ import type { AuthCounterexampleFact, DependencyFact, EncryptionCounterexampleFa
 import type { ContractViolation } from './contract-gate.ts';
 import type { WorkflowViolation } from './workflow-gate.ts';
 import type { ChangeViolation } from './change-gate.ts';
+import {
+  buildTransitionDeltaAssertions,
+  stateSmtId,
+  transitionAllowed,
+  transitionRuleMatches,
+} from './state-machine.ts';
 
 export interface Z3Proof {
   // The permanent constraint assertion from the compiled .arch spec
@@ -22,9 +28,9 @@ export interface Z3Proof {
 
 export interface GateViolation {
   id?: string;
-  type: 'flow_violation' | 'reach_violation' | 'require_flow_violation' | 'require_dataflow_violation' | 'require_auth_violation' | 'require_encryption_violation' | 'require_operation_violation' | 'require_dependency_violation' | 'dataflow_violation' | 'data_policy_violation' | 'trust_policy_violation' | 'di_violation' | 'permission_violation' | 'state_machine_violation';
+  type: 'flow_violation' | 'reach_violation' | 'require_flow_violation' | 'require_dataflow_violation' | 'require_auth_violation' | 'require_encryption_violation' | 'require_operation_violation' | 'require_dependency_violation' | 'dataflow_violation' | 'data_policy_violation' | 'trust_policy_violation' | 'di_violation' | 'permission_violation' | 'state_machine_violation' | 'value_policy_violation' | 'operation_policy_violation' | 'event_policy_violation';
   invariant: string;
-  rule: ArtifactInvariantRule | ArtifactDiPolicyRule | { kind: 'Transition'; from: string; to: string; data: string; field: string };
+  rule: ArtifactInvariantRule | ArtifactDiPolicyRule | { kind: 'Transition'; from: string; to: string; data: string; field: string } | ArchitectureArtifact['valuePolicies'][number]['rules'][number] | ArchitectureArtifact['operationPolicies'][number]['rules'][number] | ArchitectureArtifact['eventPolicies'][number]['rules'][number];
   detected: {
     from: string;
     to: string;
@@ -90,6 +96,19 @@ export interface SolverSliceDiagnostic {
 
 function smtId(name: string): string {
   return name.replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
+function relationSmtId(relation: string): string {
+  return `Relation__${relation.replace(/[^a-zA-Z0-9_]/g, token => ({ '=': 'eq', '!': 'not', '>': 'gt', '<': 'lt' }[token] ?? '_'))}`;
+}
+
+function scalarSmtId(value: unknown): string {
+  if (value === null) return 'Value__null';
+  return `Value__${smtId(String(value))}`;
+}
+
+function fieldPathSmtId(subject: string, path: string[]): string {
+  return `FieldPath__${smtId(subject)}__${path.map(smtId).join('__')}`;
 }
 
 function stableId(parts: Array<string | number | undefined>): string {
@@ -327,7 +346,7 @@ function buildSolverSlices(
       permanent: denied
         ? `(assert (=> (Transition ${smtId(fact.data)} Field__${smtId(fact.data)}__${smtId(fact.field)} ${stateSmtId(artifact, fact.data, fact.field, fact.from ?? denied.from)} ${stateSmtId(artifact, fact.data, fact.field, fact.to)}) false))`
         : `; machine ${machine.name} permits only declared allow transitions`,
-      delta: buildTransitionDeltaAssertionForArtifact(artifact, fact),
+      delta: buildTransitionDeltaAssertions(artifact, fact).join('\n'),
       source_file: fact.file,
       line: fact.line,
       components: [fact.data],
@@ -428,36 +447,6 @@ function buildDiDeltaAssertion(fact: DiFact): string {
   return `(assert (Resolves ${smtId(fact.from)} ${smtId(fact.service)}))`;
 }
 
-function buildTransitionDeltaAssertion(fact: { data: string; field: string; from?: string; to: string }): string {
-  return `(assert (Transition ${smtId(fact.data)} Field__${smtId(fact.data)}__${smtId(fact.field)} State__${smtId(fact.from ?? '*')} State__${smtId(fact.to)}))`;
-}
-
-function stateSmtId(artifact: ArchitectureArtifact, data: string, fieldName: string, value: string): string {
-  const dataDecl = (artifact.dataTypes ?? []).find(d => d.name === data);
-  const field = dataDecl?.fields.find(f => f.key === fieldName);
-  const enumName = field?.typeExpr.replace(/^Optional<(.+)>$/, '$1').trim();
-  return enumName ? `State__${smtId(enumName)}__${smtId(value)}` : `State__${smtId(data)}__${smtId(fieldName)}__${smtId(value)}`;
-}
-
-function buildTransitionDeltaAssertionForArtifact(
-  artifact: ArchitectureArtifact,
-  fact: { data: string; field: string; from?: string; to: string },
-): string {
-  if (!fact.from) return buildTransitionDeltaAssertion(fact);
-  return `(assert (Transition ${smtId(fact.data)} Field__${smtId(fact.data)}__${smtId(fact.field)} ${stateSmtId(artifact, fact.data, fact.field, fact.from)} ${stateSmtId(artifact, fact.data, fact.field, fact.to)}))`;
-}
-
-function transitionRuleMatches(rule: { from: string; to: string }, fact: { from?: string; to: string }): boolean {
-  return (rule.from === '*' || rule.from === fact.from) && (rule.to === '*' || rule.to === fact.to);
-}
-
-function transitionAllowed(machine: ArchitectureArtifact['stateMachines'][number], fact: { from?: string; to: string }): boolean {
-  if (!fact.from) return true;
-  if (machine.transitions.some(t => t.kind === 'deny' && transitionRuleMatches(t, fact))) return false;
-  const allowRules = machine.transitions.filter(t => t.kind === 'allow');
-  return allowRules.length === 0 || allowRules.some(t => transitionRuleMatches(t, fact));
-}
-
 function dataClassification(data: string, artifact: ArchitectureArtifact): string | undefined {
   return (artifact.dataTypes ?? []).find(d => d.name === data)?.classification;
 }
@@ -500,6 +489,9 @@ export async function runGate(
   const blockingPermissionFacts = delta.blockingPermissionFacts ?? [];
   const blockingTransitionFacts = delta.blockingTransitionFacts ?? [];
   const blockingOperationFacts = delta.blockingOperationFacts ?? [];
+  const blockingValuePolicyFacts = delta.blockingValuePolicyFacts ?? [];
+  const blockingOperationPolicyFacts = delta.blockingOperationPolicyFacts ?? [];
+  const blockingEventPolicyFacts = delta.blockingEventPolicyFacts ?? [];
   const solverSlices = buildSolverSlices(artifact, delta, {
     blockingReachFacts,
     blockingRequireFlowFacts,
@@ -514,7 +506,7 @@ export async function runGate(
   const solverDiagnostics = await runSolverSlices(artifact, solverSlices);
   const solverHotspots = solverDiagnostics.filter(d => d.status === 'unknown' || d.status === 'error');
 
-  if (delta.blockingFacts.length === 0 && blockingReachFacts.length === 0 && blockingRequireFlowFacts.length === 0 && blockingRequireDataFlowFacts.length === 0 && blockingAuthCounterexampleFacts.length === 0 && blockingEncryptionCounterexampleFacts.length === 0 && blockingDependencyFacts.length === 0 && blockingDataFlowFacts.length === 0 && blockingTrustPolicyFacts.length === 0 && blockingDiFacts.length === 0 && blockingPermissionFacts.length === 0 && blockingTransitionFacts.length === 0 && blockingOperationFacts.length === 0) {
+  if (delta.blockingFacts.length === 0 && blockingReachFacts.length === 0 && blockingRequireFlowFacts.length === 0 && blockingRequireDataFlowFacts.length === 0 && blockingAuthCounterexampleFacts.length === 0 && blockingEncryptionCounterexampleFacts.length === 0 && blockingDependencyFacts.length === 0 && blockingDataFlowFacts.length === 0 && blockingTrustPolicyFacts.length === 0 && blockingDiFacts.length === 0 && blockingPermissionFacts.length === 0 && blockingTransitionFacts.length === 0 && blockingOperationFacts.length === 0 && blockingValuePolicyFacts.length === 0 && blockingOperationPolicyFacts.length === 0 && blockingEventPolicyFacts.length === 0) {
     return { passed: true, violations: [], warnings, ...(solverDiagnostics.length > 0 ? { solver_diagnostics: solverDiagnostics } : {}) };
   }
 
@@ -622,7 +614,7 @@ export async function runGate(
       }
     }
     // Generic violation only when no dataflow rule could explain UNSAT.
-    if (!matched && blockingReachFacts.length === 0 && blockingRequireFlowFacts.length === 0 && blockingRequireDataFlowFacts.length === 0 && blockingAuthCounterexampleFacts.length === 0 && blockingEncryptionCounterexampleFacts.length === 0 && blockingDependencyFacts.length === 0 && blockingDataFlowFacts.length === 0 && blockingTrustPolicyFacts.length === 0 && blockingDiFacts.length === 0 && blockingTransitionFacts.length === 0 && blockingOperationFacts.length === 0) {
+    if (!matched && blockingReachFacts.length === 0 && blockingRequireFlowFacts.length === 0 && blockingRequireDataFlowFacts.length === 0 && blockingAuthCounterexampleFacts.length === 0 && blockingEncryptionCounterexampleFacts.length === 0 && blockingDependencyFacts.length === 0 && blockingDataFlowFacts.length === 0 && blockingTrustPolicyFacts.length === 0 && blockingDiFacts.length === 0 && blockingTransitionFacts.length === 0 && blockingOperationFacts.length === 0 && blockingValuePolicyFacts.length === 0 && blockingOperationPolicyFacts.length === 0 && blockingEventPolicyFacts.length === 0) {
       violations.push({
         type: 'flow_violation',
         invariant: 'unknown',
@@ -1015,7 +1007,7 @@ export async function runGate(
     const permanentConstraint = denied
       ? `(assert (=> (Transition ${smtId(fact.data)} Field__${smtId(fact.data)}__${smtId(fact.field)} ${stateSmtId(artifact, fact.data, fact.field, fact.from ?? denied.from)} ${stateSmtId(artifact, fact.data, fact.field, fact.to)}) false))`
       : `machine ${machine.name} permits only declared allow transitions`;
-    const deltaAssertion = buildTransitionDeltaAssertionForArtifact(artifact, fact);
+    const deltaAssertion = buildTransitionDeltaAssertions(artifact, fact).join('\n');
     violations.push({
       type: 'state_machine_violation',
       invariant: machine.name,
@@ -1045,6 +1037,127 @@ export async function runGate(
         permanent_constraint: permanentConstraint,
         delta_assertion: deltaAssertion,
         explanation: `Z3 returned UNSAT because the extracted transition fact from query '${fact.query.id}' contradicts state machine '${machine.name}'.`,
+      },
+    });
+  }
+
+  for (const item of blockingValuePolicyFacts) {
+    const { policy, rule, fact, conditionFact } = item;
+    const deltaAssertion = `(assert (ValueContradiction ${smtId(fact.subject)} ${fieldPathSmtId(fact.subject, fact.path)} ${relationSmtId(rule.requirement.relation)} ${scalarSmtId(rule.requirement.value)}))`;
+    const conditionAssertion = conditionFact && rule.when
+      ? `(assert (ValueFact ${smtId(conditionFact.subject)} ${fieldPathSmtId(conditionFact.subject, conditionFact.path)} ${relationSmtId(rule.when.relation)} ${scalarSmtId(rule.when.value)}))`
+      : undefined;
+    const permanentConstraint = rule.when
+      ? `(assert (=> (and (ValueFact ${smtId(rule.when.subject)} ${fieldPathSmtId(rule.when.subject, rule.when.path)} ${relationSmtId(rule.when.relation)} ${scalarSmtId(rule.when.value)}) (ValueContradiction ${smtId(rule.requirement.subject)} ${fieldPathSmtId(rule.requirement.subject, rule.requirement.path)} ${relationSmtId(rule.requirement.relation)} ${scalarSmtId(rule.requirement.value)})) false))`
+      : `(assert (=> (ValueContradiction ${smtId(rule.requirement.subject)} ${fieldPathSmtId(rule.requirement.subject, rule.requirement.path)} ${relationSmtId(rule.requirement.relation)} ${scalarSmtId(rule.requirement.value)}) false))`;
+    violations.push({
+      type: 'value_policy_violation',
+      invariant: policy,
+      rule,
+      detected: {
+        from: fact.subject,
+        to: fact.subject,
+        data: `${fact.subject}.${fact.path.join('.')}`,
+        confidence: fact.confidence,
+        evidence: conditionAssertion ? `${conditionFact!.evidence}; ${fact.evidence}` : fact.evidence,
+        file: fact.file,
+        query: {
+          id: fact.query.id,
+          version: fact.query.version,
+          file: fact.query.file,
+          graphFactId: fact.graphFactId,
+        },
+      },
+      graph_evidence: {
+        graphFactId: fact.graphFactId,
+        kind: 'value',
+        file: fact.file,
+        line: fact.line,
+        evidence: fact.evidence,
+      },
+      message: `Value '${fact.subject}.${fact.path.join('.')}' violates value_policy '${policy}'`,
+      z3_proof: {
+        permanent_constraint: permanentConstraint,
+        delta_assertion: conditionAssertion ? `${conditionAssertion}\n${deltaAssertion}` : deltaAssertion,
+        explanation: `Z3 returned UNSAT because reviewed value evidence from query '${fact.query.id}' contradicts value_policy '${policy}'.`,
+      },
+    });
+  }
+
+  for (const item of blockingOperationPolicyFacts) {
+    const { policy, rule, fact } = item;
+    const phase = rule.kind === 'RequireBefore' ? 'Phase__before' : 'Phase__after';
+    const permanentConstraint = `(assert (=> (OperationStateContradiction Operation__${smtId(rule.operation)} ${phase} ${smtId(rule.requirement.subject)} ${fieldPathSmtId(rule.requirement.subject, rule.requirement.path)} ${relationSmtId(rule.requirement.relation)} ${scalarSmtId(rule.requirement.value)}) false))`;
+    const deltaAssertion = `(assert (OperationStateContradiction Operation__${smtId(fact.operation)} ${phase} ${smtId(fact.subject)} ${fieldPathSmtId(fact.subject, fact.path)} ${relationSmtId(rule.requirement.relation)} ${scalarSmtId(rule.requirement.value)}))`;
+    violations.push({
+      type: 'operation_policy_violation',
+      invariant: policy,
+      rule,
+      detected: {
+        from: fact.subject,
+        to: fact.subject,
+        data: `${fact.subject}.${fact.path.join('.')}`,
+        confidence: fact.confidence,
+        evidence: fact.evidence,
+        file: fact.file,
+        operation: fact.operation,
+        query: {
+          id: fact.query.id,
+          version: fact.query.version,
+          file: fact.query.file,
+          graphFactId: fact.graphFactId,
+        },
+      },
+      graph_evidence: {
+        graphFactId: fact.graphFactId,
+        kind: 'operation_event',
+        file: fact.file,
+        line: fact.line,
+        evidence: fact.evidence,
+      },
+      message: `Operation '${fact.operation}' ${fact.phase} condition violates operation_policy '${policy}'`,
+      z3_proof: {
+        permanent_constraint: permanentConstraint,
+        delta_assertion: deltaAssertion,
+        explanation: `Z3 returned UNSAT because reviewed operation-event evidence from query '${fact.query.id}' contradicts operation_policy '${policy}'.`,
+      },
+    });
+  }
+
+  for (const item of blockingEventPolicyFacts) {
+    const { policy, rule, fact } = item;
+    const permanentConstraint = `(assert (=> (EventMissingPrecedence Event__${smtId(rule.event)} Event__${smtId(rule.precededBy)} ${smtId(rule.scope)}) false))`;
+    const deltaAssertion = `(assert (EventMissingPrecedence Event__${smtId(rule.event)} Event__${smtId(rule.precededBy)} ${smtId(rule.scope)}))`;
+    violations.push({
+      type: 'event_policy_violation',
+      invariant: policy,
+      rule,
+      detected: {
+        from: rule.precededBy,
+        to: fact.event,
+        data: fact.scope,
+        confidence: fact.confidence,
+        evidence: fact.evidence,
+        file: fact.file,
+        query: {
+          id: fact.query.id,
+          version: fact.query.version,
+          file: fact.query.file,
+          graphFactId: fact.graphFactId,
+        },
+      },
+      graph_evidence: {
+        graphFactId: fact.graphFactId,
+        kind: 'event',
+        file: fact.file,
+        line: fact.line,
+        evidence: fact.evidence,
+      },
+      message: `Event '${fact.event}' must be preceded by '${rule.precededBy}' for scope '${rule.scope}' (event_policy: ${policy})`,
+      z3_proof: {
+        permanent_constraint: permanentConstraint,
+        delta_assertion: deltaAssertion,
+        explanation: `Z3 returned UNSAT because reviewed event evidence from query '${fact.query.id}' lacks the required preceding event for event_policy '${policy}'.`,
       },
     });
   }

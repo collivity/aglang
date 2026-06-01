@@ -29,7 +29,7 @@ aglc install-agent-skill
 
 `.ag` files are engineer-guided architecture source, not normal implementation files. Do not create, edit, regenerate, import into, or compile changes to `.ag` specs unless the engineer explicitly asks for architecture/spec work.
 
-Semantic query files are architecture source too. `.aglang/extractors/*.agq.yml` files are reviewed artifacts that map deterministic graph facts into domain facts such as architecture flows, named operations, or state-machine transitions. LLMs may help author them when requested, but `aglc check` never calls an LLM; it runs the committed `.ag`, `.agq.yml`, and source facts deterministically.
+Semantic query files are architecture source too. `.aglang/extractors/*.agq.yml` files are reviewed artifacts that map deterministic graph facts into domain facts such as architecture flows, named operations, state-machine transitions, value facts, operation before/after facts, or scoped events. LLMs may help author them when requested, but `aglc check` never calls an LLM; it runs the committed `.ag`, `.agq.yml`, and source facts deterministically.
 
 Generated architecture artifacts are also permissioned:
 
@@ -75,6 +75,25 @@ Transitions without a resolved `from` state are warning-only. Do not "fix" these
 
 `require flow A -> B via C`, `require dataflow D -> T via C`, `require auth on flow A -> B`, `require encryption on flow A -> B`, `require dependency A -> B via interface I`, and `require operation serialization in Serializer` are blocking when definite reviewed counterexample evidence exists. These readable rules compile to deny-counterexample enforcement; teams may also write explicit forms such as `deny unauthenticated flow A -> B` or `deny dependency A -> B without interface I`. Operation, auth, encryption, and dependency facts come from deterministic extractors or reviewed `.agq.yml` files, not ad hoc LLM inference during `check`. If a require violation appears to need a changed `.ag` or `.agq.yml` rule, ask the engineer before editing architecture intent.
 
+`value_policy`, `operation_policy`, and `event_policy` are also evidence-backed. They cover required value predicates, operation pre/postconditions, and scoped event precedence:
+
+```ag
+value_policy CartShape {
+  require Cart.items.length == 1 when Cart.phase == SingleItem
+}
+
+operation_policy SubmitOrderRules {
+  require before submitOrder Cart.phase == SingleItem
+  ensure after submitOrder Order.status == Submitted
+}
+
+event_policy ConsentProtocol {
+  require event AcceptConsent preceded_by ShowConsent by UserSession
+}
+```
+
+These policies consume reviewed `kind: value`, `kind: operation_event`, and `kind: event` query emits. Missing evidence is non-blocking; only definite contradictory facts produce `value_policy_violation`, `operation_policy_violation`, or `event_policy_violation`. Scope committed queries to the owning component with exact `subject` filters; avoid matching tests, generated site assets, and intentional violation fixtures in ordinary project gates.
+
 ## Workflow Policies
 
 GitHub Actions workflows can be modeled as components and checked with `workflow_policy`.
@@ -104,10 +123,11 @@ Check commands return schema version 2. Important fields:
 
 - `passed`: overall result.
 - `diff`: checked scope metadata when running staged, `--diff`, or `--all` checks.
-- `violations`: architecture flow, reachability, require, data, trust, DI, and permission violations with proof details.
+- `violations`: architecture flow, reachability, require, data, trust, DI, permission, value, operation, and event violations with proof details.
 - `require_flow_violation`: a violation type inside `violations[]` for a `require flow A -> B via C` path that bypasses `C`; inspect `detected.path` and `detected.via`.
 - `require_operation_violation`: a violation type inside `violations[]` for a reviewed query-emitted operation outside its required component; inspect `detected.operation`, `detected.required_component`, and `detected.query`.
 - `state_machine_violation`: a violation type inside `violations[]` for query-extracted transitions that violate a `machine` declaration.
+- `value_policy_violation`, `operation_policy_violation`, `event_policy_violation`: violation types inside `violations[]` for reviewed rich policy evidence.
 - `reach_violation`: a violation type inside `violations[]` for a transitive `deny reach` path; inspect `detected.path`.
 - `dataflow_violation`: a violation type inside `violations[]` for data reaching a denied component or node.
 - `data_policy_violation`: a violation type inside `violations[]` for classification or jurisdiction rules.

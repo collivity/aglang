@@ -6,6 +6,8 @@ import type {
   InvariantDecl, InvariantRule, TestDecl, AssertStmt,
   QueryChain, Selector, Quantifier, InvariantEndpoint,
   StateMachineDecl, TransitionRule, PermissionDecl, PermissionRule,
+  ValuePolicyDecl, ValuePolicyRule, ValueExpression, PolicyValue, ValueRelation,
+  OperationPolicyDecl, OperationPolicyRule, EventPolicyDecl, EventPolicyRule,
   ContractDecl, ContractEndpoint, PluginDecl, RepoDecl,
   WorkflowPolicyDecl, WorkflowPolicyRule, WorkflowCondition, WorkflowPolicyAction,
   ChangePolicyDecl, ChangePolicyRule, DiLifetime, DiPolicyDecl, DiPolicyRule,
@@ -565,6 +567,113 @@ export function parse(tokens: Token[]): Program {
     return { kind: 'PermissionDecl', name, onType, rules };
   }
 
+  function parsePolicyPath(): { subject: string; path: string[] } {
+    const subject = expect('IDENT').value;
+    const path: string[] = [];
+    do {
+      expect('DOT');
+      path.push(expectIdent().value);
+    } while (match('DOT'));
+    if (path.length === 0) throw new ParseError('expected field path', peek());
+    return { subject, path };
+  }
+
+  function parseValueRelation(): ValueRelation {
+    const t = advance();
+    if (t.kind === 'EQ' && t.value === '==') return '==';
+    if (t.kind === 'NE') return '!=';
+    if (t.kind === 'GTE') return '>=';
+    if (t.kind === 'LTE') return '<=';
+    if (t.kind === 'GT') return '>';
+    if (t.kind === 'LT') return '<';
+    throw new ParseError(`expected value relation operator`, t);
+  }
+
+  function parsePolicyValue(): PolicyValue {
+    const t = advance();
+    if (t.kind === 'NUMBER') return Number(t.value);
+    if (t.kind === 'STRING') return t.value;
+    if (t.value === 'true') return true;
+    if (t.value === 'false') return false;
+    if (t.value === 'null') return null;
+    if (t.kind === 'IDENT' || t.kind === 'KEYWORD') return t.value;
+    throw new ParseError('expected policy value', t);
+  }
+
+  function parseValueExpression(): ValueExpression {
+    const target = parsePolicyPath();
+    const relation = parseValueRelation();
+    const value = parsePolicyValue();
+    return { ...target, relation, value };
+  }
+
+  function parseValuePolicyDecl(): ValuePolicyDecl {
+    expect('KEYWORD', 'value_policy');
+    const name = expect('IDENT').value;
+    const rules: ValuePolicyRule[] = [];
+    expect('LBRACE');
+    while (!match('RBRACE') && !eof()) {
+      expect('KEYWORD', 'require');
+      const requirement = parseValueExpression();
+      let when: ValueExpression | undefined;
+      if (consume('KEYWORD', 'when')) {
+        when = parseValueExpression();
+      }
+      consume('SEMICOLON');
+      rules.push({ kind: 'RequireValue', requirement, ...(when ? { when } : {}) });
+    }
+    expect('RBRACE');
+    return { kind: 'ValuePolicyDecl', name, rules };
+  }
+
+  function parseOperationPolicyDecl(): OperationPolicyDecl {
+    expect('KEYWORD', 'operation_policy');
+    const name = expect('IDENT').value;
+    const rules: OperationPolicyRule[] = [];
+    expect('LBRACE');
+    while (!match('RBRACE') && !eof()) {
+      const action = advance();
+      if (action.value !== 'require' && action.value !== 'ensure') {
+        throw new ParseError(`expected 'require' or 'ensure' in operation_policy block`, action);
+      }
+      if (action.value === 'require') {
+        expect('KEYWORD', 'before');
+        const operation = expectIdent().value;
+        const requirement = parseValueExpression();
+        consume('SEMICOLON');
+        rules.push({ kind: 'RequireBefore', operation, requirement });
+      } else {
+        expect('KEYWORD', 'after');
+        const operation = expectIdent().value;
+        const requirement = parseValueExpression();
+        consume('SEMICOLON');
+        rules.push({ kind: 'EnsureAfter', operation, requirement });
+      }
+    }
+    expect('RBRACE');
+    return { kind: 'OperationPolicyDecl', name, rules };
+  }
+
+  function parseEventPolicyDecl(): EventPolicyDecl {
+    expect('KEYWORD', 'event_policy');
+    const name = expect('IDENT').value;
+    const rules: EventPolicyRule[] = [];
+    expect('LBRACE');
+    while (!match('RBRACE') && !eof()) {
+      expect('KEYWORD', 'require');
+      expect('KEYWORD', 'event');
+      const event = expectIdent().value;
+      expect('KEYWORD', 'preceded_by');
+      const precededBy = expectIdent().value;
+      expect('KEYWORD', 'by');
+      const scope = expectIdent().value;
+      consume('SEMICOLON');
+      rules.push({ kind: 'RequirePrecededBy', event, precededBy, scope });
+    }
+    expect('RBRACE');
+    return { kind: 'EventPolicyDecl', name, rules };
+  }
+
   // HTTP methods that may appear as endpoints in contract blocks
   const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']);
   const CONTRACT_STARTERS = new Set(['query', 'mutation', 'subscription', 'rpc', 'publishes', 'subscribes']);
@@ -948,6 +1057,9 @@ export function parse(tokens: Token[]): Program {
         case 'service':    declarations.push(parseServiceDecl()); break;
         case 'invariant':  declarations.push(parseInvariantDecl()); break;
         case 'machine':    declarations.push(parseStateMachineDecl()); break;
+        case 'value_policy': declarations.push(parseValuePolicyDecl()); break;
+        case 'operation_policy': declarations.push(parseOperationPolicyDecl()); break;
+        case 'event_policy': declarations.push(parseEventPolicyDecl()); break;
         case 'permission': declarations.push(parsePermissionDecl()); break;
         case 'contract':   declarations.push(parseContractDecl()); break;
         case 'plugin':     declarations.push(parsePluginDecl()); break;

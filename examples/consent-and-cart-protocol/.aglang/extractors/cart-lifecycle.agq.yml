@@ -1,0 +1,14 @@
+id: CartLifecycleTransitions
+owner: commerce
+version: 1
+confidence: definite
+match:
+  kind: assignment
+  property: phase
+  valueEnum: CartPhase
+emit:
+  kind: transition
+  data: SharedCart
+  field: phase
+  from: "$previousMember"
+  to: "$valueMember"

@@ -26,6 +26,29 @@ export interface ExtractionQuery {
         to: string;
       }
     | {
+        kind: 'value';
+        subject: string;
+        field?: string;
+        path?: string;
+        relation: string;
+        value: string;
+      }
+    | {
+        kind: 'operation_event';
+        operation: string;
+        phase: 'before' | 'after';
+        subject: string;
+        field?: string;
+        path?: string;
+        relation: string;
+        value: string;
+      }
+    | {
+        kind: 'event';
+        event: string;
+        scope?: string;
+      }
+    | {
         kind: 'flow';
         from: string;
         to: string;
@@ -134,6 +157,35 @@ export interface DependencyFact {
   query: { id: string; version: number; file: string };
 }
 
+export interface ValueFact {
+  subject: string;
+  path: string[];
+  relation: string;
+  value: string;
+  confidence: Confidence;
+  file: string;
+  line?: number;
+  evidence: string;
+  graphFactId: string;
+  query: { id: string; version: number; file: string };
+}
+
+export interface OperationEventFact extends ValueFact {
+  operation: string;
+  phase: 'before' | 'after';
+}
+
+export interface EventFact {
+  event: string;
+  scope?: string;
+  confidence: Confidence;
+  file: string;
+  line?: number;
+  evidence: string;
+  graphFactId: string;
+  query: { id: string; version: number; file: string };
+}
+
 export interface ExtractionQueryFacts {
   transitionFacts: TransitionFact[];
   flowFacts: QueryFlowFact[];
@@ -141,6 +193,26 @@ export interface ExtractionQueryFacts {
   authFacts: AuthCounterexampleFact[];
   encryptionFacts: EncryptionCounterexampleFact[];
   dependencyFacts: DependencyFact[];
+  valueFacts: ValueFact[];
+  operationEventFacts: OperationEventFact[];
+  eventFacts: EventFact[];
+  traces?: ExtractionQueryTrace[];
+}
+
+export interface ExtractionQueryTrace {
+  query: {
+    id: string;
+    version: number;
+    file: string;
+  };
+  graphFactId: string;
+  matched: boolean;
+  substitutions: Record<string, string>;
+  emitted?: {
+    kind: ExtractionQuery['emit']['kind'];
+    id: string;
+  };
+  skipped_reason?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -176,8 +248,8 @@ function parseQuery(raw: unknown, file: string): ExtractionQuery {
   }
   const emit = raw.emit;
   if (!isRecord(emit)) throw new Error(`query '${raw.id}' missing emit`);
-  if (emit.kind !== 'transition' && emit.kind !== 'flow' && emit.kind !== 'operation' && emit.kind !== 'auth' && emit.kind !== 'encryption' && emit.kind !== 'dependency') {
-    throw new Error(`query '${raw.id}' only supports emit.kind=transition, emit.kind=flow, emit.kind=operation, emit.kind=auth, emit.kind=encryption, or emit.kind=dependency`);
+  if (emit.kind !== 'transition' && emit.kind !== 'flow' && emit.kind !== 'operation' && emit.kind !== 'auth' && emit.kind !== 'encryption' && emit.kind !== 'dependency' && emit.kind !== 'value' && emit.kind !== 'operation_event' && emit.kind !== 'event') {
+    throw new Error(`query '${raw.id}' only supports emit.kind=transition, emit.kind=flow, emit.kind=operation, emit.kind=auth, emit.kind=encryption, emit.kind=dependency, emit.kind=value, emit.kind=operation_event, or emit.kind=event`);
   }
   if (raw.match === undefined) throw new Error(`query '${raw.id}' missing match`);
   if (raw.confidence === undefined) throw new Error(`query '${raw.id}' missing confidence`);
@@ -244,6 +316,28 @@ function parseQuery(raw: unknown, file: string): ExtractionQuery {
     }
     if (emit.interface !== undefined && typeof emit.interface !== 'string') throw new Error(`query '${raw.id}' emit.interface must be a string`);
     return { id: raw.id, owner: raw.owner, version: raw.version, confidence, file, match, emit: { kind: 'dependency', from: emit.from as string, to: emit.to as string, ...(emit.interface ? { interface: emit.interface as string } : {}) } };
+  }
+  if (emit.kind === 'value') {
+    for (const field of ['subject', 'relation', 'value'] as const) {
+      if (typeof emit[field] !== 'string' || emit[field].length === 0) throw new Error(`query '${raw.id}' missing emit.${field}`);
+    }
+    if (emit.field !== undefined && typeof emit.field !== 'string') throw new Error(`query '${raw.id}' emit.field must be a string`);
+    if (emit.path !== undefined && typeof emit.path !== 'string') throw new Error(`query '${raw.id}' emit.path must be a string`);
+    return { id: raw.id, owner: raw.owner, version: raw.version, confidence, file, match, emit: { kind: 'value', subject: emit.subject as string, ...(emit.field ? { field: emit.field as string } : {}), ...(emit.path ? { path: emit.path as string } : {}), relation: emit.relation as string, value: emit.value as string } };
+  }
+  if (emit.kind === 'operation_event') {
+    for (const field of ['operation', 'phase', 'subject', 'relation', 'value'] as const) {
+      if (typeof emit[field] !== 'string' || emit[field].length === 0) throw new Error(`query '${raw.id}' missing emit.${field}`);
+    }
+    if (emit.phase !== 'before' && emit.phase !== 'after' && !(emit.phase as string).startsWith('$')) throw new Error(`query '${raw.id}' emit.phase must be before or after`);
+    if (emit.field !== undefined && typeof emit.field !== 'string') throw new Error(`query '${raw.id}' emit.field must be a string`);
+    if (emit.path !== undefined && typeof emit.path !== 'string') throw new Error(`query '${raw.id}' emit.path must be a string`);
+    return { id: raw.id, owner: raw.owner, version: raw.version, confidence, file, match, emit: { kind: 'operation_event', operation: emit.operation as string, phase: emit.phase as 'before' | 'after', subject: emit.subject as string, ...(emit.field ? { field: emit.field as string } : {}), ...(emit.path ? { path: emit.path as string } : {}), relation: emit.relation as string, value: emit.value as string } };
+  }
+  if (emit.kind === 'event') {
+    if (typeof emit.event !== 'string' || emit.event.length === 0) throw new Error(`query '${raw.id}' missing emit.event`);
+    if (emit.scope !== undefined && typeof emit.scope !== 'string') throw new Error(`query '${raw.id}' emit.scope must be a string`);
+    return { id: raw.id, owner: raw.owner, version: raw.version, confidence, file, match, emit: { kind: 'event', event: emit.event as string, ...(emit.scope ? { scope: emit.scope as string } : {}) } };
   }
   for (const field of ['data', 'field', 'to'] as const) {
     if (typeof emit[field] !== 'string' || emit[field].length === 0) {
@@ -338,6 +432,47 @@ function queryMatches(query: ExtractionQuery, fact: GraphFact): boolean {
   return Object.entries(query.match).every(([key, expected]) => valueMatches(expected, graphValue(fact, key)));
 }
 
+function emitTemplates(query: ExtractionQuery): Record<string, string | undefined> {
+  return Object.fromEntries(
+    Object.entries(query.emit)
+      .filter(([key, value]) => key !== 'kind' && typeof value === 'string')
+      .map(([key, value]) => [key, value as string])
+  );
+}
+
+function traceExtractionQueries(queries: ExtractionQuery[], graphFacts: GraphFact[]): ExtractionQueryTrace[] {
+  const traces: ExtractionQueryTrace[] = [];
+  for (const query of queries) {
+    for (const graphFact of graphFacts) {
+      const matched = queryMatches(query, graphFact);
+      const substitutions: Record<string, string> = {};
+      const missing = new Set<string>();
+      if (matched) {
+        for (const [field, template] of Object.entries(emitTemplates(query))) {
+          const result = substitute(template, graphFact);
+          if (result) {
+            substitutions[field] = result.value;
+            result.missing.forEach(name => missing.add(name));
+          }
+        }
+      }
+      traces.push({
+        query: {
+          id: query.id,
+          version: query.version,
+          file: query.file,
+        },
+        graphFactId: graphFact.id,
+        matched,
+        substitutions,
+        ...(matched && missing.size === 0 ? { emitted: { kind: query.emit.kind, id: `${query.id}:${graphFact.id}` } } : {}),
+        ...(!matched ? { skipped_reason: 'match criteria did not match graph fact' } : missing.size > 0 ? { skipped_reason: `missing capture(s): ${[...missing].join(', ')}` } : {}),
+      });
+    }
+  }
+  return traces;
+}
+
 export function applyExtractionQueryFacts(queries: ExtractionQuery[], graphFacts: GraphFact[]): ExtractionQueryFacts {
   const transitionFacts: TransitionFact[] = [];
   const flowFacts: QueryFlowFact[] = [];
@@ -345,6 +480,9 @@ export function applyExtractionQueryFacts(queries: ExtractionQuery[], graphFacts
   const authFacts: AuthCounterexampleFact[] = [];
   const encryptionFacts: EncryptionCounterexampleFact[] = [];
   const dependencyFacts: DependencyFact[] = [];
+  const valueFacts: ValueFact[] = [];
+  const operationEventFacts: OperationEventFact[] = [];
+  const eventFacts: EventFact[] = [];
   for (const query of queries) {
     for (const graphFact of graphFacts) {
       if (!queryMatches(query, graphFact)) continue;
@@ -424,6 +562,50 @@ export function applyExtractionQueryFacts(queries: ExtractionQuery[], graphFacts
         }
         continue;
       }
+      if (query.emit.kind === 'value' || query.emit.kind === 'operation_event') {
+        const subject = substitute(query.emit.subject, graphFact) ?? { value: query.emit.subject, missing: [] };
+        const pathRaw = substitute(query.emit.path ?? query.emit.field, graphFact);
+        const relation = substitute(query.emit.relation, graphFact) ?? { value: query.emit.relation, missing: [] };
+        const value = substitute(query.emit.value, graphFact) ?? { value: query.emit.value, missing: [] };
+        if (!subject.value || subject.missing.length > 0 || !pathRaw?.value || pathRaw.missing.length > 0 || !relation.value || relation.missing.length > 0 || value.missing.length > 0) continue;
+        const base = {
+          subject: subject.value,
+          path: pathRaw.value.split('.').filter(Boolean),
+          relation: relation.value,
+          value: value.value,
+          confidence: query.confidence,
+          file: graphFact.evidence.file ?? '',
+          line: graphFact.evidence.line,
+          graphFactId: graphFact.id,
+          query: { id: query.id, version: query.version, file: query.file },
+        };
+        if (query.emit.kind === 'value') {
+          valueFacts.push({ ...base, evidence: `Extraction query '${query.id}' emitted value fact from ${graphFact.kind}: ${graphFact.evidence.message ?? graphFact.id}` });
+        } else {
+          const operation = substitute(query.emit.operation, graphFact) ?? { value: query.emit.operation, missing: [] };
+          if (!operation.value || operation.missing.length > 0) continue;
+          const phase = substitute(query.emit.phase, graphFact) ?? { value: query.emit.phase, missing: [] };
+          if ((phase.value !== 'before' && phase.value !== 'after') || phase.missing.length > 0) continue;
+          operationEventFacts.push({ ...base, operation: operation.value, phase: phase.value, evidence: `Extraction query '${query.id}' emitted operation ${phase.value} fact from ${graphFact.kind}: ${graphFact.evidence.message ?? graphFact.id}` });
+        }
+        continue;
+      }
+      if (query.emit.kind === 'event') {
+        const event = substitute(query.emit.event, graphFact) ?? { value: query.emit.event, missing: [] };
+        const scope = substitute(query.emit.scope, graphFact);
+        if (!event.value || event.missing.length > 0 || (scope && scope.missing.length > 0)) continue;
+        eventFacts.push({
+          event: event.value,
+          ...(scope?.value ? { scope: scope.value } : {}),
+          confidence: query.confidence,
+          file: graphFact.evidence.file ?? '',
+          line: graphFact.evidence.line,
+          evidence: `Extraction query '${query.id}' emitted event from ${graphFact.kind}: ${graphFact.evidence.message ?? graphFact.id}`,
+          graphFactId: graphFact.id,
+          query: { id: query.id, version: query.version, file: query.file },
+        });
+        continue;
+      }
       const data = substitute(query.emit.data, graphFact) ?? { value: query.emit.data, missing: [] };
       const field = substitute(query.emit.field, graphFact) ?? { value: query.emit.field, missing: [] };
       const to = substitute(query.emit.to, graphFact);
@@ -447,7 +629,7 @@ export function applyExtractionQueryFacts(queries: ExtractionQuery[], graphFacts
       });
     }
   }
-  return { transitionFacts, flowFacts, operationFacts, authFacts, encryptionFacts, dependencyFacts };
+  return { transitionFacts, flowFacts, operationFacts, authFacts, encryptionFacts, dependencyFacts, valueFacts, operationEventFacts, eventFacts, traces: traceExtractionQueries(queries, graphFacts) };
 }
 
 export function applyExtractionQueries(queries: ExtractionQuery[], graphFacts: GraphFact[]): TransitionFact[] {

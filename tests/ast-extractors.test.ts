@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { writeFileSync, mkdirSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { isTreeSitterLanguageAvailable } from '../src/analyzers/ast/loader.ts';
@@ -139,6 +139,19 @@ describe('TypeScript: route extraction — regex-compatible', () => {
     const content = `@Post()\ncreateItem() {}`;
     const routes = extractServerRoutesFromTypeScript(content, 'ctrl.ts');
     expect(routes.some(r => r.method === 'POST')).toBe(true);
+  });
+
+  it('extracts Node createServer API routes from the UI workbench', () => {
+    const content = readFileSync(join(process.cwd(), 'src/runtime/ui-server.ts'), 'utf8');
+    const routes = extractServerRoutesFromTypeScript(content, 'src/runtime/ui-server.ts');
+    expect(routes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: 'GET', normalized: '/api/config' }),
+      expect.objectContaining({ method: 'GET', normalized: '/api/runs' }),
+      expect.objectContaining({ method: 'GET', normalized: '/api/runs/{}' }),
+      expect.objectContaining({ method: 'GET', normalized: '/api/files' }),
+      expect.objectContaining({ method: 'POST', normalized: '/api/runs' }),
+    ]));
+    expect(routes.some(route => route.method === 'GET' && route.normalized === '')).toBe(false);
   });
 });
 

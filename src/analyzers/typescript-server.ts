@@ -284,6 +284,14 @@ function extractRoutesRegex(content: string, filePath: string): RouteFact[] {
     routes.push({ method: m[1]!.toUpperCase(), path, normalized: normalizeRoute(path), file: filePath, line: lineOf(content, m.index) });
   }
 
+  const nodeHttpRe = /req\.method\s*===\s*['"`](GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)['"`]\s*&&\s*url\.pathname\s*(?:===\s*['"`]([^'"`]+)['"`]|\.startsWith\s*\(\s*['"`]([^'"`]+)['"`]\s*\))/gi;
+  while ((m = nodeHttpRe.exec(content)) !== null) {
+    const method = m[1]!.toUpperCase();
+    const rawPath = m[2] ?? m[3]!;
+    const path = m[3] ? `${rawPath.replace(/\/$/, '')}/:id` : rawPath;
+    routes.push({ method, path, normalized: normalizeRoute(path), file: filePath, line: lineOf(content, m.index) });
+  }
+
   return routes;
 }
 
@@ -293,9 +301,16 @@ export function extractServerRoutesFromTypeScript(content: string, filePath: str
   const lang = filePath.endsWith('.js') || filePath.endsWith('.mjs') || filePath.endsWith('.cjs')
     ? 'javascript' : 'typescript';
   const astRoutes = extractRoutesAst(content, filePath, lang);
-  if (astRoutes.length > 0) return astRoutes;
-  // Fall back to regex if AST produced nothing (tree-sitter unavailable or empty file)
-  return extractRoutesRegex(content, filePath);
+  const regexRoutes = extractRoutesRegex(content, filePath);
+  const routes = [...astRoutes, ...regexRoutes];
+  const seen = new Set<string>();
+  return routes.filter(route => {
+    if (/\bcreateServer\s*\(/.test(content) && route.method === 'GET' && route.normalized === '') return false;
+    const key = `${route.method} ${route.normalized}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // ── AST-based infrastructure detection ───────────────────────────────────────

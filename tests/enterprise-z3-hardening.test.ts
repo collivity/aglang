@@ -568,7 +568,7 @@ emit:
       { componentName: 'Orders', files: [source] },
     ], artifact, { projectRoot: dir });
 
-    expect(delta.blockingTransitionFacts).toHaveLength(1);
+    expect(delta.blockingTransitionFacts).toHaveLength(0);
     const verdict = await runGate(artifact, delta);
     expect(verdict.passed).toBe(true);
   });
@@ -621,7 +621,7 @@ emit:
     expect(verdict.violations[0]!.type).toBe('state_machine_violation');
   });
 
-  it('keeps unknown-from transitions warning-only and out of SMT assertions', async () => {
+  it('blocks unknown-from transitions on allow-only machines when no allow * -> target exists', async () => {
     const dir = tempDir();
     mkdirSync(join(dir, '.aglang', 'extractors'), { recursive: true });
     writeFileSync(join(dir, '.aglang', 'extractors', 'order-transitions.agq.yml'), `
@@ -664,11 +664,10 @@ emit:
     const verdict = await runGate(artifact, delta);
 
     expect(delta.transitionFacts).toHaveLength(1);
-    expect(delta.blockingTransitionFacts).toHaveLength(0);
-    expect(delta.transitionWarningFacts).toHaveLength(1);
-    expect(delta.smtAssertions.join('\n')).not.toContain('State__');
-    expect(verdict.passed).toBe(true);
-    expect(verdict.warnings.some(w => w.from === 'Order.status' && w.to === 'Archived')).toBe(true);
+    expect(delta.blockingTransitionFacts).toHaveLength(1);
+    expect(delta.transitionWarningFacts).toHaveLength(0);
+    expect(verdict.passed).toBe(false);
+    expect(verdict.violations[0]!.type).toBe('state_machine_violation');
   });
 
   it('uses enum-namespaced state constants for machines with shared state names', () => {

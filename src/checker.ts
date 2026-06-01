@@ -1,5 +1,5 @@
 // Type checker — validates the AST against the stdlib ontology (multi-pass)
-import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, StateMachineDecl, PermissionDecl, ContractDecl, WorkflowPolicyDecl, ChangePolicyDecl, ResourceDecl, InvariantEndpoint, DiPolicyDecl, DataPolicyDecl, TrustPolicyDecl } from './ast.ts';
+import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, StateMachineDecl, PermissionDecl, ContractDecl, WorkflowPolicyDecl, ChangePolicyDecl, ResourceDecl, InvariantEndpoint, DiPolicyDecl, DataPolicyDecl, TrustPolicyDecl, ValuePolicyDecl, OperationPolicyDecl, EventPolicyDecl, ValueExpression } from './ast.ts';
 import { VALID_NODE_TYPES, VALID_RESOURCE_TYPES, VALID_COMPONENT_ROLES, VALID_TRUST_VALUES, VALID_CONNECTIVITY_VALUES, VALID_PROTOCOL_VALUES, VALID_AUTH_VALUES } from './stdlib/topology.ts';
 
 export interface CheckError {
@@ -68,6 +68,9 @@ export function check(program: Program): CheckError[] {
   const declaredChangePolicies = new Map<string, ChangePolicyDecl>();
   const declaredDataPolicies = new Map<string, DataPolicyDecl>();
   const declaredTrustPolicies = new Map<string, TrustPolicyDecl>();
+  const declaredValuePolicies = new Map<string, ValuePolicyDecl>();
+  const declaredOperationPolicies = new Map<string, OperationPolicyDecl>();
+  const declaredEventPolicies = new Map<string, EventPolicyDecl>();
 
   for (const decl of program.declarations) {
     switch (decl.kind) {
@@ -129,6 +132,18 @@ export function check(program: Program): CheckError[] {
       case 'TrustPolicyDecl':
         if (declaredTrustPolicies.has(decl.name)) errors.push({ message: `Duplicate trust_policy name '${decl.name}'` });
         else declaredTrustPolicies.set(decl.name, decl);
+        break;
+      case 'ValuePolicyDecl':
+        if (declaredValuePolicies.has(decl.name)) errors.push({ message: `Duplicate value_policy name '${decl.name}'` });
+        else declaredValuePolicies.set(decl.name, decl);
+        break;
+      case 'OperationPolicyDecl':
+        if (declaredOperationPolicies.has(decl.name)) errors.push({ message: `Duplicate operation_policy name '${decl.name}'` });
+        else declaredOperationPolicies.set(decl.name, decl);
+        break;
+      case 'EventPolicyDecl':
+        if (declaredEventPolicies.has(decl.name)) errors.push({ message: `Duplicate event_policy name '${decl.name}'` });
+        else declaredEventPolicies.set(decl.name, decl);
         break;
       case 'RepoDecl':
         // Collect declared repos for cross-reference validation below
@@ -194,6 +209,57 @@ export function check(program: Program): CheckError[] {
       } else if (!resourceMatches(endpoint.name)) {
         errors.push({ message: `Invariant '${invName}': resource selector '${endpoint.name}' matches no resources` });
       }
+    }
+  }
+
+  function unwrapOptional(expr: string): string {
+    return expr.replace(/^Optional<(.+)>$/, '$1').trim();
+  }
+
+  function unwrapList(expr: string): string | undefined {
+    const match = expr.trim().match(/^List<(.+)>$/);
+    return match?.[1]?.trim();
+  }
+
+  function validateValueExpression(policyKind: string, policyName: string, expr: ValueExpression): void {
+    const dataDecl = declaredData.get(expr.subject);
+    if (!dataDecl) {
+      errors.push({ message: `${policyKind} '${policyName}': unknown data type '${expr.subject}'` });
+      return;
+    }
+    let currentType: string | undefined = expr.subject;
+    let currentData = dataDecl;
+    let lastFieldType: string | undefined;
+    for (let i = 0; i < expr.path.length; i++) {
+      const part = expr.path[i]!;
+      if (part === 'length') {
+        if (!lastFieldType || !unwrapList(lastFieldType)) {
+          errors.push({ message: `${policyKind} '${policyName}': '${expr.subject}.${expr.path.slice(0, i + 1).join('.')}' uses length on non-list field` });
+        }
+        currentType = 'Int';
+        lastFieldType = 'Int';
+        continue;
+      }
+      if (!currentData) {
+        errors.push({ message: `${policyKind} '${policyName}': cannot dereference '${part}' on non-data type '${currentType}'` });
+        return;
+      }
+      const field = currentData.fields.find(f => f.key === part);
+      if (!field) {
+        errors.push({ message: `${policyKind} '${policyName}': '${currentData.name}' has no field '${part}'` });
+        return;
+      }
+      lastFieldType = unwrapOptional(field.typeExpr);
+      currentType = lastFieldType;
+      currentData = declaredData.get(currentType)!;
+    }
+    const finalType = unwrapOptional(lastFieldType ?? '');
+    const enumDecl = declaredEnums.get(finalType);
+    if (enumDecl && typeof expr.value === 'string' && !enumDecl.values.includes(expr.value)) {
+      errors.push({ message: `${policyKind} '${policyName}': '${expr.value}' is not a value of enum '${finalType}'` });
+    }
+    if ((expr.relation === '>' || expr.relation === '<' || expr.relation === '>=' || expr.relation === '<=') && finalType && !['Int', 'Float', 'Money'].includes(finalType)) {
+      errors.push({ message: `${policyKind} '${policyName}': relation '${expr.relation}' requires numeric field, got '${finalType}'` });
     }
   }
 
@@ -479,6 +545,27 @@ export function check(program: Program): CheckError[] {
         }
         if (rule.kind === 'DenyFlowWhenData' && !declaredClassifications.has(rule.classification)) {
           errors.push({ message: `trust_policy '${decl.name}': unknown classification '${rule.classification}'` });
+        }
+      }
+    }
+
+    if (decl.kind === 'ValuePolicyDecl') {
+      for (const rule of decl.rules) {
+        validateValueExpression('value_policy', decl.name, rule.requirement);
+        if (rule.when) validateValueExpression('value_policy', decl.name, rule.when);
+      }
+    }
+
+    if (decl.kind === 'OperationPolicyDecl') {
+      for (const rule of decl.rules) {
+        validateValueExpression('operation_policy', decl.name, rule.requirement);
+      }
+    }
+
+    if (decl.kind === 'EventPolicyDecl') {
+      for (const rule of decl.rules) {
+        if (!declaredData.has(rule.scope) && !declaredComponents.has(rule.scope)) {
+          errors.push({ message: `event_policy '${decl.name}': unknown scope '${rule.scope}'` });
         }
       }
     }

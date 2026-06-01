@@ -1,8 +1,8 @@
 # aglang · Architecture Ground Language
 
-**aglang** is an auditable architecture verification layer for real repositories. Describe topology, components, invariants, workflow policies, state machines, and API contracts in a `.ag` spec file. `aglc` turns those rules into enforceable checks, then validates implementation work continuously while coding, in CI, and at commit time.
+**aglang** is an auditable architecture verification layer for real repositories. Describe topology, components, invariants, workflow policies, state machines, value policies, operation protocols, event protocols, and API contracts in a `.ag` spec file. `aglc` turns those rules into enforceable checks, then validates implementation work continuously while coding, in CI, and at commit time.
 
-Agents are a primary workflow: they read `AGENTS.md`, validate focused edits with `aglc check-file --json`, validate the full guarded project with `aglc check --all --json`, and ask before changing `.ag` or `.agq.yml` architecture source. Under the hood, hard rules are compiled into solver-backed constraints and deterministic policy gates so violations come with source evidence, stable ids, query provenance, and proof details instead of vague warnings.
+Agents are a primary workflow: they read `AGENTS.md`, validate focused edits with `aglc check-file --json`, validate the full guarded project with `aglc check --all --json`, and ask before changing `.ag` or `.agq.yml` architecture source. Engineers can inspect the same evidence locally with `aglc ui`. Under the hood, hard rules are compiled into solver-backed constraints and deterministic policy gates so violations come with source evidence, stable ids, query provenance, and proof details instead of vague warnings.
 
 Readable `require` invariants compile to deny-counterexample enforcement. For example, `require auth on flow Client -> Api` blocks only when deterministic extractors or reviewed `.agq.yml` files emit definite unauthenticated evidence; teams can also author the explicit `deny unauthenticated flow Client -> Api` form. The same model applies to dataflow-via, encryption, dependency-interface, and operation-placement rules.
 
@@ -183,6 +183,7 @@ Commit aborted.
 | **Change policies** | ✅ | Require related components, docs, skills, or package metadata to change together |
 | **Dependency injection policies** | ✅ | Block illegal constructor injection, singleton-to-scoped dependencies, and service-locator usage with Z3 |
 | **State machines** | ✅ | Model entity lifecycle states and allowed transitions |
+| **Rich policies** | ✅ | Check value invariants, operation pre/postconditions, and event precedence from reviewed facts |
 | **Permissions** | ✅ | Declare role-based access rules per state |
 | **Data & enums** | ✅ | Define domain types for documentation |
 | **Multi-file specs** | ✅ | Split large specs with `import "other.ag"` — shared DAG imports are deduplicated |
@@ -207,7 +208,7 @@ Not every declaration is enforced the same way:
 
 | Level | Declarations | Behavior |
 |---|---|---|
-| `formal_z3` | `invariant deny flow`, `invariant deny reach`, `invariant deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy`, `machine` | Facts are asserted into SMT and checked by Z3 when extractors produce definite evidence. |
+| `formal_z3` | `invariant deny flow`, `invariant deny reach`, `invariant deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy`, `machine`, `value_policy`, `operation_policy`, `event_policy` | Facts are asserted into SMT and checked by Z3 when extractors produce definite evidence. |
 | `deterministic_policy` | `contract`, `workflow_policy` | Extracted route/workflow facts are checked by deterministic gates. |
 | `formal_z3` | `require encryption` / `deny unencrypted flow` | Blocks only when deterministic extractors or reviewed `.agq.yml` files emit definite unencrypted-flow evidence. |
 
@@ -452,6 +453,7 @@ import "relative/path/other.ag"
 | `aglc check-file --arch <arch.o> --file <path>` | Check a single file (dev/debug) |
 | `aglc explain --arch <arch.o> --project <dir> --violation <id>` | Explain a stable violation ID with evidence and suggested fix class |
 | `aglc debug --arch <arch.o> --project <dir> [--file <path>] [--out <dir>]` | Write graph/verdict/rule evidence plus an engineer-readable debug report |
+| `aglc ui --arch <arch.o> --project <dir> [--all\|--diff <ref>\|--file <path>] [--port <n>] [--no-open]` | Launch the local read-only UI workbench on `127.0.0.1` |
 | `aglc emit-context --arch <arch.o> [--out <path>]` | Write `AGENTS.md` (agent context brief) |
 | `aglc emit-skill --arch <arch.o> [--out <path>]` | Write `skill.json` (agent skill manifest) |
 | `aglc install-agent-skill [--path <skills-dir>]` | Install the packaged generic Codex skill |
@@ -568,7 +570,7 @@ aglang is designed as a first-class tool for AI coding agents:
 - **`AGENTS.md`** — generated by `aglc emit-context`, gives agents a precise brief: topology, component paths, allowed flows, contracts, state machines, and permission rules. Fits in any context window.
 - **`skill.json`** — a machine-readable skill descriptor agents can register as a tool.
 - **Packaged Codex skill** — `aglc install-agent-skill` installs the generic aglang interface so agents know the CLI workflows after npm install.
-- **Continuous validation** — agents run `aglc check-file --json` while editing and `aglc check --all --json` before finishing.
+- **Continuous validation** — agents run `aglc check-file --json` while editing and `aglc check --all --json` before finishing; engineers can add `--ui` to `check` or `debug` to persist a `.aglang/ui` run and open the local workbench.
 - **Structured JSON errors** — every Z3 violation includes exact file paths, component names, and the Z3 proof object so agents can locate and fix violations without hallucinating.
 - **Fail-closed** — git diff failures and Z3 `unknown` results block the commit; nothing is silently allowed.
 - **Engineer-guided architecture source** — agents should ask before changing `.ag`, `architecture.o`, `AGENTS.md`, or `skill.json`.

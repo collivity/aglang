@@ -1,7 +1,7 @@
 // Contract gate — validates API contracts between implementing and consuming components.
 // Checks that routes declared in `contract` blocks match actual code in implementing/consuming components.
 
-import { readdirSync } from 'fs';
+import { existsSync, readdirSync, statSync } from 'fs';
 import { resolve, join } from 'path';
 import micromatch from 'micromatch';
 import type { ArchitectureArtifact, ArtifactEndpoint } from '../emitters/artifact.ts';
@@ -58,6 +58,7 @@ function globToFiles(globPattern: string, projectRoot: string): string[] {
   const scanned = micromatch.scan(globPattern.replace(/\\/g, '/'));
   const baseDir = scanned.base || '.';
   const absDir = resolve(projectRoot, baseDir);
+  if (existsSync(absDir) && statSync(absDir).isFile()) return [absDir];
 
   // Collect all files under the base directory
   const allFiles = collectFiles(absDir, []); // no extension filter — micromatch handles it

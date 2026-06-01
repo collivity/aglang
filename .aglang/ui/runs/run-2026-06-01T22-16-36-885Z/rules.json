@@ -1,0 +1,538 @@
+{
+  "sourcePath": "C:\\Users\\pante\\Codespaces\\aglang\\architecture.ag",
+  "components": [
+    {
+      "name": "CliCompiler",
+      "paths": "src/index.ts"
+    },
+    {
+      "name": "LanguageFrontend",
+      "paths": "src/{ast,checker,importer,import-openapi,import-tf,lexer,parser}.ts"
+    },
+    {
+      "name": "SmtBackend",
+      "paths": "src/smt/**/*.ts"
+    },
+    {
+      "name": "RuntimeGate",
+      "paths": "src/runtime/{contract-gate,delta-assert,diff-parser,diagnostic,extraction-cache,gate,state-machine}.ts"
+    },
+    {
+      "name": "ExtractorAnalyzers",
+      "paths": "src/analyzers/**/*.ts"
+    },
+    {
+      "name": "GraphProjection",
+      "paths": "src/runtime/graph-projection.ts"
+    },
+    {
+      "name": "Emitters",
+      "paths": "src/emitters/**/*.ts"
+    },
+    {
+      "name": "SpecGenerator",
+      "paths": "src/generate.ts"
+    },
+    {
+      "name": "DocsSite",
+      "paths": "{docs,site,scripts}/**/*.{md,ts,js,mjs}"
+    },
+    {
+      "name": "PackageMetadata",
+      "paths": "{package.json,package-lock.json}"
+    },
+    {
+      "name": "AgentSkill",
+      "paths": "skills/aglang/SKILL.md"
+    },
+    {
+      "name": "AgentSkillInstaller",
+      "paths": "scripts/postinstall-agent-skill.mjs"
+    },
+    {
+      "name": "ReadmeDocs",
+      "paths": "README.md"
+    },
+    {
+      "name": "CliReferenceDocs",
+      "paths": "docs/cli/reference.md"
+    },
+    {
+      "name": "PublicDocs",
+      "paths": "docs/**/*.md"
+    },
+    {
+      "name": "ReleaseWorkflow",
+      "paths": ".github/workflows/release.yml"
+    },
+    {
+      "name": "DocsWorkflow",
+      "paths": ".github/workflows/docs.yml"
+    },
+    {
+      "name": "VscodeExtension",
+      "paths": "editors/vscode-aglang/src/**/*.ts"
+    },
+    {
+      "name": "Tests",
+      "paths": "tests/**/*.ts"
+    },
+    {
+      "name": "ArchitectureSpec",
+      "paths": "architecture.ag"
+    },
+    {
+      "name": "CompiledArchitecture",
+      "paths": "architecture.o"
+    },
+    {
+      "name": "AgentContext",
+      "paths": "AGENTS.md"
+    },
+    {
+      "name": "SkillManifest",
+      "paths": "skill.json"
+    },
+    {
+      "name": "SemanticQueries",
+      "paths": ".aglang/extractors/**/*.agq.yml"
+    }
+  ],
+  "invariants": [
+    {
+      "name": "CompilerEntrypointBoundary",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "LanguageFrontend",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "RuntimeGate",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "ExtractorAnalyzers",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "GraphProjection",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "Emitters",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SpecGenerator",
+          "to": "CliCompiler"
+        }
+      ]
+    },
+    {
+      "name": "SmtBackendIsolation",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "RuntimeGate"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "ExtractorAnalyzers"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "GraphProjection"
+        }
+      ]
+    },
+    {
+      "name": "LanguageFrontendPurity",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "LanguageFrontend",
+          "to": "RuntimeGate"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "LanguageFrontend",
+          "to": "GraphProjection"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "LanguageFrontend",
+          "to": "Emitters"
+        }
+      ]
+    },
+    {
+      "name": "ExtractorAnalyzerBoundary",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "ExtractorAnalyzers",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "ExtractorAnalyzers",
+          "to": "Emitters"
+        }
+      ]
+    },
+    {
+      "name": "VscodeApiBoundary",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "VscodeExtension",
+          "to": "RuntimeGate"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "VscodeExtension",
+          "to": "ExtractorAnalyzers"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "VscodeExtension",
+          "to": "SmtBackend"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "VscodeExtension",
+          "to": "GraphProjection"
+        }
+      ]
+    }
+  ],
+  "dataPolicies": [],
+  "trustPolicies": [],
+  "diPolicies": [],
+  "changePolicies": [
+    {
+      "name": "DocsFreshness",
+      "rules": [
+        {
+          "kind": "RequireTouched",
+          "required": "CliReferenceDocs",
+          "trigger": "CliCompiler"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ReadmeDocs",
+          "trigger": "CliCompiler"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "CliReferenceDocs",
+          "trigger": "PackageMetadata"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ReadmeDocs",
+          "trigger": "PackageMetadata"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "AgentSkill",
+          "trigger": "PackageMetadata"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "AgentSkill",
+          "trigger": "AgentSkillInstaller"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "PublicDocs",
+          "trigger": "AgentSkill"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ArchitectureSpec",
+          "trigger": "LanguageFrontend"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ArchitectureSpec",
+          "trigger": "RuntimeGate"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ArchitectureSpec",
+          "trigger": "SmtBackend"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ArchitectureSpec",
+          "trigger": "Emitters"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "CompiledArchitecture",
+          "trigger": "ArchitectureSpec"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "AgentContext",
+          "trigger": "ArchitectureSpec"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "SkillManifest",
+          "trigger": "ArchitectureSpec"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "PublicDocs",
+          "trigger": "ArchitectureSpec"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "AgentSkill",
+          "trigger": "ArchitectureSpec"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "PublicDocs",
+          "trigger": "SemanticQueries"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "AgentSkill",
+          "trigger": "SemanticQueries"
+        }
+      ]
+    }
+  ],
+  "contracts": [],
+  "workflowPolicies": [
+    {
+      "name": "ReleaseSafety",
+      "rules": [
+        {
+          "kind": "ActionRule",
+          "effect": "allow",
+          "action": "publish",
+          "workflow": "ReleaseWorkflow",
+          "target": "npm_registry",
+          "when": {
+            "kind": "tag",
+            "value": "v*.*.*"
+          }
+        },
+        {
+          "kind": "ActionRule",
+          "effect": "allow",
+          "action": "release",
+          "workflow": "ReleaseWorkflow",
+          "target": "github_releases",
+          "when": {
+            "kind": "tag",
+            "value": "v*.*.*"
+          }
+        },
+        {
+          "kind": "ActionRule",
+          "effect": "allow",
+          "action": "deploy",
+          "workflow": "DocsWorkflow",
+          "target": "github_pages",
+          "when": {
+            "kind": "branch",
+            "value": "master"
+          }
+        },
+        {
+          "kind": "ActionRule",
+          "effect": "deny",
+          "action": "publish",
+          "workflow": "*",
+          "target": "npm_registry",
+          "when": {
+            "kind": "pull_request"
+          }
+        },
+        {
+          "kind": "ActionRule",
+          "effect": "deny",
+          "action": "release",
+          "workflow": "*",
+          "target": "github_releases",
+          "when": {
+            "kind": "pull_request"
+          }
+        },
+        {
+          "kind": "ActionRule",
+          "effect": "deny",
+          "action": "deploy",
+          "workflow": "*",
+          "target": "github_pages",
+          "when": {
+            "kind": "pull_request"
+          }
+        },
+        {
+          "kind": "BeforeRule",
+          "workflow": "ReleaseWorkflow",
+          "before": "npm run typecheck",
+          "after": "npm publish"
+        },
+        {
+          "kind": "BeforeRule",
+          "workflow": "ReleaseWorkflow",
+          "before": "npm run build",
+          "after": "npm publish"
+        },
+        {
+          "kind": "BeforeRule",
+          "workflow": "ReleaseWorkflow",
+          "before": "npm test",
+          "after": "npm publish"
+        },
+        {
+          "kind": "BeforeRule",
+          "workflow": "ReleaseWorkflow",
+          "before": "npm pack --dry-run",
+          "after": "npm publish"
+        },
+        {
+          "kind": "BeforeRule",
+          "workflow": "ReleaseWorkflow",
+          "before": "npm run docs:build",
+          "after": "npm publish"
+        },
+        {
+          "kind": "PermissionRule",
+          "effect": "deny",
+          "workflow": "*",
+          "permission": "contents",
+          "access": "write",
+          "when": {
+            "kind": "pull_request"
+          }
+        }
+      ]
+    }
+  ],
+  "stateMachines": [],
+  "permissions": [],
+  "enforcement": [
+    {
+      "declaration": "invariant deny flow",
+      "level": "formal_z3",
+      "mechanism": "Flow facts extracted from code are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant deny dataflow",
+      "level": "formal_z3",
+      "mechanism": "Dataflow facts inferred from handled data and extracted reachability are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant deny reach",
+      "level": "formal_z3",
+      "mechanism": "Transitive flow reachability facts extracted from code are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant require flow",
+      "level": "formal_z3",
+      "mechanism": "Definite extracted paths that bypass the required intermediate endpoint are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant require dataflow",
+      "level": "formal_z3",
+      "mechanism": "Definite data paths that bypass the required intermediate endpoint are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant require auth",
+      "level": "formal_z3",
+      "mechanism": "Reviewed unauthenticated-flow counterexample facts are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant require encryption",
+      "level": "formal_z3",
+      "mechanism": "Reviewed unencrypted-flow counterexample facts are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant require dependency",
+      "level": "formal_z3",
+      "mechanism": "Reviewed dependency facts without the required interface are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "invariant require operation",
+      "level": "formal_z3",
+      "mechanism": "Reviewed operation facts are asserted against required component placement constraints."
+    },
+    {
+      "declaration": "data_policy",
+      "level": "formal_z3",
+      "mechanism": "Classified and jurisdictional data reachability facts are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "trust_policy",
+      "level": "formal_z3",
+      "mechanism": "Trust boundary facts are checked against extracted reachability, data classification, and declared auth metadata."
+    },
+    {
+      "declaration": "permission",
+      "level": "formal_z3",
+      "mechanism": "Extracted protected operations are checked for matching role evidence where extractors can prove authorization facts."
+    },
+    {
+      "declaration": "change_policy",
+      "level": "formal_z3",
+      "mechanism": "Touched-component facts are asserted against SMT-LIB implication rules."
+    },
+    {
+      "declaration": "di_policy",
+      "level": "formal_z3",
+      "mechanism": "Constructor-injection, lifetime, and service-locator facts are asserted against SMT-LIB constraints."
+    },
+    {
+      "declaration": "contract",
+      "level": "deterministic_policy",
+      "mechanism": "Route extractors compare implemented and consumed endpoints against declared contracts."
+    },
+    {
+      "declaration": "workflow_policy",
+      "level": "deterministic_policy",
+      "mechanism": "GitHub Actions facts are checked for publish/deploy/release, permissions, and step order."
+    },
+    {
+      "declaration": "machine",
+      "level": "formal_z3",
+      "mechanism": "Extracted transition facts are asserted against declared state-machine transition rules."
+    },
+    {
+      "declaration": "value_policy",
+      "level": "formal_z3",
+      "mechanism": "Reviewed scalar and collection value facts are asserted against value policy constraints."
+    },
+    {
+      "declaration": "operation_policy",
+      "level": "formal_z3",
+      "mechanism": "Reviewed operation before/after state facts are asserted against pre/postcondition constraints."
+    },
+    {
+      "declaration": "event_policy",
+      "level": "formal_z3",
+      "mechanism": "Reviewed event facts are checked against scoped event precedence constraints."
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+id: ConsentExampleConsentTransitions
+owner: examples
+version: 1
+confidence: definite
+match:
+  subject: ConsentExampleConsentModule
+  kind: assignment
+  property: consent
+  valueEnum: ConsentStatus
+emit:
+  kind: transition
+  data: ConsentExampleUserSession
+  field: consent
+  from: "$previousMember"
+  to: "$valueMember"

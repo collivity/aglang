@@ -19,6 +19,9 @@ aglang declarations have explicit enforcement levels:
 | `change_policy` | `formal_z3` | Touched-component facts are checked against SMT-LIB implication rules in Z3. |
 | `di_policy` | `formal_z3` | Definite constructor-injection, lifetime, and service-locator facts are checked in Z3. |
 | `machine` | `formal_z3` | Extracted transition facts are checked against declared state-machine transitions. |
+| `value_policy` | `formal_z3` | Reviewed scalar and collection value facts are checked against required value predicates. |
+| `operation_policy` | `formal_z3` | Reviewed before/after operation facts are checked against preconditions and postconditions. |
+| `event_policy` | `formal_z3` | Reviewed event facts are checked against scoped temporal precedence rules. |
 | `contract` | `deterministic_policy` | Route facts are compared against declared implements/consumes contracts. |
 | `workflow_policy` | `deterministic_policy` | GitHub Actions facts are checked for release, deploy, publish, permission, and step-order rules. |
 | `permission` | `formal_z3` | Authorization intent is emitted and can be enforced when extractors produce definite operation and role-check evidence. |
@@ -164,6 +167,77 @@ emit:
   operation: serialization
   component: "$subject"
 ```
+
+## Rich Runtime Policies
+
+`value_policy`, `operation_policy`, and `event_policy` cover evidence-backed value invariants, pre/postconditions, and temporal protocols. They block only when deterministic extractors or reviewed `.agq.yml` files emit definite facts.
+
+```ag
+enum CartPhase { Empty | SingleItem | MultiItem }
+enum OrderStatus { Draft | Submitted }
+
+data Cart {
+  phase: CartPhase
+  items: List<String>
+}
+
+data Order {
+  status: OrderStatus
+  total: Money
+}
+
+data UserSession {
+  gdprAccepted: Bool
+}
+
+value_policy CartShape {
+  require Cart.items.length == 1 when Cart.phase == SingleItem
+  require Order.total >= 0
+  require UserSession.gdprAccepted == true
+}
+
+operation_policy SubmitOrderRules {
+  require before submitOrder Cart.phase == SingleItem
+  ensure after submitOrder Order.status == Submitted
+}
+
+event_policy ConsentProtocol {
+  require event AcceptConsent preceded_by ShowConsent by UserSession
+}
+```
+
+Supported value operators are `==`, `!=`, `>`, `<`, `>=`, and `<=`. Numeric comparisons require numeric fields. Enum comparisons are checked against declared enum values.
+
+Reviewed queries can emit the facts these policies consume:
+
+```yaml
+emit:
+  kind: value
+  subject: Cart
+  path: items.length
+  relation: "=="
+  value: "$actualLength"
+```
+
+```yaml
+emit:
+  kind: operation_event
+  operation: submitOrder
+  phase: before
+  subject: Cart
+  path: phase
+  relation: "=="
+  value: "$phase"
+```
+
+```yaml
+emit:
+  kind: event
+  event: "$eventName"
+  scope: UserSession
+```
+
+Missing value, operation, or event evidence is non-blocking. For conditional value rules, the `when` condition must also be backed by a definite value fact before a contradictory requirement blocks.
 
 ## Data Metadata And Policies
 
@@ -332,7 +406,58 @@ The enforcement path is:
 4. `aglc check` asserts definite transition facts into Z3 and reports `state_machine_violation` when a transition contradicts the machine.
 5. `aglc explain --arch architecture.o --project . --violation <id> --json` re-runs the selected scope and returns the repair-loop explanation for the stable violation id.
 
-Transition query files are auditable source artifacts. LLMs may help draft them when requested, but `aglc check` does not call an LLM. Extracted transitions without a resolved `from` state are warnings only and are not asserted into Z3.
+Transition query files are auditable source artifacts. LLMs may help draft them when requested, but `aglc check` does not call an LLM.
+
+When a transition fact has no resolved `from` state (unguarded assignment), aglang treats it as an unknown source:
+
+- **Deny rules** with `from: *` block the target state for any unguarded write.
+- **Allow-only machines** block unguarded writes unless an `allow transition * -> <target>` rule exists.
+
+This is how consent flows catch `session.consent = Accepted` without a prior `Presented` guard.
+
+### Consent-first UX
+
+Model consent as an enum field, not as a screen route graph (unless you add project-specific navigation `.agq.yml` later):
+
+```ag
+enum ConsentStatus { Unknown | Presented | Accepted | Rejected }
+
+data UserSession {
+  consent: ConsentStatus
+}
+
+machine ConsentLifecycle on UserSession.consent {
+  allow transition Unknown -> Presented
+  allow transition Presented -> Accepted
+  deny transition Unknown -> Accepted
+}
+```
+
+Pair with `.aglang/extractors/consent-lifecycle.agq.yml` that matches `assignment` graph facts on `consent` and emits `transition` facts. See `examples/consent-and-cart-protocol/`.
+
+### Shared mutable protocol (cart phase)
+
+Prefer a protocol enum over raw collection length:
+
+```ag
+enum CartPhase { Empty | SingleItem | MultiItem }
+
+data SharedCart {
+  phase: CartPhase
+}
+
+machine CartProtocol on SharedCart.phase {
+  allow transition Empty -> SingleItem
+  allow transition SingleItem -> MultiItem
+  deny transition Empty -> MultiItem
+}
+```
+
+Use `.agq.yml` to emit transitions from `phase` assignments. This catches workflows that skip `SingleItem` even when they share one array in memory.
+
+### Compliance via imports
+
+`require flow Checkout -> ApiClient via Compliance` works with component import facts: checkout must import the compliance module before reaching the API client component. UI navigation graphs still need custom `.agq.yml` `flow` emit rules per framework.
 
 A blocking JSON verdict includes the machine name, transition edge, source file, evidence, query id/version/file, graph fact id when available, stable violation id, and conflicting Z3 assertions.
 

@@ -104,6 +104,9 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
                   'di_violation',
                   'permission_violation',
                   'state_machine_violation',
+                  'value_policy_violation',
+                  'operation_policy_violation',
+                  'event_policy_violation',
                 ],
               },
               invariant: { type: 'string', description: 'Name of the violated invariant' },
@@ -276,8 +279,8 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
     },
     advisory_note:
       'Enforcement is declaration-specific. Flow deny invariants, state machines, and change_policy rules are Z3-backed. ' +
-      'Reachability, require-flow paths, require-operation placement, propagated dataflow, trust boundary, DI, contract, and workflow policies are enforced when extractors or reviewed queries produce definite evidence. ' +
-      'Auth, encryption, dependency, and operation facts must come from deterministic extractors or reviewed .agq.yml files, not LLM calls during check. Ask before changing .ag or .agq.yml files to satisfy a require violation.',
+      'Reachability, require-flow paths, require-operation placement, propagated dataflow, trust boundary, DI, contract, workflow, value, operation, and event policies are enforced when extractors or reviewed queries produce definite evidence. ' +
+      'Auth, encryption, dependency, operation, value, operation_event, and event facts must come from deterministic extractors or reviewed .agq.yml files, not LLM calls during check. Ask before changing .ag or .agq.yml files to satisfy a require or rich policy violation.',
   };
 }
 

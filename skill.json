@@ -111,7 +111,10 @@
                 "trust_policy_violation",
                 "di_violation",
                 "permission_violation",
-                "state_machine_violation"
+                "state_machine_violation",
+                "value_policy_violation",
+                "operation_policy_violation",
+                "event_policy_violation"
               ]
             },
             "invariant": {
@@ -606,6 +609,21 @@
       "declaration": "machine",
       "level": "formal_z3",
       "mechanism": "Extracted transition facts are asserted against declared state-machine transition rules."
+    },
+    {
+      "declaration": "value_policy",
+      "level": "formal_z3",
+      "mechanism": "Reviewed scalar and collection value facts are asserted against value policy constraints."
+    },
+    {
+      "declaration": "operation_policy",
+      "level": "formal_z3",
+      "mechanism": "Reviewed operation before/after state facts are asserted against pre/postcondition constraints."
+    },
+    {
+      "declaration": "event_policy",
+      "level": "formal_z3",
+      "mechanism": "Reviewed event facts are checked against scoped event precedence constraints."
     }
   ],
   "confidence_levels": {
@@ -613,5 +631,5 @@
     "probable": "WARNING — Pattern is likely present (e.g. new-instantiation) but not certain. Non-blocking.",
     "possible": "INFO — Pattern may be present. Informational only. Never blocks."
   },
-  "advisory_note": "Enforcement is declaration-specific. Flow deny invariants, state machines, and change_policy rules are Z3-backed. Reachability, require-flow paths, require-operation placement, propagated dataflow, trust boundary, DI, contract, and workflow policies are enforced when extractors or reviewed queries produce definite evidence. Auth, encryption, dependency, and operation facts must come from deterministic extractors or reviewed .agq.yml files, not LLM calls during check. Ask before changing .ag or .agq.yml files to satisfy a require violation."
+  "advisory_note": "Enforcement is declaration-specific. Flow deny invariants, state machines, and change_policy rules are Z3-backed. Reachability, require-flow paths, require-operation placement, propagated dataflow, trust boundary, DI, contract, workflow, value, operation, and event policies are enforced when extractors or reviewed queries produce definite evidence. Auth, encryption, dependency, operation, value, operation_event, and event facts must come from deterministic extractors or reviewed .agq.yml files, not LLM calls during check. Ask before changing .ag or .agq.yml files to satisfy a require or rich policy violation."
 }

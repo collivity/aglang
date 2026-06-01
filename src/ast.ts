@@ -124,6 +124,53 @@ export interface StateMachineDecl {
   transitions: TransitionRule[];
 }
 
+export type ValueRelation = '==' | '!=' | '>=' | '<=' | '>' | '<';
+export type PolicyValue = string | number | boolean | null;
+
+export interface ValueExpression {
+  subject: string;
+  path: string[];
+  relation: ValueRelation;
+  value: PolicyValue;
+}
+
+export interface ValuePolicyRule {
+  kind: 'RequireValue';
+  requirement: ValueExpression;
+  when?: ValueExpression;
+}
+
+export interface ValuePolicyDecl {
+  kind: 'ValuePolicyDecl';
+  name: string;
+  rules: ValuePolicyRule[];
+}
+
+export interface OperationPolicyRule {
+  kind: 'RequireBefore' | 'EnsureAfter';
+  operation: string;
+  requirement: ValueExpression;
+}
+
+export interface OperationPolicyDecl {
+  kind: 'OperationPolicyDecl';
+  name: string;
+  rules: OperationPolicyRule[];
+}
+
+export interface EventPolicyRule {
+  kind: 'RequirePrecededBy';
+  event: string;
+  precededBy: string;
+  scope: string;
+}
+
+export interface EventPolicyDecl {
+  kind: 'EventPolicyDecl';
+  name: string;
+  rules: EventPolicyRule[];
+}
+
 export interface PermissionRule {
   kind: 'allow' | 'deny';
   roleEnum: string;     // EnumDecl name, e.g. "UserRole", or '*'
@@ -257,6 +304,9 @@ export type Declaration =
   | ServiceDecl
   | InvariantDecl
   | StateMachineDecl
+  | ValuePolicyDecl
+  | OperationPolicyDecl
+  | EventPolicyDecl
   | PermissionDecl
   | ContractDecl
   | PluginDecl

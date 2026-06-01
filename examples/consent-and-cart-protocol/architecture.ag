@@ -1,0 +1,95 @@
+// Consent-first UX and shared-cart protocol — example for .ag + .agq.yml workflows.
+
+node web_client : edge_desktop {
+  trust: untrusted
+}
+
+node api_backend : server {
+  trust: trusted
+  auth: jwt
+}
+
+enum ConsentStatus {
+  Unknown | Presented | Accepted | Rejected
+}
+
+data UserSession {
+  consent: ConsentStatus
+  gdprAccepted: Bool
+}
+
+enum CartPhase {
+  Empty | SingleItem | MultiItem
+}
+
+data SharedCart {
+  phase: CartPhase
+  items: List<String>
+}
+
+enum OrderStatus {
+  Draft | Submitted
+}
+
+data Order {
+  status: OrderStatus
+  total: Money
+}
+
+component Compliance {
+  runs_on: web_client
+  paths: "src/compliance.ts"
+}
+
+component Checkout {
+  runs_on: web_client
+  paths: "src/checkout.ts"
+}
+
+component ApiClient {
+  runs_on: api_backend
+  paths: "src/api.ts"
+}
+
+component ConsentModule {
+  runs_on: web_client
+  paths: "src/{consent,violations/consent-skip-banner}.ts"
+}
+
+component CartModule {
+  runs_on: web_client
+  paths: "src/{cart,violations/cart-skip-single}.ts"
+}
+
+machine ConsentLifecycle on UserSession.consent {
+  allow transition Unknown -> Presented
+  allow transition Presented -> Accepted
+  allow transition Presented -> Rejected
+  deny transition Unknown -> Accepted
+  deny transition Unknown -> Rejected
+}
+
+machine CartProtocol on SharedCart.phase {
+  allow transition Empty -> SingleItem
+  allow transition SingleItem -> MultiItem
+  deny transition Empty -> MultiItem
+}
+
+invariant ConsentBeforeApi {
+  require flow Checkout -> ApiClient via Compliance
+}
+
+value_policy CartShape {
+  require SharedCart.items.length == 1 when SharedCart.phase == SingleItem
+  require Order.total >= 0
+  require UserSession.gdprAccepted == true
+}
+
+operation_policy SubmitOrderRules {
+  require before submitOrder SharedCart.phase == SingleItem
+  ensure after submitOrder Order.status == Submitted
+}
+
+event_policy ConsentProtocol {
+  require event AcceptConsent preceded_by ShowConsent by UserSession
+}

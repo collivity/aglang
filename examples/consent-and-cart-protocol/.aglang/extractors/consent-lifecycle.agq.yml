@@ -1,0 +1,14 @@
+id: ConsentLifecycleTransitions
+owner: compliance
+version: 1
+confidence: definite
+match:
+  kind: assignment
+  property: consent
+  valueEnum: ConsentStatus
+emit:
+  kind: transition
+  data: UserSession
+  field: consent
+  from: "$previousMember"
+  to: "$valueMember"

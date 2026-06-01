@@ -27,6 +27,9 @@
 | `contract` | `deterministic_policy` | Route extractors compare implemented and consumed endpoints against declared contracts. |
 | `workflow_policy` | `deterministic_policy` | GitHub Actions facts are checked for publish/deploy/release, permissions, and step order. |
 | `machine` | `formal_z3` | Extracted transition facts are asserted against declared state-machine transition rules. |
+| `value_policy` | `formal_z3` | Reviewed scalar and collection value facts are asserted against value policy constraints. |
+| `operation_policy` | `formal_z3` | Reviewed operation before/after state facts are asserted against pre/postcondition constraints. |
+| `event_policy` | `formal_z3` | Reviewed event facts are checked against scoped event precedence constraints. |
 
 ## Infrastructure Nodes
 
@@ -47,37 +50,105 @@ These logical components map your code files to the architecture nodes above.
 - **Rules affecting this component:**
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `CliCompiler`
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `SmtBackend` must NOT directly access `CliCompiler`
-  - [CompilerEntrypointBoundary] **FORBIDDEN**: `RuntimeGate` must NOT directly access `CliCompiler`
+  - [CompilerEntrypointBoundary] **FORBIDDEN**: `RuntimeCore` must NOT directly access `CliCompiler`
+  - [CompilerEntrypointBoundary] **FORBIDDEN**: `PolicyGates` must NOT directly access `CliCompiler`
+  - [CompilerEntrypointBoundary] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `CliCompiler`
+  - [CompilerEntrypointBoundary] **FORBIDDEN**: `StateMachineRuntime` must NOT directly access `CliCompiler`
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `CliCompiler`
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `GraphProjection` must NOT directly access `CliCompiler`
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `Emitters` must NOT directly access `CliCompiler`
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `SpecGenerator` must NOT directly access `CliCompiler`
   - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `CliCompiler`
+  - [SemanticQueryEngineIsolation] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `CliCompiler`
 
 ### `LanguageFrontend`
 - **File glob**: `src/{ast,checker,importer,import-openapi,import-tf,lexer,parser}.ts`
 - **Rules affecting this component:**
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `CliCompiler`
-  - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `RuntimeGate`
+  - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `RuntimeCore`
+  - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `PolicyGates`
+  - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `SemanticQueryEngine`
+  - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `StateMachineRuntime`
   - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `GraphProjection`
   - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `Emitters`
+  - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `UiWorkbench`
+  - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `LanguageFrontend`
 
 ### `SmtBackend`
 - **File glob**: `src/smt/**/*.ts`
 - **Rules affecting this component:**
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `SmtBackend` must NOT directly access `CliCompiler`
-  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `RuntimeGate`
+  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `RuntimeCore`
+  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `PolicyGates`
+  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `SemanticQueryEngine`
+  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `StateMachineRuntime`
   - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `ExtractorAnalyzers`
   - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `GraphProjection`
+  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `UiWorkbench`
+  - [SemanticQueryEngineIsolation] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `SmtBackend`
+  - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `SmtBackend`
   - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `SmtBackend`
 
-### `RuntimeGate`
-- **File glob**: `src/runtime/{contract-gate,delta-assert,diff-parser,diagnostic,extraction-cache,gate}.ts`
+### `RuntimeCore`
+- **File glob**: `src/runtime/{delta-assert,diff-parser,diagnostic,extraction-cache,gate}.ts`
 - **Rules affecting this component:**
-  - [CompilerEntrypointBoundary] **FORBIDDEN**: `RuntimeGate` must NOT directly access `CliCompiler`
-  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `RuntimeGate`
-  - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `RuntimeGate`
-  - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `RuntimeGate`
+  - [CompilerEntrypointBoundary] **FORBIDDEN**: `RuntimeCore` must NOT directly access `CliCompiler`
+  - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `RuntimeCore`
+  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `RuntimeCore`
+  - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `RuntimeCore`
+  - [SemanticQueryEngineIsolation] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `RuntimeCore`
+  - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `RuntimeCore`
+
+### `PolicyGates`
+- **File glob**: `src/runtime/{contract-gate,workflow-gate,change-gate}.ts`
+- **Rules affecting this component:**
+  - [CompilerEntrypointBoundary] **FORBIDDEN**: `PolicyGates` must NOT directly access `CliCompiler`
+  - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `PolicyGates`
+  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `PolicyGates`
+  - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `PolicyGates`
+  - [SemanticQueryEngineIsolation] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `PolicyGates`
+  - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `PolicyGates`
+
+### `SemanticQueryEngine`
+- **File glob**: `src/runtime/extraction-query.ts`
+- **Rules affecting this component:**
+  - [CompilerEntrypointBoundary] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `CliCompiler`
+  - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `SemanticQueryEngine`
+  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `SemanticQueryEngine`
+  - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `SemanticQueryEngine`
+  - [SemanticQueryEngineIsolation] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `CliCompiler`
+  - [SemanticQueryEngineIsolation] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `SmtBackend`
+  - [SemanticQueryEngineIsolation] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `RuntimeCore`
+  - [SemanticQueryEngineIsolation] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `PolicyGates`
+  - [SemanticQueryEngineIsolation] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `GraphProjection`
+  - [SemanticQueryEngineIsolation] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `UiWorkbench`
+  - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `SemanticQueryEngine`
+  - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `SemanticQueryEngine`
+
+### `StateMachineRuntime`
+- **File glob**: `src/runtime/state-machine.ts`
+- **Rules affecting this component:**
+  - [CompilerEntrypointBoundary] **FORBIDDEN**: `StateMachineRuntime` must NOT directly access `CliCompiler`
+  - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `StateMachineRuntime`
+  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `StateMachineRuntime`
+  - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `StateMachineRuntime`
+  - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `StateMachineRuntime`
+  - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `StateMachineRuntime`
+
+### `UiWorkbench`
+- **File glob**: `src/runtime/ui-server.ts`
+- **Rules affecting this component:**
+  - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `UiWorkbench`
+  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `UiWorkbench`
+  - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `UiWorkbench`
+  - [SemanticQueryEngineIsolation] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `UiWorkbench`
+  - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `LanguageFrontend`
+  - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `SmtBackend`
+  - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `ExtractorAnalyzers`
+  - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `GraphProjection`
+  - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `StateMachineRuntime`
+  - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `SemanticQueryEngine`
+  - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `UiWorkbench`
 
 ### `ExtractorAnalyzers`
 - **File glob**: `src/analyzers/**/*.ts`
@@ -86,14 +157,22 @@ These logical components map your code files to the architecture nodes above.
   - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `ExtractorAnalyzers`
   - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `CliCompiler`
   - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `Emitters`
+  - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `RuntimeCore`
+  - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `PolicyGates`
+  - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `SemanticQueryEngine`
+  - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `StateMachineRuntime`
+  - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `UiWorkbench`
+  - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `ExtractorAnalyzers`
   - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `ExtractorAnalyzers`
 
 ### `GraphProjection`
 - **File glob**: `src/runtime/graph-projection.ts`
 - **Rules affecting this component:**
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `GraphProjection` must NOT directly access `CliCompiler`
-  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `GraphProjection`
   - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `GraphProjection`
+  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `GraphProjection`
+  - [SemanticQueryEngineIsolation] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `GraphProjection`
+  - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `GraphProjection`
   - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `GraphProjection`
 
 ### `Emitters`
@@ -108,8 +187,11 @@ These logical components map your code files to the architecture nodes above.
 - **Rules affecting this component:**
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `SpecGenerator` must NOT directly access `CliCompiler`
 
-### `DocsSite`
-- **File glob**: `{docs,site,scripts}/**/*.{md,ts,js,mjs}`
+### `DocsSource`
+- **File glob**: `{docs,scripts}/**/*.{md,ts,js,mjs}`
+
+### `GeneratedDocsSite`
+- **File glob**: `site/**/*`
 
 ### `PackageMetadata`
 - **File glob**: `{package.json,package-lock.json}`
@@ -129,6 +211,42 @@ These logical components map your code files to the architecture nodes above.
 ### `PublicDocs`
 - **File glob**: `docs/**/*.md`
 
+### `ConsentExampleConsentModule`
+- **File glob**: `examples/consent-and-cart-protocol/src/{consent,compliance}.ts`
+
+### `ConsentExampleCartModule`
+- **File glob**: `examples/consent-and-cart-protocol/src/cart.ts`
+
+### `ConsentExampleCheckout`
+- **File glob**: `examples/consent-and-cart-protocol/src/{checkout,checkout-good,api}.ts`
+
+### `ConsentExampleViolationFixtures`
+- **File glob**: `examples/consent-and-cart-protocol/src/violations/**/*.ts`
+
+### `ConsentExampleDocsAndSpec`
+- **File glob**: `examples/consent-and-cart-protocol/{README.md,architecture.ag,.aglang/extractors/**/*.agq.yml}`
+
+### `StripeExampleAndroidApp`
+- **File glob**: `examples/stripe-order-workflow/android/**/*.kt`
+
+### `StripeExampleBackendApi`
+- **File glob**: `examples/stripe-order-workflow/backend/api/**/*.ts`
+
+### `StripeExampleWebhook`
+- **File glob**: `examples/stripe-order-workflow/backend/webhooks/**/*.ts`
+
+### `StripeExampleFulfillmentWorker`
+- **File glob**: `examples/stripe-order-workflow/workers/**/*.ts`
+
+### `StripeExampleDocsAndSpec`
+- **File glob**: `examples/stripe-order-workflow/{README.md,architecture.ag,.aglang/extractors/**/*.agq.yml}`
+
+### `ExampleViolationFixtures`
+- **File glob**: `examples/**/violations/**/*`
+
+### `ExampleSpecs`
+- **File glob**: `examples/**/*.ag`
+
 ### `ReleaseWorkflow`
 - **File glob**: `.github/workflows/release.yml`
 
@@ -138,10 +256,14 @@ These logical components map your code files to the architecture nodes above.
 ### `VscodeExtension`
 - **File glob**: `editors/vscode-aglang/src/**/*.ts`
 - **Rules affecting this component:**
-  - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `RuntimeGate`
+  - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `RuntimeCore`
+  - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `PolicyGates`
+  - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `SemanticQueryEngine`
+  - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `StateMachineRuntime`
   - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `ExtractorAnalyzers`
   - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `SmtBackend`
   - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `GraphProjection`
+  - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `UiWorkbench`
 
 ### `Tests`
 - **File glob**: `tests/**/*.ts`
@@ -168,31 +290,201 @@ These are universal laws — they apply to ALL code, not just tests.
 ### `CompilerEntrypointBoundary`
 - **FORBIDDEN**: `LanguageFrontend` must NOT directly access `CliCompiler`
 - **FORBIDDEN**: `SmtBackend` must NOT directly access `CliCompiler`
-- **FORBIDDEN**: `RuntimeGate` must NOT directly access `CliCompiler`
+- **FORBIDDEN**: `RuntimeCore` must NOT directly access `CliCompiler`
+- **FORBIDDEN**: `PolicyGates` must NOT directly access `CliCompiler`
+- **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `CliCompiler`
+- **FORBIDDEN**: `StateMachineRuntime` must NOT directly access `CliCompiler`
 - **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `CliCompiler`
 - **FORBIDDEN**: `GraphProjection` must NOT directly access `CliCompiler`
 - **FORBIDDEN**: `Emitters` must NOT directly access `CliCompiler`
 - **FORBIDDEN**: `SpecGenerator` must NOT directly access `CliCompiler`
 
-### `SmtBackendIsolation`
-- **FORBIDDEN**: `SmtBackend` must NOT directly access `RuntimeGate`
-- **FORBIDDEN**: `SmtBackend` must NOT directly access `ExtractorAnalyzers`
-- **FORBIDDEN**: `SmtBackend` must NOT directly access `GraphProjection`
-
 ### `LanguageFrontendPurity`
-- **FORBIDDEN**: `LanguageFrontend` must NOT directly access `RuntimeGate`
+- **FORBIDDEN**: `LanguageFrontend` must NOT directly access `RuntimeCore`
+- **FORBIDDEN**: `LanguageFrontend` must NOT directly access `PolicyGates`
+- **FORBIDDEN**: `LanguageFrontend` must NOT directly access `SemanticQueryEngine`
+- **FORBIDDEN**: `LanguageFrontend` must NOT directly access `StateMachineRuntime`
 - **FORBIDDEN**: `LanguageFrontend` must NOT directly access `GraphProjection`
 - **FORBIDDEN**: `LanguageFrontend` must NOT directly access `Emitters`
+- **FORBIDDEN**: `LanguageFrontend` must NOT directly access `UiWorkbench`
+
+### `SmtBackendIsolation`
+- **FORBIDDEN**: `SmtBackend` must NOT directly access `RuntimeCore`
+- **FORBIDDEN**: `SmtBackend` must NOT directly access `PolicyGates`
+- **FORBIDDEN**: `SmtBackend` must NOT directly access `SemanticQueryEngine`
+- **FORBIDDEN**: `SmtBackend` must NOT directly access `StateMachineRuntime`
+- **FORBIDDEN**: `SmtBackend` must NOT directly access `ExtractorAnalyzers`
+- **FORBIDDEN**: `SmtBackend` must NOT directly access `GraphProjection`
+- **FORBIDDEN**: `SmtBackend` must NOT directly access `UiWorkbench`
 
 ### `ExtractorAnalyzerBoundary`
 - **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `CliCompiler`
 - **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `Emitters`
+- **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `RuntimeCore`
+- **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `PolicyGates`
+- **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `SemanticQueryEngine`
+- **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `StateMachineRuntime`
+- **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `UiWorkbench`
+
+### `SemanticQueryEngineIsolation`
+- **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `CliCompiler`
+- **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `SmtBackend`
+- **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `RuntimeCore`
+- **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `PolicyGates`
+- **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `GraphProjection`
+- **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `UiWorkbench`
+
+### `UiWorkbenchBoundary`
+- **FORBIDDEN**: `UiWorkbench` must NOT directly access `LanguageFrontend`
+- **FORBIDDEN**: `UiWorkbench` must NOT directly access `SmtBackend`
+- **FORBIDDEN**: `UiWorkbench` must NOT directly access `ExtractorAnalyzers`
+- **FORBIDDEN**: `UiWorkbench` must NOT directly access `GraphProjection`
+- **FORBIDDEN**: `UiWorkbench` must NOT directly access `StateMachineRuntime`
+- **FORBIDDEN**: `UiWorkbench` must NOT directly access `SemanticQueryEngine`
 
 ### `VscodeApiBoundary`
-- **FORBIDDEN**: `VscodeExtension` must NOT directly access `RuntimeGate`
+- **FORBIDDEN**: `VscodeExtension` must NOT directly access `RuntimeCore`
+- **FORBIDDEN**: `VscodeExtension` must NOT directly access `PolicyGates`
+- **FORBIDDEN**: `VscodeExtension` must NOT directly access `SemanticQueryEngine`
+- **FORBIDDEN**: `VscodeExtension` must NOT directly access `StateMachineRuntime`
 - **FORBIDDEN**: `VscodeExtension` must NOT directly access `ExtractorAnalyzers`
 - **FORBIDDEN**: `VscodeExtension` must NOT directly access `SmtBackend`
 - **FORBIDDEN**: `VscodeExtension` must NOT directly access `GraphProjection`
+- **FORBIDDEN**: `VscodeExtension` must NOT directly access `UiWorkbench`
+
+## Domain Enums
+
+Use these exact values in your code. The solver knows about them.
+
+### `ConsentStatus`
+Values: `Unknown` | `Presented` | `Accepted` | `Rejected`
+
+### `CartPhase`
+Values: `Empty` | `SingleItem` | `MultiItem`
+
+### `ConsentExampleOrderStatus`
+Values: `Draft` | `Submitted`
+
+### `OrderStatus`
+Values: `Created` | `PendingPayment` | `Paid` | `FulfillmentQueued` | `Fulfilled` | `Cancelled` | `Refunded`
+
+## Data Contracts
+
+These are the canonical data shapes for this system.
+
+### `AglcUiConfig`
+
+| Field | Type |
+|-------|------|
+| `projectRoot` | `String` |
+| `artifact` | `String` |
+
+### `AglcUiRun`
+
+| Field | Type |
+|-------|------|
+| `id` | `String` |
+
+### `AglcUiFile`
+
+| Field | Type |
+|-------|------|
+| `path` | `String` |
+| `content` | `String` |
+
+### `AglcUiRunCreated`
+
+| Field | Type |
+|-------|------|
+| `id` | `String` |
+
+### `ConsentExampleUserSession`
+
+| Field | Type |
+|-------|------|
+| `consent` | `ConsentStatus` |
+| `gdprAccepted` | `Bool` |
+
+### `ConsentExampleSharedCart`
+
+| Field | Type |
+|-------|------|
+| `phase` | `CartPhase` |
+| `items` | `List<String>` |
+
+### `ConsentExampleOrder`
+
+| Field | Type |
+|-------|------|
+| `status` | `ConsentExampleOrderStatus` |
+| `total` | `Money` |
+
+### `StripeOrder`
+
+| Field | Type |
+|-------|------|
+| `id` | `UUID` |
+| `status` | `OrderStatus` |
+| `stripe_payment_intent_id` | `Optional<String>` |
+
+## State Machine Rules
+
+> **Enforced when extractor query evidence is available** — transition facts are checked against these rules.
+> Agents: do NOT write code that performs transitions not listed as `allow` here.
+
+### `ConsentExampleConsentLifecycle` — `ConsentExampleUserSession.consent`
+
+**Allowed transitions:**
+- `Unknown` → `Presented`
+- `Presented` → `Accepted`
+- `Presented` → `Rejected`
+
+**Explicitly forbidden transitions:**
+- ~~`Unknown` → `Accepted`~~ ❌
+- ~~`Unknown` → `Rejected`~~ ❌
+
+### `ConsentExampleCartProtocol` — `ConsentExampleSharedCart.phase`
+
+**Allowed transitions:**
+- `Empty` → `SingleItem`
+- `SingleItem` → `MultiItem`
+
+**Explicitly forbidden transitions:**
+- ~~`Empty` → `MultiItem`~~ ❌
+
+### `StripeOrderLifecycle` — `StripeOrder.status`
+
+**Allowed transitions:**
+- `Created` → `PendingPayment`
+- `PendingPayment` → `Paid`
+- `PendingPayment` → `Cancelled`
+- `Paid` → `FulfillmentQueued`
+- `FulfillmentQueued` → `Fulfilled`
+- `Paid` → `Refunded`
+
+**Explicitly forbidden transitions:**
+- ~~`Created` → `Paid`~~ ❌
+- ~~`Created` → `Fulfilled`~~ ❌
+- ~~`PendingPayment` → `Fulfilled`~~ ❌
+- ~~`Cancelled` → `*`~~ ❌
+- ~~`Refunded` → `*`~~ ❌
+
+## API Contracts
+
+> 🔒 **Enforced at commit time** — route additions/renames in `implements` components
+> and undeclared fetch() calls in `consumes` components will block the commit.
+
+### `AglcUiApi`
+
+- **Implemented by**: `UiWorkbench`
+
+| Method | Route | Return Type |
+|--------|-------|-------------|
+| `GET` | `/api/config` | `AglcUiConfig` |
+| `GET` | `/api/runs` | `AglcUiRun[]` |
+| `GET` | `/api/runs/:id` | `AglcUiRun` |
+| `GET` | `/api/files` | `AglcUiFile` |
+| `POST` | `/api/runs` | `AglcUiRunCreated` |
 
 ## Workflow Policies
 
@@ -226,7 +518,10 @@ These are universal laws — they apply to ALL code, not just tests.
 - **REQUIRE TOUCHED** `AgentSkill` when `AgentSkillInstaller` changes
 - **REQUIRE TOUCHED** `PublicDocs` when `AgentSkill` changes
 - **REQUIRE TOUCHED** `ArchitectureSpec` when `LanguageFrontend` changes
-- **REQUIRE TOUCHED** `ArchitectureSpec` when `RuntimeGate` changes
+- **REQUIRE TOUCHED** `ArchitectureSpec` when `RuntimeCore` changes
+- **REQUIRE TOUCHED** `ArchitectureSpec` when `PolicyGates` changes
+- **REQUIRE TOUCHED** `ArchitectureSpec` when `SemanticQueryEngine` changes
+- **REQUIRE TOUCHED** `ArchitectureSpec` when `StateMachineRuntime` changes
 - **REQUIRE TOUCHED** `ArchitectureSpec` when `SmtBackend` changes
 - **REQUIRE TOUCHED** `ArchitectureSpec` when `Emitters` changes
 - **REQUIRE TOUCHED** `CompiledArchitecture` when `ArchitectureSpec` changes

@@ -436,4 +436,19 @@ aglc compile examples/stripe-order-workflow/architecture.ag --out /tmp/aglang-st
 aglc check --arch /tmp/aglang-stripe-order-workflow.o --project examples/stripe-order-workflow --all
 ```
 
+## Consent and cart protocol
+
+`examples/consent-and-cart-protocol/` shows two related patterns:
+
+1. **Consent-first UX** — `ConsentLifecycle` on `UserSession.consent` plus `consent-lifecycle.agq.yml` blocks skipping the consent banner (`acceptWithoutBanner` in `src/violations/consent-skip-banner.ts`).
+2. **Shared cart protocol** — `CartProtocol` on `SharedCart.phase` instead of asserting `items.length === 1` (`jumpToMultiItem` in `src/violations/cart-skip-single.ts`).
+3. **Compliance gate** — `require flow Checkout -> ApiClient via Compliance` uses TypeScript import paths (`checkout.ts` vs `checkout-good.ts`).
+
+```bash
+aglc compile examples/consent-and-cart-protocol/architecture.ag --out /tmp/consent-cart.o
+aglc check --arch /tmp/consent-cart.o --project examples/consent-and-cart-protocol --all --json
+```
+
+See `examples/consent-and-cart-protocol/README.md` for the full file map.
+
 This is the main value of state machines in aglang: a lifecycle rule declared once is enforced against transition evidence from multiple runtimes and languages.

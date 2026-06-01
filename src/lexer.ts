@@ -5,7 +5,7 @@ export type TokenKind =
   | 'LBRACE' | 'RBRACE' | 'LPAREN' | 'RPAREN'
   | 'LBRACKET' | 'RBRACKET'
   | 'COLON' | 'SEMICOLON' | 'COMMA' | 'PIPE' | 'DOT' | 'ARROW'
-  | 'LT' | 'GT' | 'EQ' | 'AT' | 'STAR'
+  | 'LT' | 'GT' | 'EQ' | 'NE' | 'LTE' | 'GTE' | 'AT' | 'STAR'
   | 'EOF';
 
 export interface Token {
@@ -28,6 +28,9 @@ const KEYWORDS = new Set([
   'degrade', 'never', 'eventual', 'always',
   // State machine + permission keywords
   'machine', 'permission', 'transition', 'when',
+  // Value, operation, and event policy support
+  'value_policy', 'operation_policy', 'event_policy', 'ensure', 'after', 'event',
+  'preceded_by', 'by', 'true', 'false', 'null',
   // Contract block
   'contract', 'query', 'mutation', 'subscription', 'rpc', 'publishes', 'subscribes',
   // External extractor plugin declaration
@@ -80,6 +83,19 @@ export function tokenize(src: string): Token[] {
     // Arrow ->
     if (src[i] === '-' && src[i + 1] === '>') {
       tokens.push({ kind: 'ARROW', value: '->', line, col: col() });
+      i += 2; continue;
+    }
+
+    if (src[i] === '!' && src[i + 1] === '=') {
+      tokens.push({ kind: 'NE', value: '!=', line, col: col() });
+      i += 2; continue;
+    }
+    if (src[i] === '>' && src[i + 1] === '=') {
+      tokens.push({ kind: 'GTE', value: '>=', line, col: col() });
+      i += 2; continue;
+    }
+    if (src[i] === '<' && src[i + 1] === '=') {
+      tokens.push({ kind: 'LTE', value: '<=', line, col: col() });
       i += 2; continue;
     }
 

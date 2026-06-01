@@ -1,4 +1,4 @@
-// aglang self-spec — keeps this repository aligned with its own architecture rules.
+// aglang self-spec - keeps this repository aligned with its own architecture rules.
 
 node node_runtime : agent_runtime {
   trust: trusted
@@ -23,6 +23,69 @@ node github_releases : release_host {
   auth: oauth2
 }
 
+contract AglcUiApi {
+  GET "/api/config" -> AglcUiConfig
+  GET "/api/runs" -> AglcUiRun[]
+  GET "/api/runs/:id" -> AglcUiRun
+  GET "/api/files" -> AglcUiFile
+  POST "/api/runs" -> AglcUiRunCreated
+}
+
+data AglcUiConfig {
+  projectRoot: String
+  artifact: String
+}
+
+data AglcUiRun {
+  id: String
+}
+
+data AglcUiFile {
+  path: String
+  content: String
+}
+
+data AglcUiRunCreated {
+  id: String
+}
+
+enum ConsentStatus {
+  Unknown | Presented | Accepted | Rejected
+}
+
+data ConsentExampleUserSession {
+  consent: ConsentStatus
+  gdprAccepted: Bool
+}
+
+enum CartPhase {
+  Empty | SingleItem | MultiItem
+}
+
+data ConsentExampleSharedCart {
+  phase: CartPhase
+  items: List<String>
+}
+
+enum ConsentExampleOrderStatus {
+  Draft | Submitted
+}
+
+data ConsentExampleOrder {
+  status: ConsentExampleOrderStatus
+  total: Money
+}
+
+enum OrderStatus {
+  Created | PendingPayment | Paid | FulfillmentQueued | Fulfilled | Cancelled | Refunded
+}
+
+data StripeOrder {
+  id: UUID
+  status: OrderStatus
+  stripe_payment_intent_id: Optional<String>
+}
+
 component CliCompiler {
   runs_on: node_runtime
   paths: "src/index.ts"
@@ -38,9 +101,30 @@ component SmtBackend {
   paths: "src/smt/**/*.ts"
 }
 
-component RuntimeGate {
+component RuntimeCore {
   runs_on: node_runtime
-  paths: "src/runtime/{contract-gate,delta-assert,diff-parser,diagnostic,extraction-cache,gate}.ts"
+  paths: "src/runtime/{delta-assert,diff-parser,diagnostic,extraction-cache,gate}.ts"
+}
+
+component PolicyGates {
+  runs_on: node_runtime
+  paths: "src/runtime/{contract-gate,workflow-gate,change-gate}.ts"
+}
+
+component SemanticQueryEngine {
+  runs_on: node_runtime
+  paths: "src/runtime/extraction-query.ts"
+}
+
+component StateMachineRuntime {
+  runs_on: node_runtime
+  paths: "src/runtime/state-machine.ts"
+}
+
+component UiWorkbench {
+  runs_on: node_runtime
+  paths: "src/runtime/ui-server.ts"
+  implements: AglcUiApi
 }
 
 component ExtractorAnalyzers {
@@ -63,9 +147,14 @@ component SpecGenerator {
   paths: "src/generate.ts"
 }
 
-component DocsSite {
+component DocsSource {
   runs_on: node_runtime
-  paths: "{docs,site,scripts}/**/*.{md,ts,js,mjs}"
+  paths: "{docs,scripts}/**/*.{md,ts,js,mjs}"
+}
+
+component GeneratedDocsSite {
+  runs_on: node_runtime
+  paths: "site/**/*"
 }
 
 component PackageMetadata {
@@ -96,6 +185,66 @@ component CliReferenceDocs {
 component PublicDocs {
   runs_on: node_runtime
   paths: "docs/**/*.md"
+}
+
+component ConsentExampleConsentModule {
+  runs_on: node_runtime
+  paths: "examples/consent-and-cart-protocol/src/{consent,compliance}.ts"
+}
+
+component ConsentExampleCartModule {
+  runs_on: node_runtime
+  paths: "examples/consent-and-cart-protocol/src/cart.ts"
+}
+
+component ConsentExampleCheckout {
+  runs_on: node_runtime
+  paths: "examples/consent-and-cart-protocol/src/{checkout,checkout-good,api}.ts"
+}
+
+component ConsentExampleViolationFixtures {
+  runs_on: node_runtime
+  paths: "examples/consent-and-cart-protocol/src/violations/**/*.ts"
+}
+
+component ConsentExampleDocsAndSpec {
+  runs_on: node_runtime
+  paths: "examples/consent-and-cart-protocol/{README.md,architecture.ag,.aglang/extractors/**/*.agq.yml}"
+}
+
+component StripeExampleAndroidApp {
+  runs_on: node_runtime
+  paths: "examples/stripe-order-workflow/android/**/*.kt"
+}
+
+component StripeExampleBackendApi {
+  runs_on: node_runtime
+  paths: "examples/stripe-order-workflow/backend/api/**/*.ts"
+}
+
+component StripeExampleWebhook {
+  runs_on: node_runtime
+  paths: "examples/stripe-order-workflow/backend/webhooks/**/*.ts"
+}
+
+component StripeExampleFulfillmentWorker {
+  runs_on: node_runtime
+  paths: "examples/stripe-order-workflow/workers/**/*.ts"
+}
+
+component StripeExampleDocsAndSpec {
+  runs_on: node_runtime
+  paths: "examples/stripe-order-workflow/{README.md,architecture.ag,.aglang/extractors/**/*.agq.yml}"
+}
+
+component ExampleViolationFixtures {
+  runs_on: node_runtime
+  paths: "examples/**/violations/**/*"
+}
+
+component ExampleSpecs {
+  runs_on: node_runtime
+  paths: "examples/**/*.ag"
 }
 
 component ReleaseWorkflow {
@@ -146,35 +295,116 @@ component SemanticQueries {
 invariant CompilerEntrypointBoundary {
   deny flow LanguageFrontend -> CliCompiler
   deny flow SmtBackend -> CliCompiler
-  deny flow RuntimeGate -> CliCompiler
+  deny flow RuntimeCore -> CliCompiler
+  deny flow PolicyGates -> CliCompiler
+  deny flow SemanticQueryEngine -> CliCompiler
+  deny flow StateMachineRuntime -> CliCompiler
   deny flow ExtractorAnalyzers -> CliCompiler
   deny flow GraphProjection -> CliCompiler
   deny flow Emitters -> CliCompiler
   deny flow SpecGenerator -> CliCompiler
 }
 
-invariant SmtBackendIsolation {
-  deny flow SmtBackend -> RuntimeGate
-  deny flow SmtBackend -> ExtractorAnalyzers
-  deny flow SmtBackend -> GraphProjection
-}
-
 invariant LanguageFrontendPurity {
-  deny flow LanguageFrontend -> RuntimeGate
+  deny flow LanguageFrontend -> RuntimeCore
+  deny flow LanguageFrontend -> PolicyGates
+  deny flow LanguageFrontend -> SemanticQueryEngine
+  deny flow LanguageFrontend -> StateMachineRuntime
   deny flow LanguageFrontend -> GraphProjection
   deny flow LanguageFrontend -> Emitters
+  deny flow LanguageFrontend -> UiWorkbench
+}
+
+invariant SmtBackendIsolation {
+  deny flow SmtBackend -> RuntimeCore
+  deny flow SmtBackend -> PolicyGates
+  deny flow SmtBackend -> SemanticQueryEngine
+  deny flow SmtBackend -> StateMachineRuntime
+  deny flow SmtBackend -> ExtractorAnalyzers
+  deny flow SmtBackend -> GraphProjection
+  deny flow SmtBackend -> UiWorkbench
 }
 
 invariant ExtractorAnalyzerBoundary {
   deny flow ExtractorAnalyzers -> CliCompiler
   deny flow ExtractorAnalyzers -> Emitters
+  deny flow ExtractorAnalyzers -> RuntimeCore
+  deny flow ExtractorAnalyzers -> PolicyGates
+  deny flow ExtractorAnalyzers -> SemanticQueryEngine
+  deny flow ExtractorAnalyzers -> StateMachineRuntime
+  deny flow ExtractorAnalyzers -> UiWorkbench
+}
+
+invariant SemanticQueryEngineIsolation {
+  deny flow SemanticQueryEngine -> CliCompiler
+  deny flow SemanticQueryEngine -> SmtBackend
+  deny flow SemanticQueryEngine -> RuntimeCore
+  deny flow SemanticQueryEngine -> PolicyGates
+  deny flow SemanticQueryEngine -> GraphProjection
+  deny flow SemanticQueryEngine -> UiWorkbench
+}
+
+invariant UiWorkbenchBoundary {
+  deny flow UiWorkbench -> LanguageFrontend
+  deny flow UiWorkbench -> SmtBackend
+  deny flow UiWorkbench -> ExtractorAnalyzers
+  deny flow UiWorkbench -> GraphProjection
+  deny flow UiWorkbench -> StateMachineRuntime
+  deny flow UiWorkbench -> SemanticQueryEngine
 }
 
 invariant VscodeApiBoundary {
-  deny flow VscodeExtension -> RuntimeGate
+  deny flow VscodeExtension -> RuntimeCore
+  deny flow VscodeExtension -> PolicyGates
+  deny flow VscodeExtension -> SemanticQueryEngine
+  deny flow VscodeExtension -> StateMachineRuntime
   deny flow VscodeExtension -> ExtractorAnalyzers
   deny flow VscodeExtension -> SmtBackend
   deny flow VscodeExtension -> GraphProjection
+  deny flow VscodeExtension -> UiWorkbench
+}
+
+machine ConsentExampleConsentLifecycle on ConsentExampleUserSession.consent {
+  allow transition Unknown -> Presented
+  allow transition Presented -> Accepted
+  allow transition Presented -> Rejected
+  deny transition Unknown -> Accepted
+  deny transition Unknown -> Rejected
+}
+
+machine ConsentExampleCartProtocol on ConsentExampleSharedCart.phase {
+  allow transition Empty -> SingleItem
+  allow transition SingleItem -> MultiItem
+  deny transition Empty -> MultiItem
+}
+
+machine StripeOrderLifecycle on StripeOrder.status {
+  allow transition Created -> PendingPayment
+  allow transition PendingPayment -> Paid
+  allow transition PendingPayment -> Cancelled
+  allow transition Paid -> FulfillmentQueued
+  allow transition FulfillmentQueued -> Fulfilled
+  allow transition Paid -> Refunded
+  deny transition Created -> Paid
+  deny transition Created -> Fulfilled
+  deny transition PendingPayment -> Fulfilled
+  deny transition Cancelled -> *
+  deny transition Refunded -> *
+}
+
+value_policy ConsentExampleCartShape {
+  require ConsentExampleSharedCart.items.length == 1 when ConsentExampleSharedCart.phase == SingleItem
+  require ConsentExampleOrder.total >= 0
+  require ConsentExampleUserSession.gdprAccepted == true
+}
+
+operation_policy ConsentExampleSubmitOrderRules {
+  require before submitOrder ConsentExampleSharedCart.phase == SingleItem
+  ensure after submitOrder ConsentExampleOrder.status == Submitted
+}
+
+event_policy ConsentExampleProtocol {
+  require event AcceptConsent preceded_by ShowConsent by ConsentExampleUserSession
 }
 
 workflow_policy ReleaseSafety {
@@ -201,7 +431,10 @@ change_policy DocsFreshness {
   require touched AgentSkill when touched AgentSkillInstaller
   require touched PublicDocs when touched AgentSkill
   require touched ArchitectureSpec when touched LanguageFrontend
-  require touched ArchitectureSpec when touched RuntimeGate
+  require touched ArchitectureSpec when touched RuntimeCore
+  require touched ArchitectureSpec when touched PolicyGates
+  require touched ArchitectureSpec when touched SemanticQueryEngine
+  require touched ArchitectureSpec when touched StateMachineRuntime
   require touched ArchitectureSpec when touched SmtBackend
   require touched ArchitectureSpec when touched Emitters
   require touched CompiledArchitecture when touched ArchitectureSpec

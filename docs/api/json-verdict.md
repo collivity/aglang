@@ -105,6 +105,9 @@ Architecture violations use these `type` values:
 - `di_violation` for dependency-injection policy failures.
 - `permission_violation` for protected operations missing matching authorization evidence when an extractor can prove the operation.
 - `state_machine_violation` for query-extracted transitions that violate a `machine` declaration.
+- `value_policy_violation` for definite value facts contradicting a `value_policy`.
+- `operation_policy_violation` for definite before/after operation facts contradicting an `operation_policy`.
+- `event_policy_violation` for definite event facts missing required scoped precedence in an `event_policy`.
 
 Blocking violations include a stable `id` field derived from the rule, fact kind, components or data, and source evidence. In `aglc check --diff <ref> --json` output, violations are marked with `status: "new"` because the check scope is the changed file set for `<ref>...HEAD`; staged and `--all` scopes use `status: "unchanged"` when status is present.
 
@@ -317,3 +320,25 @@ if (!verdict.passed) {
 Evidence-backed `require` rules lower to deny-counterexample enforcement. JSON verdicts may include `require_flow_violation`, `require_dataflow_violation`, `require_auth_violation`, `require_encryption_violation`, `require_operation_violation`, and `require_dependency_violation` entries in `violations[]`.
 
 Auth, encryption, dependency, and operation violations are based on deterministic extractor output or reviewed `.agq.yml` facts. Missing evidence does not block; only definite bad facts are reported.
+
+## Rich Policy Violations
+
+`value_policy_violation`, `operation_policy_violation`, and `event_policy_violation` entries include the violated policy name, the rule, detected value/event evidence, query provenance, graph fact id, and Z3 proof fields.
+
+```json
+{
+  "type": "operation_policy_violation",
+  "invariant": "SubmitOrderRules",
+  "detected": {
+    "operation": "submitOrder",
+    "data": "Cart.phase",
+    "confidence": "definite",
+    "query": {
+      "id": "SubmitOrderFacts",
+      "version": 1,
+      "file": ".aglang/extractors/submit-order.agq.yml",
+      "graphFactId": "graph:checkout:42"
+    }
+  }
+}
+```

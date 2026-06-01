@@ -1,0 +1,16 @@
+id: ConsentExampleReviewedValueFacts
+owner: examples
+version: 1
+confidence: definite
+match:
+  subject:
+    - ConsentExampleConsentModule
+    - ConsentExampleCartModule
+    - ConsentExampleCheckout
+  kind: value
+emit:
+  kind: value
+  subject: "$dataSubject"
+  path: "$path"
+  relation: "$relation"
+  value: "$value"

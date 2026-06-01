@@ -106,8 +106,9 @@ aglc check --arch <architecture.o> --project <dir> [--diff <ref>] [--all] [--jso
 | `--require-ast` | Fail when an AST-capable extractor falls back to regex for a detected fact |
 | `--workflow-z3` | Include workflow policy SMT debug snippets in workflow violations |
 | `--dump-workflow-smt` | Write workflow policy SMT debug snippets to `workflow-debug.smt2` |
+| `--ui` | Persist the selected check scope under `.aglang/ui/runs/<run-id>` and launch the local UI workbench |
 
-`aglc check` also evaluates reachability, propagated dataflow, `data_policy`, `trust_policy`, `di_policy`, `machine`, and `change_policy` blocks against the staged diff, against `<ref>...HEAD` when `--diff` is used, or against every tracked component file when `--all` is used. Reachability and trust failures appear as `reach_violation`, `data_policy_violation`, or `trust_policy_violation` entries in `violations[]`; dependency-injection failures appear as `di_violation`; state-machine failures appear as `state_machine_violation`; change policy failures appear in `change_violations[]`.
+`aglc check` also evaluates reachability, propagated dataflow, `data_policy`, `trust_policy`, `di_policy`, `machine`, `value_policy`, `operation_policy`, `event_policy`, and `change_policy` blocks against the staged diff, against `<ref>...HEAD` when `--diff` is used, or against every tracked component file when `--all` is used. Reachability and trust failures appear as `reach_violation`, `data_policy_violation`, or `trust_policy_violation` entries in `violations[]`; dependency-injection failures appear as `di_violation`; state-machine failures appear as `state_machine_violation`; rich policy failures appear as `value_policy_violation`, `operation_policy_violation`, or `event_policy_violation`; change policy failures appear in `change_violations[]`.
 
 In JSON mode, project checks include `diff.changed_files`, `diff.changed_components`, `diff.mode`, and `rule_coverage[]`. Violations include stable `id` values; when `--diff <ref>` is used, returned violations are marked with `status: "new"` because the check scope is limited to files changed in the selected comparison.
 
@@ -178,8 +179,34 @@ The bundle contains:
 - `verdict.json` — check verdict for the selected scope.
 - `rules.json` — architecture rules and component mappings.
 - `agent-tasks.json` — suggested follow-up tasks for an agent.
+- `query-traces.json` — `.agq.yml` matches, substitutions, emitted fact ids, and skipped-match reasons.
 
 Use this when a check result is unclear, a file maps unexpectedly, extractors emit weak evidence, or an agent needs the graph/rule context before proposing a fix.
+
+Add `--ui` to write the bundle as a UI run and launch the local workbench:
+
+```bash
+aglc debug --arch architecture.o --project . --all --ui
+```
+
+---
+
+## `aglc ui`
+
+Launch a local read-only workbench backed by `aglc debug` evidence bundles.
+
+```bash
+aglc ui --arch <architecture.o> --project <dir> [--all|--diff <ref>|--file <path>] [--port <n>] [--no-open]
+```
+
+Defaults: `--all`, an ephemeral available port, and automatic browser open only in an interactive local terminal. The server binds to `127.0.0.1`, always prints its URL, stores run history under `.aglang/ui/runs`, and writes local UI config to `.aglang/ui/config.json`.
+
+The workbench exposes:
+
+- `GET /api/config` — architecture, project root, declared repos, and local path status.
+- `GET /api/runs` and `GET /api/runs/:id` — persisted run list and run payloads.
+- `POST /api/runs` — execute a new debug-backed run for `all`, `diff`, or `file` scope.
+- `GET /api/files?path=...&line=...` — read-only source snippets scoped to the project root.
 
 ---
 

@@ -1,0 +1,13 @@
+id: ConsentExampleReviewedEvents
+owner: examples
+version: 1
+confidence: definite
+match:
+  subject:
+    - ConsentExampleConsentModule
+    - ConsentExampleCheckout
+  kind: event
+emit:
+  kind: event
+  event: "$eventName"
+  scope: "$scope"

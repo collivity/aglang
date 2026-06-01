@@ -1,5 +1,5 @@
 // SMT-LIB 2.6 translator — converts checked AST to formula strings
-import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, ResourceDecl, DiPolicyDecl, DataPolicyDecl, TrustPolicyDecl, PermissionDecl, StateMachineDecl, TransitionRule } from '../ast.ts';
+import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, ResourceDecl, DiPolicyDecl, DataPolicyDecl, TrustPolicyDecl, PermissionDecl, StateMachineDecl, TransitionRule, ValuePolicyDecl, OperationPolicyDecl, EventPolicyDecl, ValueExpression, PolicyValue } from '../ast.ts';
 import { BASE_SMT_DECLARATIONS } from '../stdlib/topology.ts';
 import { expandInvariantRules } from '../invariant-selectors.ts';
 
@@ -21,6 +21,9 @@ export function translate(program: Program): string[] {
   const trustPolicies: TrustPolicyDecl[] = [];
   const permissions: PermissionDecl[] = [];
   const stateMachines: StateMachineDecl[] = [];
+  const valuePolicies: ValuePolicyDecl[] = [];
+  const operationPolicies: OperationPolicyDecl[] = [];
+  const eventPolicies: EventPolicyDecl[] = [];
   const enums: EnumDecl[] = [];
   const dataTypes: DataDecl[] = [];
 
@@ -34,6 +37,9 @@ export function translate(program: Program): string[] {
     else if (d.kind === 'TrustPolicyDecl') trustPolicies.push(d);
     else if (d.kind === 'PermissionDecl') permissions.push(d);
     else if (d.kind === 'StateMachineDecl') stateMachines.push(d);
+    else if (d.kind === 'ValuePolicyDecl') valuePolicies.push(d);
+    else if (d.kind === 'OperationPolicyDecl') operationPolicies.push(d);
+    else if (d.kind === 'EventPolicyDecl') eventPolicies.push(d);
     else if (d.kind === 'EnumDecl') enums.push(d);
     else if (d.kind === 'DataDecl') dataTypes.push(d);
   }
@@ -300,6 +306,91 @@ export function translate(program: Program): string[] {
           const allowed = allowRules.length === 0 || allowRules.some(t => matches(t, from, to));
           if (explicitlyDenied || !allowed) denyTransition(from, to);
         }
+      }
+    }
+    stmts.push('');
+  }
+
+  const fieldPathId = (expr: ValueExpression): string => `FieldPath__${smtId(expr.subject)}__${expr.path.map(smtId).join('__')}`;
+  const relationId = (relation: string): string => `Relation__${relation.replace(/[^a-zA-Z0-9_]/g, token => ({ '=': 'eq', '!': 'not', '>': 'gt', '<': 'lt' }[token] ?? '_'))}`;
+  const scalarId = (value: PolicyValue): string => {
+    if (value === null) return 'Value__null';
+    return `Value__${smtId(String(value))}`;
+  };
+  const declaredFieldPaths = new Set<string>();
+  const declaredRelations = new Set<string>();
+  const declaredScalarValues = new Set<string>();
+  const declareValueExpr = (expr: ValueExpression): void => {
+    const fieldId = fieldPathId(expr);
+    const relId = relationId(expr.relation);
+    const valId = scalarId(expr.value);
+    if (!declaredFieldPaths.has(fieldId)) {
+      stmts.push(`(declare-const ${fieldId} FieldPath)`);
+      declaredFieldPaths.add(fieldId);
+    }
+    if (!declaredRelations.has(relId)) {
+      stmts.push(`(declare-const ${relId} ValueRelation)`);
+      declaredRelations.add(relId);
+    }
+    if (!declaredScalarValues.has(valId)) {
+      stmts.push(`(declare-const ${valId} ScalarValue)`);
+      declaredScalarValues.add(valId);
+    }
+  };
+
+  if (valuePolicies.length > 0) {
+    stmts.push('; === value policy rules ===');
+    for (const policy of valuePolicies) {
+      stmts.push(`; --- ${policy.name} ---`);
+      for (const rule of policy.rules) {
+        declareValueExpr(rule.requirement);
+        if (rule.when) declareValueExpr(rule.when);
+        const req = rule.requirement;
+        const contradiction = `(ValueContradiction ${smtId(req.subject)} ${fieldPathId(req)} ${relationId(req.relation)} ${scalarId(req.value)})`;
+        if (rule.when) {
+          const cond = rule.when;
+          stmts.push(`(assert (=> (and (ValueFact ${smtId(cond.subject)} ${fieldPathId(cond)} ${relationId(cond.relation)} ${scalarId(cond.value)}) ${contradiction}) false))`);
+        } else {
+          stmts.push(`(assert (=> ${contradiction} false))`);
+        }
+      }
+    }
+    stmts.push('');
+  }
+
+  if (operationPolicies.length > 0) {
+    stmts.push('; === operation policy rules ===');
+    for (const policy of operationPolicies) {
+      stmts.push(`; --- ${policy.name} ---`);
+      for (const rule of policy.rules) {
+        const operationId = `Operation__${smtId(rule.operation)}`;
+        if (!declaredOperations.has(operationId)) {
+          stmts.push(`(declare-const ${operationId} Operation)`);
+          declaredOperations.add(operationId);
+        }
+        declareValueExpr(rule.requirement);
+        const req = rule.requirement;
+        const phase = rule.kind === 'RequireBefore' ? 'Phase__before' : 'Phase__after';
+        stmts.push(`(assert (=> (OperationStateContradiction ${operationId} ${phase} ${smtId(req.subject)} ${fieldPathId(req)} ${relationId(req.relation)} ${scalarId(req.value)}) false))`);
+      }
+    }
+    stmts.push('');
+  }
+
+  if (eventPolicies.length > 0) {
+    stmts.push('; === event policy rules ===');
+    const declaredEvents = new Set<string>();
+    for (const policy of eventPolicies) {
+      stmts.push(`; --- ${policy.name} ---`);
+      for (const rule of policy.rules) {
+        for (const event of [rule.event, rule.precededBy]) {
+          const eventId = `Event__${smtId(event)}`;
+          if (!declaredEvents.has(eventId)) {
+            stmts.push(`(declare-const ${eventId} EventType)`);
+            declaredEvents.add(eventId);
+          }
+        }
+        stmts.push(`(assert (=> (EventMissingPrecedence Event__${smtId(rule.event)} Event__${smtId(rule.precededBy)} ${smtId(rule.scope)}) false))`);
       }
     }
     stmts.push('');

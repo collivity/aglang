@@ -37,7 +37,7 @@ features:
 
   - icon: 🧩
     title: Enforces Boundaries
-    details: "Today the strongest built-in checks cover flow, reachability, dataflow, trust/auth, DI, contracts, workflows, change policies, and state machines."
+    details: "Today the strongest built-in checks cover flow, reachability, dataflow, trust/auth, DI, contracts, workflows, change policies, state machines, value policies, operation policies, and event policies."
 
   - icon: 🗂️
     title: Coordinates Multi-Repo Work
@@ -159,7 +159,7 @@ Not every declaration is enforced the same way.
 
 | Level | Used for | Meaning |
 |---|---|---|
-| `formal_z3` | `deny flow`, `deny reach`, `require flow`, `require operation`, `deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy`, `machine` | Checked with solver-backed constraints when extractors or reviewed queries produce definite evidence. |
+| `formal_z3` | `deny flow`, `deny reach`, `require flow`, `require operation`, `deny dataflow`, `data_policy`, `trust_policy`, `di_policy`, `permission`, `change_policy`, `machine`, `value_policy`, `operation_policy`, `event_policy` | Checked with solver-backed constraints when extractors or reviewed queries produce definite evidence. |
 | `deterministic_policy` | `contract`, `workflow_policy` | Checked by deterministic gates with exact diagnostics. |
 | `formal_z3` | `require encryption` / `deny unencrypted flow` | Blocks only when deterministic extractors or reviewed `.agq.yml` files emit definite unencrypted-flow evidence. |
 

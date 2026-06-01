@@ -25,7 +25,8 @@ import {
   projectGraphToFlows,
   type GraphReport,
 } from './graph-projection.ts';
-import { applyExtractionQueryFacts, loadExtractionQueries, type AuthCounterexampleFact, type DependencyFact, type EncryptionCounterexampleFact, type OperationFact, type TransitionFact } from './extraction-query.ts';
+import { applyExtractionQueryFacts, loadExtractionQueries, type AuthCounterexampleFact, type DependencyFact, type EncryptionCounterexampleFact, type EventFact, type ExtractionQueryTrace, type OperationEventFact, type OperationFact, type TransitionFact, type ValueFact } from './extraction-query.ts';
+import { buildTransitionDeltaAssertions, shouldBlockTransitionFact } from './state-machine.ts';
 
 export type { FlowFact, GraphFact };
 
@@ -88,6 +89,25 @@ export interface PermissionViolationFact {
   confidence: 'definite';
 }
 
+export interface BlockingValuePolicyFact {
+  policy: string;
+  rule: ArchitectureArtifact['valuePolicies'][number]['rules'][number];
+  fact: ValueFact;
+  conditionFact?: ValueFact;
+}
+
+export interface BlockingOperationPolicyFact {
+  policy: string;
+  rule: ArchitectureArtifact['operationPolicies'][number]['rules'][number];
+  fact: OperationEventFact;
+}
+
+export interface BlockingEventPolicyFact {
+  policy: string;
+  rule: ArchitectureArtifact['eventPolicies'][number]['rules'][number];
+  fact: EventFact;
+}
+
 // Registry of built-in plugins (keyed by extension)
 const BUILT_IN_PLUGINS: ExtractorPlugin[] = [
   csharpPlugin,
@@ -133,6 +153,12 @@ export interface DeltaResult {
   operationFacts: OperationFact[];
   blockingOperationFacts: OperationFact[];
   operationWarningFacts: OperationFact[];
+  valueFacts: ValueFact[];
+  blockingValuePolicyFacts: BlockingValuePolicyFact[];
+  operationEventFacts: OperationEventFact[];
+  blockingOperationPolicyFacts: BlockingOperationPolicyFact[];
+  eventFacts: EventFact[];
+  blockingEventPolicyFacts: BlockingEventPolicyFact[];
   blockingRequireFlowFacts: RequireFlowViolationFact[];
   blockingRequireDataFlowFacts: RequireDataFlowViolationFact[];
   authCounterexampleFacts: AuthCounterexampleFact[];
@@ -147,6 +173,7 @@ export interface DeltaResult {
   factSmtMap: Map<string, string>;
   diFactSmtMap: Map<string, string>;
   graphReport: GraphReport;
+  queryTraces: ExtractionQueryTrace[];
   unresolvedTargets: string[];
   graphWarnings: Array<{ graphFactId: string; message: string }>;
   /** Number of files whose extraction result came from cache */
@@ -158,11 +185,54 @@ function smtId(name: string): string {
   return name.replace(/[^a-zA-Z0-9_]/g, '_');
 }
 
-function stateSmtId(artifact: ArchitectureArtifact, data: string, fieldName: string, value: string): string {
-  const dataDecl = (artifact.dataTypes ?? []).find(d => d.name === data);
-  const field = dataDecl?.fields.find(f => f.key === fieldName);
-  const enumName = field?.typeExpr.replace(/^Optional<(.+)>$/, '$1').trim();
-  return enumName ? `State__${smtId(enumName)}__${smtId(value)}` : `State__${smtId(data)}__${smtId(fieldName)}__${smtId(value)}`;
+function relationSmtId(relation: string): string {
+  return `Relation__${relation.replace(/[^a-zA-Z0-9_]/g, token => ({ '=': 'eq', '!': 'not', '>': 'gt', '<': 'lt' }[token] ?? '_'))}`;
+}
+
+function scalarSmtId(value: unknown): string {
+  if (value === null) return 'Value__null';
+  return `Value__${smtId(String(value))}`;
+}
+
+function fieldPathSmtId(subject: string, path: string[]): string {
+  return `FieldPath__${smtId(subject)}__${path.map(smtId).join('__')}`;
+}
+
+function normalizeScalar(value: unknown): string | number | boolean | null {
+  if (value === null) return null;
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  const text = String(value);
+  if (text === 'true') return true;
+  if (text === 'false') return false;
+  if (text === 'null') return null;
+  if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
+  return text;
+}
+
+function relationHolds(actual: unknown, relation: string, expected: unknown): boolean {
+  const left = normalizeScalar(actual);
+  const right = normalizeScalar(expected);
+  if (relation === '==') return left === right;
+  if (relation === '!=') return left !== right;
+  if (typeof left === 'number' && typeof right === 'number') {
+    if (relation === '>=') return left >= right;
+    if (relation === '<=') return left <= right;
+    if (relation === '>') return left > right;
+    if (relation === '<') return left < right;
+  }
+  return false;
+}
+
+function sameValueTarget(fact: Pick<ValueFact, 'subject' | 'path'>, expr: { subject: string; path: string[] }): boolean {
+  return fact.subject === expr.subject && fact.path.join('.') === expr.path.join('.');
+}
+
+function factSatisfies(fact: ValueFact, expr: { subject: string; path: string[]; relation: string; value: unknown }): boolean {
+  return sameValueTarget(fact, expr) && relationHolds(fact.value, expr.relation, expr.value);
+}
+
+function factContradicts(fact: ValueFact, expr: { subject: string; path: string[]; relation: string; value: unknown }): boolean {
+  return sameValueTarget(fact, expr) && !relationHolds(fact.value, expr.relation, expr.value);
 }
 
 function diFactMatchesPolicy(fact: DiFact, artifact: ArchitectureArtifact): boolean {
@@ -465,6 +535,56 @@ function inferPermissionViolations(authFacts: AuthFact[], artifact: Architecture
   return violations;
 }
 
+function inferValuePolicyFacts(valueFacts: ValueFact[], artifact: ArchitectureArtifact, strict: boolean): BlockingValuePolicyFact[] {
+  const blocking = valueFacts.filter(f => isBlocking({ from: f.subject, to: f.subject, confidence: f.confidence, evidence: f.evidence, file: f.file }, strict));
+  const out: BlockingValuePolicyFact[] = [];
+  for (const policy of artifact.valuePolicies ?? []) {
+    for (const rule of policy.rules) {
+      const conditionFact = rule.when
+        ? blocking.find(f => factSatisfies(f, rule.when!))
+        : undefined;
+      if (rule.when && !conditionFact) continue;
+      for (const fact of blocking) {
+        if (factContradicts(fact, rule.requirement)) {
+          out.push({ policy: policy.name, rule, fact, ...(conditionFact ? { conditionFact } : {}) });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function inferOperationPolicyFacts(facts: OperationEventFact[], artifact: ArchitectureArtifact, strict: boolean): BlockingOperationPolicyFact[] {
+  const blocking = facts.filter(f => isBlocking({ from: f.subject, to: f.subject, confidence: f.confidence, evidence: f.evidence, file: f.file }, strict));
+  const out: BlockingOperationPolicyFact[] = [];
+  for (const policy of artifact.operationPolicies ?? []) {
+    for (const rule of policy.rules) {
+      const phase = rule.kind === 'RequireBefore' ? 'before' : 'after';
+      for (const fact of blocking) {
+        if (fact.operation === rule.operation && fact.phase === phase && factContradicts(fact, rule.requirement)) {
+          out.push({ policy: policy.name, rule, fact });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function inferEventPolicyFacts(facts: EventFact[], artifact: ArchitectureArtifact, strict: boolean): BlockingEventPolicyFact[] {
+  const blocking = facts.filter(f => isBlocking({ from: f.scope ?? f.event, to: f.event, confidence: f.confidence, evidence: f.evidence, file: f.file }, strict));
+  const out: BlockingEventPolicyFact[] = [];
+  for (const policy of artifact.eventPolicies ?? []) {
+    for (const rule of policy.rules) {
+      for (const fact of blocking) {
+        if (fact.event !== rule.event || fact.scope !== rule.scope) continue;
+        const hasPreceding = blocking.some(candidate => candidate.event === rule.precededBy && candidate.scope === fact.scope);
+        if (!hasPreceding) out.push({ policy: policy.name, rule, fact });
+      }
+    }
+  }
+  return out;
+}
+
 function defaultStrategyForPlugin(plugin: ExtractorPlugin): ExtractionStrategy {
   return /regex/i.test(plugin.name) ? 'regex' : 'legacy-flow';
 }
@@ -589,14 +709,10 @@ export async function generateDeltaAssertions(
   const warningFlowFacts = [...projection.warningFacts, ...queryFacts.flowFacts.filter(f => !isBlocking(f, strict) && f.confidence === 'probable')];
   const graphReport = buildGraphReport(uniqueGraphFacts, projection);
   const transitionFacts = queryFacts.transitionFacts;
-  const blockingTransitionFacts = transitionFacts.filter(f => Boolean(f.from) && isBlocking({
-    from: f.data,
-    to: f.to,
-    confidence: f.confidence,
-    evidence: f.evidence,
-    file: f.file,
-  }, strict));
-  const transitionWarningFacts = transitionFacts.filter(f => !blockingTransitionFacts.includes(f) && (!f.from || f.confidence === 'probable'));
+  const blockingTransitionFacts = transitionFacts.filter(f => shouldBlockTransitionFact(f, artifact, strict));
+  const transitionWarningFacts = transitionFacts.filter(f =>
+    !blockingTransitionFacts.includes(f) && (!f.from || f.confidence === 'probable'),
+  );
   const operationFacts = queryFacts.operationFacts;
   const blockingOperationFacts = operationFacts.filter(f => isBlocking({
     from: f.component,
@@ -606,6 +722,12 @@ export async function generateDeltaAssertions(
     file: f.file,
   }, strict));
   const operationWarningFacts = operationFacts.filter(f => !blockingOperationFacts.includes(f) && f.confidence === 'probable');
+  const valueFacts = queryFacts.valueFacts;
+  const operationEventFacts = queryFacts.operationEventFacts;
+  const eventFacts = queryFacts.eventFacts;
+  const blockingValuePolicyFacts = inferValuePolicyFacts(valueFacts, artifact, strict);
+  const blockingOperationPolicyFacts = inferOperationPolicyFacts(operationEventFacts, artifact, strict);
+  const blockingEventPolicyFacts = inferEventPolicyFacts(eventFacts, artifact, strict);
   const authCounterexampleFacts = queryFacts.authFacts;
   const blockingAuthCounterexampleFacts = authCounterexampleFacts.filter(f => isBlocking({ from: f.from, to: f.to, confidence: f.confidence, evidence: f.evidence, file: f.file }, strict));
   const encryptionCounterexampleFacts = queryFacts.encryptionFacts;
@@ -669,9 +791,7 @@ export async function generateDeltaAssertions(
   });
   const authFacts = extractAuthFactsFromCSharp(csharpInputs, artifact.permissionPolicies ?? artifact.permissions ?? []);
   const blockingPermissionFacts = inferPermissionViolations(authFacts, artifact);
-  const transitionAssertions = blockingTransitionFacts.map(f => {
-    return `(assert (Transition ${smtId(f.data)} Field__${smtId(f.data)}__${smtId(f.field)} ${stateSmtId(artifact, f.data, f.field, f.from!)} ${stateSmtId(artifact, f.data, f.field, f.to)}))`;
-  });
+  const transitionAssertions = blockingTransitionFacts.flatMap(f => buildTransitionDeltaAssertions(artifact, f));
   const operationAssertions = blockingOperationFacts.flatMap(f => [
     `(assert (OperationIn ${smtId(f.component)} Operation__${smtId(f.operation)}))`,
     ...(f.data ? [`(assert (OperationOnDataIn ${smtId(f.component)} Operation__${smtId(f.operation)} ${smtId(f.data)}))`] : []),
@@ -686,6 +806,16 @@ export async function generateDeltaAssertions(
         ? [`(assert (DependencyWithoutInterface ${smtId(f.from)} ${smtId(f.to)} Interface__${smtId(rule.interface)}))`]
         : [],
     )),
+  );
+  const valuePolicyAssertions = blockingValuePolicyFacts.flatMap(({ rule, fact, conditionFact }) => [
+    ...(conditionFact ? [`(assert (ValueFact ${smtId(conditionFact.subject)} ${fieldPathSmtId(conditionFact.subject, conditionFact.path)} ${relationSmtId(rule.when!.relation)} ${scalarSmtId(rule.when!.value)}))`] : []),
+    `(assert (ValueContradiction ${smtId(fact.subject)} ${fieldPathSmtId(fact.subject, fact.path)} ${relationSmtId(rule.requirement.relation)} ${scalarSmtId(rule.requirement.value)}))`,
+  ]);
+  const operationPolicyAssertions = blockingOperationPolicyFacts.map(({ rule, fact }) =>
+    `(assert (OperationStateContradiction Operation__${smtId(fact.operation)} ${rule.kind === 'RequireBefore' ? 'Phase__before' : 'Phase__after'} ${smtId(fact.subject)} ${fieldPathSmtId(fact.subject, fact.path)} ${relationSmtId(rule.requirement.relation)} ${scalarSmtId(rule.requirement.value)}))`,
+  );
+  const eventPolicyAssertions = blockingEventPolicyFacts.map(({ rule }) =>
+    `(assert (EventMissingPrecedence Event__${smtId(rule.event)} Event__${smtId(rule.precededBy)} ${smtId(rule.scope)}))`,
   );
 
   return {
@@ -707,6 +837,12 @@ export async function generateDeltaAssertions(
     operationFacts,
     blockingOperationFacts,
     operationWarningFacts,
+    valueFacts,
+    blockingValuePolicyFacts,
+    operationEventFacts,
+    blockingOperationPolicyFacts,
+    eventFacts,
+    blockingEventPolicyFacts,
     blockingRequireFlowFacts,
     blockingRequireDataFlowFacts,
     authCounterexampleFacts,
@@ -716,10 +852,11 @@ export async function generateDeltaAssertions(
     dependencyFacts,
     blockingDependencyFacts,
     warningFacts: warningFlowFacts,
-    smtAssertions: [...projection.smtAssertions, ...queryFlowSmtAssertions, ...reachAssertions, ...dataFlowAssertions, ...diAssertions, ...transitionAssertions, ...operationAssertions, ...requireFlowAssertions, ...requireDataFlowAssertions, ...authCounterexampleAssertions, ...encryptionCounterexampleAssertions, ...dependencyAssertions],
+    smtAssertions: [...projection.smtAssertions, ...queryFlowSmtAssertions, ...reachAssertions, ...dataFlowAssertions, ...diAssertions, ...transitionAssertions, ...operationAssertions, ...requireFlowAssertions, ...requireDataFlowAssertions, ...authCounterexampleAssertions, ...encryptionCounterexampleAssertions, ...dependencyAssertions, ...valuePolicyAssertions, ...operationPolicyAssertions, ...eventPolicyAssertions],
     factSmtMap,
     diFactSmtMap,
     graphReport,
+    queryTraces: queryFacts.traces ?? [],
     unresolvedTargets: projection.unresolvedTargets,
     graphWarnings: projection.warnings,
     cacheHits,

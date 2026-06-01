@@ -37,7 +37,7 @@ This legacy starter command creates:
 
 `.ag` files are engineer-guided architecture source. Coding agents should not create, edit, regenerate, or compile changes to `.ag` specs unless the engineer explicitly asks for architecture/spec work, ideally in a planning or design session.
 
-Semantic query files in `.aglang/extractors/*.agq.yml` are also reviewed architecture source. They translate deterministic graph facts into domain facts such as state-machine transitions, architecture flows, or named operations. Agents may inspect them to understand provenance, but should ask before creating or changing them.
+Semantic query files in `.aglang/extractors/*.agq.yml` are also reviewed architecture source. They translate deterministic graph facts into domain facts such as state-machine transitions, architecture flows, named operations, value facts, operation before/after facts, or scoped events. Agents may inspect them to understand provenance, but should ask before creating or changing them.
 
 For agent-native adoption, prefer task packets:
 
@@ -114,6 +114,8 @@ When `require_flow_violation` or `require_operation_violation` entries appear in
 When `di_violation` entries appear in `violations[]`, fix the implementation dependency graph. Reach-based DI failures may include a transitive `detected.path`. Do not work around the gate by editing `.ag` unless the engineer explicitly asks to change the intended architecture.
 
 When `state_machine_violation` entries appear in `violations[]`, use the machine name, transition edge, source evidence, and `detected.query` provenance to fix the invalid state write. `aglc check` never calls an LLM; it evaluates committed source, compiled architecture, and reviewed query files.
+
+When `value_policy_violation`, `operation_policy_violation`, or `event_policy_violation` entries appear in `violations[]`, use the policy rule, source evidence, and `detected.query` provenance to fix the contradictory value, pre/postcondition, or missing event precedence in implementation code.
 
 When `solver_diagnostics[]` contains `unknown`, `error`, or `suggested_refactor`, treat it as a path-explosion or modeling hotspot. Prefer simplifying the implementation path, state write, or dependency graph before asking to change architecture rules.
 

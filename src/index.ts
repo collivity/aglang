@@ -18,6 +18,7 @@ import { runChangeGate } from './runtime/change-gate.ts';
 import { formatVerdict, formatVerdictJson } from './runtime/diagnostic.ts';
 import type { ArchitectureArtifact } from './emitters/artifact.ts';
 import { generateSpec } from './generate.ts';
+import { createUiRunId, currentCliPath, startUiServer, type UiScope } from './runtime/ui-server.ts';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -49,6 +50,7 @@ Commands:
   aglc explain --arch <arch.o> --project <dir> --violation <id> [--json] [--diff <ref>] [--all]  Explain a violation from the current check scope
   aglc graph --arch <arch.o> [--file <f> | --project <dir>] [--json] [--debug-extractors] [--require-ast]  Emit graph facts and Z3 flow projections
   aglc debug --arch <arch.o> --project <dir> [--file <f>] [--diff <ref>] [--all] [--out <dir>] [--debug-extractors]  Write debug bundle for agents and engineers
+  aglc ui --arch <arch.o> --project <dir> [--all|--diff <ref>|--file <path>] [--port <n>] [--no-open]  Launch local UI workbench
   aglc import-openapi <swagger.json> [--out <file.ag>]       Import OpenAPI 3.x spec → .ag contracts
   aglc import-tf <main.tf> [--out <file.ag>]                Import Terraform → .ag node declarations
 
@@ -62,6 +64,8 @@ Flags:
   --dump-smt           Write the full SMT-LIB script fed to Z3 → examples/debug.smt2
   --workflow-z3        Include workflow policy SMT debug snippets in verdicts
   --dump-workflow-smt  Write workflow policy SMT debug snippets → workflow-debug.smt2
+  --ui                 With check/debug, persist a UI run bundle and launch the local workbench
+  --no-open            Print the UI URL without opening a browser
 `);
   process.exit(1);
 }
@@ -969,6 +973,7 @@ function writeEngineerDebugReport(outDir: string, bundle: Record<string, unknown
     '',
     '- `debug.json` - complete structured packet',
     '- `graph.json` - extracted graph/projection evidence',
+    '- `query-traces.json` - semantic query matches, substitutions, and skipped captures',
     '- `verdict.json` - check verdict for the selected scope',
     '- `rules.json` - architecture rules and component mappings',
     '- `agent-tasks.json` - suggested agent follow-up tasks',
@@ -1044,6 +1049,7 @@ async function debugCommand(archPath: string, projectRoot: string, filePath: str
   const deltaSummary = {
     flow_facts: delta.facts.length,
     graph_facts: delta.graphFacts.length,
+    query_traces: delta.queryTraces.length,
     reach_facts: delta.reachFacts.length,
     di_facts: delta.diFacts.length,
     blocking_facts: delta.blockingFacts.length,
@@ -1064,6 +1070,7 @@ async function debugCommand(archPath: string, projectRoot: string, filePath: str
     delta_summary: deltaSummary,
     verdict: verdictPayload,
     graph: delta.graphReport,
+    query_traces: delta.queryTraces,
     rules,
     agent_tasks: agentTasks,
   };
@@ -1071,6 +1078,7 @@ async function debugCommand(archPath: string, projectRoot: string, filePath: str
   mkdirSync(outDir, { recursive: true });
   writeFileSync(resolve(outDir, 'debug.json'), JSON.stringify(bundle, null, 2) + '\n', 'utf8');
   writeFileSync(resolve(outDir, 'graph.json'), JSON.stringify(delta.graphReport, null, 2) + '\n', 'utf8');
+  writeFileSync(resolve(outDir, 'query-traces.json'), JSON.stringify(delta.queryTraces, null, 2) + '\n', 'utf8');
   writeFileSync(resolve(outDir, 'verdict.json'), JSON.stringify(verdictPayload, null, 2) + '\n', 'utf8');
   writeFileSync(resolve(outDir, 'rules.json'), JSON.stringify(rules, null, 2) + '\n', 'utf8');
   writeFileSync(resolve(outDir, 'agent-tasks.json'), JSON.stringify(agentTasks, null, 2) + '\n', 'utf8');
@@ -1078,7 +1086,7 @@ async function debugCommand(archPath: string, projectRoot: string, filePath: str
 
   log(`✓ Wrote aglc debug bundle → ${outDir}`);
   log(`  Verdict: ${verdictPayload.passed ? 'passed' : 'failed'}`);
-  log(`  Files: debug.json, engineer.md, graph.json, verdict.json, rules.json, agent-tasks.json`);
+  log(`  Files: debug.json, engineer.md, graph.json, query-traces.json, verdict.json, rules.json, agent-tasks.json`);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1304,6 +1312,35 @@ function writeAgentTask(kind: AgentTaskKind, projectRoot: string, outPath: strin
   log(`  Project: ${resolve(projectRoot)}`);
 }
 
+function uiScopeFromArgs(): UiScope {
+  return {
+    all: args.includes('--all') || (!getArg('--diff') && !getArg('--file')),
+    diff: getArg('--diff'),
+    file: getArg('--file'),
+  };
+}
+
+async function launchUi(archPath: string, projectRoot: string, scope: UiScope, initialRunId?: string) {
+  if (!existsSync(archPath)) {
+    logErr(`Error: architecture.o not found: ${archPath}`);
+    process.exit(1);
+  }
+  const artifact: ArchitectureArtifact = loadArtifact(readFileSync(archPath, 'utf8'));
+  const port = getNumberArg('--port');
+  const server = await startUiServer(artifact, {
+    archPath: resolve(archPath),
+    projectRoot: resolve(projectRoot),
+    scope,
+    port,
+    open: !args.includes('--no-open'),
+    cliPath: currentCliPath(import.meta.url),
+    initialRunId,
+  });
+  log(`✓ aglc UI workbench listening on ${server.url}`);
+  log(`  Bind: 127.0.0.1`);
+  log(`  Runs: ${resolve(projectRoot, '.aglang', 'ui', 'runs')}`);
+}
+
 (async () => {
   if (command === 'request-scan') {
     writeAgentTask('architecture_discovery', getArg('--project') ?? '.', getArg('--out'));
@@ -1339,7 +1376,14 @@ function writeAgentTask(kind: AgentTaskKind, projectRoot: string, outPath: strin
     const archPath = getArg('--arch') ?? 'architecture.o';
     const projectRoot = getArg('--project') ?? '.';
     const repoFilter = getArg('--repo-filter');
-    await checkDiff(archPath, projectRoot, repoFilter, args.includes('--all'), getArg('--diff'));
+    if (args.includes('--ui')) {
+      const runId = createUiRunId('check');
+      const outDir = resolve(projectRoot, '.aglang', 'ui', 'runs', runId);
+      await debugCommand(archPath, projectRoot, undefined, args.includes('--all'), getArg('--diff'), outDir);
+      await launchUi(archPath, projectRoot, uiScopeFromArgs(), runId);
+    } else {
+      await checkDiff(archPath, projectRoot, repoFilter, args.includes('--all'), getArg('--diff'));
+    }
 
   } else if (command === 'check-file') {
     const archPath = getArg('--arch') ?? 'architecture.o';
@@ -1363,7 +1407,19 @@ function writeAgentTask(kind: AgentTaskKind, projectRoot: string, outPath: strin
   } else if (command === 'debug') {
     const archPath = getArg('--arch') ?? 'architecture.o';
     const projectRoot = getArg('--project') ?? '.';
-    await debugCommand(archPath, projectRoot, getArg('--file'), args.includes('--all'), getArg('--diff'), getArg('--out'));
+    if (args.includes('--ui')) {
+      const runId = createUiRunId('debug');
+      const outDir = getArg('--out') ?? resolve(projectRoot, '.aglang', 'ui', 'runs', runId);
+      await debugCommand(archPath, projectRoot, getArg('--file'), args.includes('--all'), getArg('--diff'), outDir);
+      await launchUi(archPath, projectRoot, uiScopeFromArgs(), basename(outDir));
+    } else {
+      await debugCommand(archPath, projectRoot, getArg('--file'), args.includes('--all'), getArg('--diff'), getArg('--out'));
+    }
+
+  } else if (command === 'ui') {
+    const archPath = getArg('--arch') ?? 'architecture.o';
+    const projectRoot = getArg('--project') ?? '.';
+    await launchUi(archPath, projectRoot, uiScopeFromArgs());
 
   } else if (command === 'import-openapi') {
     const specPath = args[1];

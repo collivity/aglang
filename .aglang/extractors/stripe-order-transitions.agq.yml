@@ -1,0 +1,18 @@
+id: StripeExampleOrderTransitions
+owner: examples
+version: 1
+confidence: definite
+match:
+  subject:
+    - StripeExampleBackendApi
+    - StripeExampleWebhook
+    - StripeExampleFulfillmentWorker
+  kind: assignment
+  property: status
+  valueEnum: OrderStatus
+emit:
+  kind: transition
+  data: StripeOrder
+  field: status
+  from: "$previousMember"
+  to: "$valueMember"

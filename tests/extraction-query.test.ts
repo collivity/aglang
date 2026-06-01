@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 import { applyExtractionQueries, applyExtractionQueryFacts, loadExtractionQueries } from '../src/runtime/extraction-query.ts';
 import type { GraphFact } from '../src/analyzers/plugin.ts';
@@ -23,11 +23,11 @@ describe('extraction query files', () => {
     writeFileSync(join(project, '.aglang', 'extractors', name), content);
   }
 
-  function graphFact(properties: GraphFact['properties']): GraphFact {
+  function graphFact(properties: GraphFact['properties'], subject = 'Orders', kind = 'assignment'): GraphFact {
     return {
       id: 'graph-1',
-      kind: 'assignment',
-      subject: 'Orders',
+      kind,
+      subject,
       properties,
       confidence: 'definite',
       evidence: {
@@ -239,6 +239,118 @@ emit:
       component: 'Api',
       graphFactId: 'graph-3',
       query: { id: 'SerializationOperations' },
+    });
+  });
+
+  it('loads the root self-spec extraction queries', () => {
+    const queries = loadExtractionQueries(resolve('.'));
+
+    expect(queries.map(query => query.id)).toEqual(expect.arrayContaining([
+      'ConsentExampleConsentTransitions',
+      'ConsentExampleCartTransitions',
+      'StripeExampleOrderTransitions',
+      'ConsentExampleReviewedValueFacts',
+      'ConsentExampleReviewedOperationEvents',
+      'ConsentExampleReviewedEvents',
+    ]));
+  });
+
+  it('emits lifecycle transition facts only from scoped example components', () => {
+    const queries = loadExtractionQueries(resolve('.'));
+    const facts = applyExtractionQueryFacts(queries, [
+      graphFact({
+        property: 'consent',
+        valueEnum: 'ConsentStatus',
+        previousMember: 'Presented',
+        valueMember: 'Accepted',
+      }, 'ConsentExampleConsentModule'),
+      graphFact({
+        property: 'phase',
+        valueEnum: 'CartPhase',
+        previousMember: 'Empty',
+        valueMember: 'SingleItem',
+      }, 'ConsentExampleCartModule'),
+      graphFact({
+        property: 'status',
+        valueEnum: 'OrderStatus',
+        previousMember: 'Paid',
+        valueMember: 'FulfillmentQueued',
+      }, 'StripeExampleFulfillmentWorker'),
+      graphFact({
+        property: 'status',
+        valueEnum: 'OrderStatus',
+        previousMember: 'Created',
+        valueMember: 'Paid',
+      }, 'Tests'),
+      graphFact({
+        property: 'phase',
+        valueEnum: 'CartPhase',
+        previousMember: 'Empty',
+        valueMember: 'MultiItem',
+      }, 'GeneratedDocsSite'),
+      graphFact({
+        property: 'consent',
+        valueEnum: 'ConsentStatus',
+        valueMember: 'Accepted',
+      }, 'ExampleViolationFixtures'),
+    ]);
+
+    expect(facts.transitionFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ data: 'ConsentExampleUserSession', field: 'consent', from: 'Presented', to: 'Accepted' }),
+      expect.objectContaining({ data: 'ConsentExampleSharedCart', field: 'phase', from: 'Empty', to: 'SingleItem' }),
+      expect.objectContaining({ data: 'StripeOrder', field: 'status', from: 'Paid', to: 'FulfillmentQueued' }),
+    ]));
+    expect(facts.transitionFacts).toHaveLength(3);
+  });
+
+  it('bridges reviewed rich policy graph facts from scoped example components', () => {
+    const queries = loadExtractionQueries(resolve('.'));
+    const facts = applyExtractionQueryFacts(queries, [
+      graphFact({
+        dataSubject: 'ConsentExampleSharedCart',
+        path: 'items.length',
+        relation: '==',
+        value: '1',
+      }, 'ConsentExampleCartModule', 'value'),
+      graphFact({
+        operation: 'submitOrder',
+        phase: 'before',
+        dataSubject: 'ConsentExampleSharedCart',
+        path: 'phase',
+        relation: '==',
+        value: 'SingleItem',
+      }, 'ConsentExampleCheckout', 'operation_event'),
+      graphFact({
+        eventName: 'AcceptConsent',
+        scope: 'ConsentExampleUserSession',
+      }, 'ConsentExampleConsentModule', 'event'),
+      graphFact({
+        dataSubject: 'ConsentExampleSharedCart',
+        path: 'items.length',
+        relation: '==',
+        value: '2',
+      }, 'Tests', 'value'),
+    ]);
+
+    expect(facts.valueFacts).toHaveLength(1);
+    expect(facts.valueFacts[0]).toMatchObject({
+      subject: 'ConsentExampleSharedCart',
+      path: ['items', 'length'],
+      relation: '==',
+      value: '1',
+    });
+    expect(facts.operationEventFacts).toHaveLength(1);
+    expect(facts.operationEventFacts[0]).toMatchObject({
+      operation: 'submitOrder',
+      phase: 'before',
+      subject: 'ConsentExampleSharedCart',
+      path: ['phase'],
+      value: 'SingleItem',
+    });
+    expect(facts.eventFacts).toHaveLength(1);
+    expect(facts.eventFacts[0]).toMatchObject({
+      event: 'AcceptConsent',
+      scope: 'ConsentExampleUserSession',
     });
   });
 });

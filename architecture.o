@@ -86,6 +86,21 @@
       "declaration": "machine",
       "level": "formal_z3",
       "mechanism": "Extracted transition facts are asserted against declared state-machine transition rules."
+    },
+    {
+      "declaration": "value_policy",
+      "level": "formal_z3",
+      "mechanism": "Reviewed scalar and collection value facts are asserted against value policy constraints."
+    },
+    {
+      "declaration": "operation_policy",
+      "level": "formal_z3",
+      "mechanism": "Reviewed operation before/after state facts are asserted against pre/postcondition constraints."
+    },
+    {
+      "declaration": "event_policy",
+      "level": "formal_z3",
+      "mechanism": "Reviewed event facts are checked against scoped event precedence constraints."
     }
   ],
   "constraints": [
@@ -99,6 +114,11 @@
     "(declare-sort RoleType 0)",
     "(declare-sort Field 0)",
     "(declare-sort StateValue 0)",
+    "(declare-sort FieldPath 0)",
+    "(declare-sort ScalarValue 0)",
+    "(declare-sort ValueRelation 0)",
+    "(declare-sort EventType 0)",
+    "(declare-datatype OperationPhase ((Phase__before) (Phase__after)))",
     "(declare-datatype Lifetime ((Lifetime__singleton) (Lifetime__scoped) (Lifetime__transient)))",
     "(declare-fun Flow      (Entity Entity) Bool)",
     "(declare-fun CanReach  (Entity Entity) Bool)",
@@ -119,6 +139,10 @@
     "(declare-fun Performs (Entity Operation DataType) Bool)",
     "(declare-fun OperationIn (Entity Operation) Bool)",
     "(declare-fun OperationOnDataIn (Entity Operation DataType) Bool)",
+    "(declare-fun ValueFact (DataType FieldPath ValueRelation ScalarValue) Bool)",
+    "(declare-fun ValueContradiction (DataType FieldPath ValueRelation ScalarValue) Bool)",
+    "(declare-fun OperationStateContradiction (Operation OperationPhase DataType FieldPath ValueRelation ScalarValue) Bool)",
+    "(declare-fun EventMissingPrecedence (EventType EventType DataType) Bool)",
     "(declare-sort InterfaceType 0)",
     "(declare-fun DependencyWithoutInterface (Entity Entity InterfaceType) Bool)",
     "(declare-fun ChecksRole (Entity RoleType) Bool)",
@@ -128,6 +152,22 @@
     "(declare-fun IsNode    (Entity) Bool)",
     "(declare-fun IsComp    (Entity) Bool)",
     "(declare-fun IsResource (Entity) Bool)",
+    "",
+    "; === enum declarations ===",
+    "(declare-datatype ConsentStatus ((ConsentStatus__Unknown) (ConsentStatus__Presented) (ConsentStatus__Accepted) (ConsentStatus__Rejected)))",
+    "(declare-datatype CartPhase ((CartPhase__Empty) (CartPhase__SingleItem) (CartPhase__MultiItem)))",
+    "(declare-datatype ConsentExampleOrderStatus ((ConsentExampleOrderStatus__Draft) (ConsentExampleOrderStatus__Submitted)))",
+    "(declare-datatype OrderStatus ((OrderStatus__Created) (OrderStatus__PendingPayment) (OrderStatus__Paid) (OrderStatus__FulfillmentQueued) (OrderStatus__Fulfilled) (OrderStatus__Cancelled) (OrderStatus__Refunded)))",
+    "",
+    "; === data type declarations ===",
+    "(declare-const AglcUiConfig DataType)",
+    "(declare-const AglcUiRun DataType)",
+    "(declare-const AglcUiFile DataType)",
+    "(declare-const AglcUiRunCreated DataType)",
+    "(declare-const ConsentExampleUserSession DataType)",
+    "(declare-const ConsentExampleSharedCart DataType)",
+    "(declare-const ConsentExampleOrder DataType)",
+    "(declare-const StripeOrder DataType)",
     "",
     "; === node declarations ===",
     "(declare-const node_runtime Entity)",
@@ -153,8 +193,16 @@
     "(assert (IsComp LanguageFrontend))",
     "(declare-const SmtBackend Entity)",
     "(assert (IsComp SmtBackend))",
-    "(declare-const RuntimeGate Entity)",
-    "(assert (IsComp RuntimeGate))",
+    "(declare-const RuntimeCore Entity)",
+    "(assert (IsComp RuntimeCore))",
+    "(declare-const PolicyGates Entity)",
+    "(assert (IsComp PolicyGates))",
+    "(declare-const SemanticQueryEngine Entity)",
+    "(assert (IsComp SemanticQueryEngine))",
+    "(declare-const StateMachineRuntime Entity)",
+    "(assert (IsComp StateMachineRuntime))",
+    "(declare-const UiWorkbench Entity)",
+    "(assert (IsComp UiWorkbench))",
     "(declare-const ExtractorAnalyzers Entity)",
     "(assert (IsComp ExtractorAnalyzers))",
     "(declare-const GraphProjection Entity)",
@@ -163,8 +211,10 @@
     "(assert (IsComp Emitters))",
     "(declare-const SpecGenerator Entity)",
     "(assert (IsComp SpecGenerator))",
-    "(declare-const DocsSite Entity)",
-    "(assert (IsComp DocsSite))",
+    "(declare-const DocsSource Entity)",
+    "(assert (IsComp DocsSource))",
+    "(declare-const GeneratedDocsSite Entity)",
+    "(assert (IsComp GeneratedDocsSite))",
     "(declare-const PackageMetadata Entity)",
     "(assert (IsComp PackageMetadata))",
     "(declare-const AgentSkill Entity)",
@@ -177,6 +227,30 @@
     "(assert (IsComp CliReferenceDocs))",
     "(declare-const PublicDocs Entity)",
     "(assert (IsComp PublicDocs))",
+    "(declare-const ConsentExampleConsentModule Entity)",
+    "(assert (IsComp ConsentExampleConsentModule))",
+    "(declare-const ConsentExampleCartModule Entity)",
+    "(assert (IsComp ConsentExampleCartModule))",
+    "(declare-const ConsentExampleCheckout Entity)",
+    "(assert (IsComp ConsentExampleCheckout))",
+    "(declare-const ConsentExampleViolationFixtures Entity)",
+    "(assert (IsComp ConsentExampleViolationFixtures))",
+    "(declare-const ConsentExampleDocsAndSpec Entity)",
+    "(assert (IsComp ConsentExampleDocsAndSpec))",
+    "(declare-const StripeExampleAndroidApp Entity)",
+    "(assert (IsComp StripeExampleAndroidApp))",
+    "(declare-const StripeExampleBackendApi Entity)",
+    "(assert (IsComp StripeExampleBackendApi))",
+    "(declare-const StripeExampleWebhook Entity)",
+    "(assert (IsComp StripeExampleWebhook))",
+    "(declare-const StripeExampleFulfillmentWorker Entity)",
+    "(assert (IsComp StripeExampleFulfillmentWorker))",
+    "(declare-const StripeExampleDocsAndSpec Entity)",
+    "(assert (IsComp StripeExampleDocsAndSpec))",
+    "(declare-const ExampleViolationFixtures Entity)",
+    "(assert (IsComp ExampleViolationFixtures))",
+    "(declare-const ExampleSpecs Entity)",
+    "(assert (IsComp ExampleSpecs))",
     "(declare-const ReleaseWorkflow Entity)",
     "(assert (IsComp ReleaseWorkflow))",
     "(declare-const DocsWorkflow Entity)",
@@ -202,7 +276,13 @@
     "; --- CompilerEntrypointBoundary ---",
     "(assert (=> (Flow SmtBackend CliCompiler) false))",
     "; --- CompilerEntrypointBoundary ---",
-    "(assert (=> (Flow RuntimeGate CliCompiler) false))",
+    "(assert (=> (Flow RuntimeCore CliCompiler) false))",
+    "; --- CompilerEntrypointBoundary ---",
+    "(assert (=> (Flow PolicyGates CliCompiler) false))",
+    "; --- CompilerEntrypointBoundary ---",
+    "(assert (=> (Flow SemanticQueryEngine CliCompiler) false))",
+    "; --- CompilerEntrypointBoundary ---",
+    "(assert (=> (Flow StateMachineRuntime CliCompiler) false))",
     "; --- CompilerEntrypointBoundary ---",
     "(assert (=> (Flow ExtractorAnalyzers CliCompiler) false))",
     "; --- CompilerEntrypointBoundary ---",
@@ -211,48 +291,224 @@
     "(assert (=> (Flow Emitters CliCompiler) false))",
     "; --- CompilerEntrypointBoundary ---",
     "(assert (=> (Flow SpecGenerator CliCompiler) false))",
-    "; --- SmtBackendIsolation ---",
-    "(assert (=> (Flow SmtBackend RuntimeGate) false))",
-    "; --- SmtBackendIsolation ---",
-    "(assert (=> (Flow SmtBackend ExtractorAnalyzers) false))",
-    "; --- SmtBackendIsolation ---",
-    "(assert (=> (Flow SmtBackend GraphProjection) false))",
     "; --- LanguageFrontendPurity ---",
-    "(assert (=> (Flow LanguageFrontend RuntimeGate) false))",
+    "(assert (=> (Flow LanguageFrontend RuntimeCore) false))",
+    "; --- LanguageFrontendPurity ---",
+    "(assert (=> (Flow LanguageFrontend PolicyGates) false))",
+    "; --- LanguageFrontendPurity ---",
+    "(assert (=> (Flow LanguageFrontend SemanticQueryEngine) false))",
+    "; --- LanguageFrontendPurity ---",
+    "(assert (=> (Flow LanguageFrontend StateMachineRuntime) false))",
     "; --- LanguageFrontendPurity ---",
     "(assert (=> (Flow LanguageFrontend GraphProjection) false))",
     "; --- LanguageFrontendPurity ---",
     "(assert (=> (Flow LanguageFrontend Emitters) false))",
+    "; --- LanguageFrontendPurity ---",
+    "(assert (=> (Flow LanguageFrontend UiWorkbench) false))",
+    "; --- SmtBackendIsolation ---",
+    "(assert (=> (Flow SmtBackend RuntimeCore) false))",
+    "; --- SmtBackendIsolation ---",
+    "(assert (=> (Flow SmtBackend PolicyGates) false))",
+    "; --- SmtBackendIsolation ---",
+    "(assert (=> (Flow SmtBackend SemanticQueryEngine) false))",
+    "; --- SmtBackendIsolation ---",
+    "(assert (=> (Flow SmtBackend StateMachineRuntime) false))",
+    "; --- SmtBackendIsolation ---",
+    "(assert (=> (Flow SmtBackend ExtractorAnalyzers) false))",
+    "; --- SmtBackendIsolation ---",
+    "(assert (=> (Flow SmtBackend GraphProjection) false))",
+    "; --- SmtBackendIsolation ---",
+    "(assert (=> (Flow SmtBackend UiWorkbench) false))",
     "; --- ExtractorAnalyzerBoundary ---",
     "(assert (=> (Flow ExtractorAnalyzers CliCompiler) false))",
     "; --- ExtractorAnalyzerBoundary ---",
     "(assert (=> (Flow ExtractorAnalyzers Emitters) false))",
+    "; --- ExtractorAnalyzerBoundary ---",
+    "(assert (=> (Flow ExtractorAnalyzers RuntimeCore) false))",
+    "; --- ExtractorAnalyzerBoundary ---",
+    "(assert (=> (Flow ExtractorAnalyzers PolicyGates) false))",
+    "; --- ExtractorAnalyzerBoundary ---",
+    "(assert (=> (Flow ExtractorAnalyzers SemanticQueryEngine) false))",
+    "; --- ExtractorAnalyzerBoundary ---",
+    "(assert (=> (Flow ExtractorAnalyzers StateMachineRuntime) false))",
+    "; --- ExtractorAnalyzerBoundary ---",
+    "(assert (=> (Flow ExtractorAnalyzers UiWorkbench) false))",
+    "; --- SemanticQueryEngineIsolation ---",
+    "(assert (=> (Flow SemanticQueryEngine CliCompiler) false))",
+    "; --- SemanticQueryEngineIsolation ---",
+    "(assert (=> (Flow SemanticQueryEngine SmtBackend) false))",
+    "; --- SemanticQueryEngineIsolation ---",
+    "(assert (=> (Flow SemanticQueryEngine RuntimeCore) false))",
+    "; --- SemanticQueryEngineIsolation ---",
+    "(assert (=> (Flow SemanticQueryEngine PolicyGates) false))",
+    "; --- SemanticQueryEngineIsolation ---",
+    "(assert (=> (Flow SemanticQueryEngine GraphProjection) false))",
+    "; --- SemanticQueryEngineIsolation ---",
+    "(assert (=> (Flow SemanticQueryEngine UiWorkbench) false))",
+    "; --- UiWorkbenchBoundary ---",
+    "(assert (=> (Flow UiWorkbench LanguageFrontend) false))",
+    "; --- UiWorkbenchBoundary ---",
+    "(assert (=> (Flow UiWorkbench SmtBackend) false))",
+    "; --- UiWorkbenchBoundary ---",
+    "(assert (=> (Flow UiWorkbench ExtractorAnalyzers) false))",
+    "; --- UiWorkbenchBoundary ---",
+    "(assert (=> (Flow UiWorkbench GraphProjection) false))",
+    "; --- UiWorkbenchBoundary ---",
+    "(assert (=> (Flow UiWorkbench StateMachineRuntime) false))",
+    "; --- UiWorkbenchBoundary ---",
+    "(assert (=> (Flow UiWorkbench SemanticQueryEngine) false))",
     "; --- VscodeApiBoundary ---",
-    "(assert (=> (Flow VscodeExtension RuntimeGate) false))",
+    "(assert (=> (Flow VscodeExtension RuntimeCore) false))",
+    "; --- VscodeApiBoundary ---",
+    "(assert (=> (Flow VscodeExtension PolicyGates) false))",
+    "; --- VscodeApiBoundary ---",
+    "(assert (=> (Flow VscodeExtension SemanticQueryEngine) false))",
+    "; --- VscodeApiBoundary ---",
+    "(assert (=> (Flow VscodeExtension StateMachineRuntime) false))",
     "; --- VscodeApiBoundary ---",
     "(assert (=> (Flow VscodeExtension ExtractorAnalyzers) false))",
     "; --- VscodeApiBoundary ---",
     "(assert (=> (Flow VscodeExtension SmtBackend) false))",
     "; --- VscodeApiBoundary ---",
     "(assert (=> (Flow VscodeExtension GraphProjection) false))",
+    "; --- VscodeApiBoundary ---",
+    "(assert (=> (Flow VscodeExtension UiWorkbench) false))",
+    "",
+    "; === state machine transition rules ===",
+    "; --- ConsentExampleConsentLifecycle ---",
+    "(declare-const Field__ConsentExampleUserSession__consent Field)",
+    "(declare-const State__ConsentStatus__Unknown StateValue)",
+    "(declare-const State__ConsentStatus__Presented StateValue)",
+    "(declare-const State__ConsentStatus__Accepted StateValue)",
+    "(declare-const State__ConsentStatus__Rejected StateValue)",
+    "(assert (=> (Transition ConsentExampleUserSession Field__ConsentExampleUserSession__consent State__ConsentStatus__Unknown State__ConsentStatus__Accepted) false))",
+    "(assert (=> (Transition ConsentExampleUserSession Field__ConsentExampleUserSession__consent State__ConsentStatus__Unknown State__ConsentStatus__Rejected) false))",
+    "(assert (=> (Transition ConsentExampleUserSession Field__ConsentExampleUserSession__consent State__ConsentStatus__Presented State__ConsentStatus__Unknown) false))",
+    "(assert (=> (Transition ConsentExampleUserSession Field__ConsentExampleUserSession__consent State__ConsentStatus__Accepted State__ConsentStatus__Unknown) false))",
+    "(assert (=> (Transition ConsentExampleUserSession Field__ConsentExampleUserSession__consent State__ConsentStatus__Accepted State__ConsentStatus__Presented) false))",
+    "(assert (=> (Transition ConsentExampleUserSession Field__ConsentExampleUserSession__consent State__ConsentStatus__Accepted State__ConsentStatus__Rejected) false))",
+    "(assert (=> (Transition ConsentExampleUserSession Field__ConsentExampleUserSession__consent State__ConsentStatus__Rejected State__ConsentStatus__Unknown) false))",
+    "(assert (=> (Transition ConsentExampleUserSession Field__ConsentExampleUserSession__consent State__ConsentStatus__Rejected State__ConsentStatus__Presented) false))",
+    "(assert (=> (Transition ConsentExampleUserSession Field__ConsentExampleUserSession__consent State__ConsentStatus__Rejected State__ConsentStatus__Accepted) false))",
+    "; --- ConsentExampleCartProtocol ---",
+    "(declare-const Field__ConsentExampleSharedCart__phase Field)",
+    "(declare-const State__CartPhase__Empty StateValue)",
+    "(declare-const State__CartPhase__SingleItem StateValue)",
+    "(declare-const State__CartPhase__MultiItem StateValue)",
+    "(assert (=> (Transition ConsentExampleSharedCart Field__ConsentExampleSharedCart__phase State__CartPhase__Empty State__CartPhase__MultiItem) false))",
+    "(assert (=> (Transition ConsentExampleSharedCart Field__ConsentExampleSharedCart__phase State__CartPhase__SingleItem State__CartPhase__Empty) false))",
+    "(assert (=> (Transition ConsentExampleSharedCart Field__ConsentExampleSharedCart__phase State__CartPhase__MultiItem State__CartPhase__Empty) false))",
+    "(assert (=> (Transition ConsentExampleSharedCart Field__ConsentExampleSharedCart__phase State__CartPhase__MultiItem State__CartPhase__SingleItem) false))",
+    "; --- StripeOrderLifecycle ---",
+    "(declare-const Field__StripeOrder__status Field)",
+    "(declare-const State__OrderStatus__Created StateValue)",
+    "(declare-const State__OrderStatus__PendingPayment StateValue)",
+    "(declare-const State__OrderStatus__Paid StateValue)",
+    "(declare-const State__OrderStatus__FulfillmentQueued StateValue)",
+    "(declare-const State__OrderStatus__Fulfilled StateValue)",
+    "(declare-const State__OrderStatus__Cancelled StateValue)",
+    "(declare-const State__OrderStatus__Refunded StateValue)",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Created State__OrderStatus__Paid) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Created State__OrderStatus__FulfillmentQueued) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Created State__OrderStatus__Fulfilled) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Created State__OrderStatus__Cancelled) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Created State__OrderStatus__Refunded) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__PendingPayment State__OrderStatus__Created) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__PendingPayment State__OrderStatus__FulfillmentQueued) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__PendingPayment State__OrderStatus__Fulfilled) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__PendingPayment State__OrderStatus__Refunded) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Paid State__OrderStatus__Created) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Paid State__OrderStatus__PendingPayment) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Paid State__OrderStatus__Fulfilled) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Paid State__OrderStatus__Cancelled) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__FulfillmentQueued State__OrderStatus__Created) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__FulfillmentQueued State__OrderStatus__PendingPayment) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__FulfillmentQueued State__OrderStatus__Paid) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__FulfillmentQueued State__OrderStatus__Cancelled) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__FulfillmentQueued State__OrderStatus__Refunded) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Fulfilled State__OrderStatus__Created) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Fulfilled State__OrderStatus__PendingPayment) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Fulfilled State__OrderStatus__Paid) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Fulfilled State__OrderStatus__FulfillmentQueued) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Fulfilled State__OrderStatus__Cancelled) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Fulfilled State__OrderStatus__Refunded) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Cancelled State__OrderStatus__Created) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Cancelled State__OrderStatus__PendingPayment) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Cancelled State__OrderStatus__Paid) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Cancelled State__OrderStatus__FulfillmentQueued) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Cancelled State__OrderStatus__Fulfilled) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Cancelled State__OrderStatus__Refunded) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Refunded State__OrderStatus__Created) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Refunded State__OrderStatus__PendingPayment) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Refunded State__OrderStatus__Paid) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Refunded State__OrderStatus__FulfillmentQueued) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Refunded State__OrderStatus__Fulfilled) false))",
+    "(assert (=> (Transition StripeOrder Field__StripeOrder__status State__OrderStatus__Refunded State__OrderStatus__Cancelled) false))",
+    "",
+    "; === value policy rules ===",
+    "; --- ConsentExampleCartShape ---",
+    "(declare-const FieldPath__ConsentExampleSharedCart__items__length FieldPath)",
+    "(declare-const Relation__eqeq ValueRelation)",
+    "(declare-const Value__1 ScalarValue)",
+    "(declare-const FieldPath__ConsentExampleSharedCart__phase FieldPath)",
+    "(declare-const Value__SingleItem ScalarValue)",
+    "(assert (=> (and (ValueFact ConsentExampleSharedCart FieldPath__ConsentExampleSharedCart__phase Relation__eqeq Value__SingleItem) (ValueContradiction ConsentExampleSharedCart FieldPath__ConsentExampleSharedCart__items__length Relation__eqeq Value__1)) false))",
+    "(declare-const FieldPath__ConsentExampleOrder__total FieldPath)",
+    "(declare-const Relation__gteq ValueRelation)",
+    "(declare-const Value__0 ScalarValue)",
+    "(assert (=> (ValueContradiction ConsentExampleOrder FieldPath__ConsentExampleOrder__total Relation__gteq Value__0) false))",
+    "(declare-const FieldPath__ConsentExampleUserSession__gdprAccepted FieldPath)",
+    "(declare-const Value__true ScalarValue)",
+    "(assert (=> (ValueContradiction ConsentExampleUserSession FieldPath__ConsentExampleUserSession__gdprAccepted Relation__eqeq Value__true) false))",
+    "",
+    "; === operation policy rules ===",
+    "; --- ConsentExampleSubmitOrderRules ---",
+    "(declare-const Operation__submitOrder Operation)",
+    "(assert (=> (OperationStateContradiction Operation__submitOrder Phase__before ConsentExampleSharedCart FieldPath__ConsentExampleSharedCart__phase Relation__eqeq Value__SingleItem) false))",
+    "(declare-const FieldPath__ConsentExampleOrder__status FieldPath)",
+    "(declare-const Value__Submitted ScalarValue)",
+    "(assert (=> (OperationStateContradiction Operation__submitOrder Phase__after ConsentExampleOrder FieldPath__ConsentExampleOrder__status Relation__eqeq Value__Submitted) false))",
+    "",
+    "; === event policy rules ===",
+    "; --- ConsentExampleProtocol ---",
+    "(declare-const Event__AcceptConsent EventType)",
+    "(declare-const Event__ShowConsent EventType)",
+    "(assert (=> (EventMissingPrecedence Event__AcceptConsent Event__ShowConsent ConsentExampleUserSession) false))",
     ""
   ],
   "mappings": {
     "CliCompiler": "src/index.ts",
     "LanguageFrontend": "src/{ast,checker,importer,import-openapi,import-tf,lexer,parser}.ts",
     "SmtBackend": "src/smt/**/*.ts",
-    "RuntimeGate": "src/runtime/{contract-gate,delta-assert,diff-parser,diagnostic,extraction-cache,gate}.ts",
+    "RuntimeCore": "src/runtime/{delta-assert,diff-parser,diagnostic,extraction-cache,gate}.ts",
+    "PolicyGates": "src/runtime/{contract-gate,workflow-gate,change-gate}.ts",
+    "SemanticQueryEngine": "src/runtime/extraction-query.ts",
+    "StateMachineRuntime": "src/runtime/state-machine.ts",
+    "UiWorkbench": "src/runtime/ui-server.ts",
     "ExtractorAnalyzers": "src/analyzers/**/*.ts",
     "GraphProjection": "src/runtime/graph-projection.ts",
     "Emitters": "src/emitters/**/*.ts",
     "SpecGenerator": "src/generate.ts",
-    "DocsSite": "{docs,site,scripts}/**/*.{md,ts,js,mjs}",
+    "DocsSource": "{docs,scripts}/**/*.{md,ts,js,mjs}",
+    "GeneratedDocsSite": "site/**/*",
     "PackageMetadata": "{package.json,package-lock.json}",
     "AgentSkill": "skills/aglang/SKILL.md",
     "AgentSkillInstaller": "scripts/postinstall-agent-skill.mjs",
     "ReadmeDocs": "README.md",
     "CliReferenceDocs": "docs/cli/reference.md",
     "PublicDocs": "docs/**/*.md",
+    "ConsentExampleConsentModule": "examples/consent-and-cart-protocol/src/{consent,compliance}.ts",
+    "ConsentExampleCartModule": "examples/consent-and-cart-protocol/src/cart.ts",
+    "ConsentExampleCheckout": "examples/consent-and-cart-protocol/src/{checkout,checkout-good,api}.ts",
+    "ConsentExampleViolationFixtures": "examples/consent-and-cart-protocol/src/violations/**/*.ts",
+    "ConsentExampleDocsAndSpec": "examples/consent-and-cart-protocol/{README.md,architecture.ag,.aglang/extractors/**/*.agq.yml}",
+    "StripeExampleAndroidApp": "examples/stripe-order-workflow/android/**/*.kt",
+    "StripeExampleBackendApi": "examples/stripe-order-workflow/backend/api/**/*.ts",
+    "StripeExampleWebhook": "examples/stripe-order-workflow/backend/webhooks/**/*.ts",
+    "StripeExampleFulfillmentWorker": "examples/stripe-order-workflow/workers/**/*.ts",
+    "StripeExampleDocsAndSpec": "examples/stripe-order-workflow/{README.md,architecture.ag,.aglang/extractors/**/*.agq.yml}",
+    "ExampleViolationFixtures": "examples/**/violations/**/*",
+    "ExampleSpecs": "examples/**/*.ag",
     "ReleaseWorkflow": ".github/workflows/release.yml",
     "DocsWorkflow": ".github/workflows/docs.yml",
     "VscodeExtension": "editors/vscode-aglang/src/**/*.ts",
@@ -279,7 +535,22 @@
         },
         {
           "kind": "DenyFlow",
-          "from": "RuntimeGate",
+          "from": "RuntimeCore",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "PolicyGates",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SemanticQueryEngine",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "StateMachineRuntime",
           "to": "CliCompiler"
         },
         {
@@ -305,32 +576,27 @@
       ]
     },
     {
-      "name": "SmtBackendIsolation",
-      "rules": [
-        {
-          "kind": "DenyFlow",
-          "from": "SmtBackend",
-          "to": "RuntimeGate"
-        },
-        {
-          "kind": "DenyFlow",
-          "from": "SmtBackend",
-          "to": "ExtractorAnalyzers"
-        },
-        {
-          "kind": "DenyFlow",
-          "from": "SmtBackend",
-          "to": "GraphProjection"
-        }
-      ]
-    },
-    {
       "name": "LanguageFrontendPurity",
       "rules": [
         {
           "kind": "DenyFlow",
           "from": "LanguageFrontend",
-          "to": "RuntimeGate"
+          "to": "RuntimeCore"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "LanguageFrontend",
+          "to": "PolicyGates"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "LanguageFrontend",
+          "to": "SemanticQueryEngine"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "LanguageFrontend",
+          "to": "StateMachineRuntime"
         },
         {
           "kind": "DenyFlow",
@@ -341,6 +607,51 @@
           "kind": "DenyFlow",
           "from": "LanguageFrontend",
           "to": "Emitters"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "LanguageFrontend",
+          "to": "UiWorkbench"
+        }
+      ]
+    },
+    {
+      "name": "SmtBackendIsolation",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "RuntimeCore"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "PolicyGates"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "SemanticQueryEngine"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "StateMachineRuntime"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "ExtractorAnalyzers"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "GraphProjection"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "UiWorkbench"
         }
       ]
     },
@@ -356,6 +667,101 @@
           "kind": "DenyFlow",
           "from": "ExtractorAnalyzers",
           "to": "Emitters"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "ExtractorAnalyzers",
+          "to": "RuntimeCore"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "ExtractorAnalyzers",
+          "to": "PolicyGates"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "ExtractorAnalyzers",
+          "to": "SemanticQueryEngine"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "ExtractorAnalyzers",
+          "to": "StateMachineRuntime"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "ExtractorAnalyzers",
+          "to": "UiWorkbench"
+        }
+      ]
+    },
+    {
+      "name": "SemanticQueryEngineIsolation",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "SemanticQueryEngine",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SemanticQueryEngine",
+          "to": "SmtBackend"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SemanticQueryEngine",
+          "to": "RuntimeCore"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SemanticQueryEngine",
+          "to": "PolicyGates"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SemanticQueryEngine",
+          "to": "GraphProjection"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SemanticQueryEngine",
+          "to": "UiWorkbench"
+        }
+      ]
+    },
+    {
+      "name": "UiWorkbenchBoundary",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "UiWorkbench",
+          "to": "LanguageFrontend"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "UiWorkbench",
+          "to": "SmtBackend"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "UiWorkbench",
+          "to": "ExtractorAnalyzers"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "UiWorkbench",
+          "to": "GraphProjection"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "UiWorkbench",
+          "to": "StateMachineRuntime"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "UiWorkbench",
+          "to": "SemanticQueryEngine"
         }
       ]
     },
@@ -365,7 +771,22 @@
         {
           "kind": "DenyFlow",
           "from": "VscodeExtension",
-          "to": "RuntimeGate"
+          "to": "RuntimeCore"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "VscodeExtension",
+          "to": "PolicyGates"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "VscodeExtension",
+          "to": "SemanticQueryEngine"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "VscodeExtension",
+          "to": "StateMachineRuntime"
         },
         {
           "kind": "DenyFlow",
@@ -381,6 +802,11 @@
           "kind": "DenyFlow",
           "from": "VscodeExtension",
           "to": "GraphProjection"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "VscodeExtension",
+          "to": "UiWorkbench"
         }
       ]
     }
@@ -417,31 +843,440 @@
     }
   ],
   "resources": [],
-  "enums": [],
-  "dataTypes": [],
-  "stateMachines": [],
+  "enums": [
+    {
+      "name": "ConsentStatus",
+      "values": [
+        "Unknown",
+        "Presented",
+        "Accepted",
+        "Rejected"
+      ]
+    },
+    {
+      "name": "CartPhase",
+      "values": [
+        "Empty",
+        "SingleItem",
+        "MultiItem"
+      ]
+    },
+    {
+      "name": "ConsentExampleOrderStatus",
+      "values": [
+        "Draft",
+        "Submitted"
+      ]
+    },
+    {
+      "name": "OrderStatus",
+      "values": [
+        "Created",
+        "PendingPayment",
+        "Paid",
+        "FulfillmentQueued",
+        "Fulfilled",
+        "Cancelled",
+        "Refunded"
+      ]
+    }
+  ],
+  "dataTypes": [
+    {
+      "name": "AglcUiConfig",
+      "fields": [
+        {
+          "key": "projectRoot",
+          "typeExpr": "String"
+        },
+        {
+          "key": "artifact",
+          "typeExpr": "String"
+        }
+      ]
+    },
+    {
+      "name": "AglcUiRun",
+      "fields": [
+        {
+          "key": "id",
+          "typeExpr": "String"
+        }
+      ]
+    },
+    {
+      "name": "AglcUiFile",
+      "fields": [
+        {
+          "key": "path",
+          "typeExpr": "String"
+        },
+        {
+          "key": "content",
+          "typeExpr": "String"
+        }
+      ]
+    },
+    {
+      "name": "AglcUiRunCreated",
+      "fields": [
+        {
+          "key": "id",
+          "typeExpr": "String"
+        }
+      ]
+    },
+    {
+      "name": "ConsentExampleUserSession",
+      "fields": [
+        {
+          "key": "consent",
+          "typeExpr": "ConsentStatus"
+        },
+        {
+          "key": "gdprAccepted",
+          "typeExpr": "Bool"
+        }
+      ]
+    },
+    {
+      "name": "ConsentExampleSharedCart",
+      "fields": [
+        {
+          "key": "phase",
+          "typeExpr": "CartPhase"
+        },
+        {
+          "key": "items",
+          "typeExpr": "List<String>"
+        }
+      ]
+    },
+    {
+      "name": "ConsentExampleOrder",
+      "fields": [
+        {
+          "key": "status",
+          "typeExpr": "ConsentExampleOrderStatus"
+        },
+        {
+          "key": "total",
+          "typeExpr": "Money"
+        }
+      ]
+    },
+    {
+      "name": "StripeOrder",
+      "fields": [
+        {
+          "key": "id",
+          "typeExpr": "UUID"
+        },
+        {
+          "key": "status",
+          "typeExpr": "OrderStatus"
+        },
+        {
+          "key": "stripe_payment_intent_id",
+          "typeExpr": "Optional<String>"
+        }
+      ]
+    }
+  ],
+  "stateMachines": [
+    {
+      "name": "ConsentExampleConsentLifecycle",
+      "onType": "ConsentExampleUserSession",
+      "onField": "consent",
+      "transitions": [
+        {
+          "kind": "allow",
+          "from": "Unknown",
+          "to": "Presented"
+        },
+        {
+          "kind": "allow",
+          "from": "Presented",
+          "to": "Accepted"
+        },
+        {
+          "kind": "allow",
+          "from": "Presented",
+          "to": "Rejected"
+        },
+        {
+          "kind": "deny",
+          "from": "Unknown",
+          "to": "Accepted"
+        },
+        {
+          "kind": "deny",
+          "from": "Unknown",
+          "to": "Rejected"
+        }
+      ]
+    },
+    {
+      "name": "ConsentExampleCartProtocol",
+      "onType": "ConsentExampleSharedCart",
+      "onField": "phase",
+      "transitions": [
+        {
+          "kind": "allow",
+          "from": "Empty",
+          "to": "SingleItem"
+        },
+        {
+          "kind": "allow",
+          "from": "SingleItem",
+          "to": "MultiItem"
+        },
+        {
+          "kind": "deny",
+          "from": "Empty",
+          "to": "MultiItem"
+        }
+      ]
+    },
+    {
+      "name": "StripeOrderLifecycle",
+      "onType": "StripeOrder",
+      "onField": "status",
+      "transitions": [
+        {
+          "kind": "allow",
+          "from": "Created",
+          "to": "PendingPayment"
+        },
+        {
+          "kind": "allow",
+          "from": "PendingPayment",
+          "to": "Paid"
+        },
+        {
+          "kind": "allow",
+          "from": "PendingPayment",
+          "to": "Cancelled"
+        },
+        {
+          "kind": "allow",
+          "from": "Paid",
+          "to": "FulfillmentQueued"
+        },
+        {
+          "kind": "allow",
+          "from": "FulfillmentQueued",
+          "to": "Fulfilled"
+        },
+        {
+          "kind": "allow",
+          "from": "Paid",
+          "to": "Refunded"
+        },
+        {
+          "kind": "deny",
+          "from": "Created",
+          "to": "Paid"
+        },
+        {
+          "kind": "deny",
+          "from": "Created",
+          "to": "Fulfilled"
+        },
+        {
+          "kind": "deny",
+          "from": "PendingPayment",
+          "to": "Fulfilled"
+        },
+        {
+          "kind": "deny",
+          "from": "Cancelled",
+          "to": "*"
+        },
+        {
+          "kind": "deny",
+          "from": "Refunded",
+          "to": "*"
+        }
+      ]
+    }
+  ],
+  "valuePolicies": [
+    {
+      "name": "ConsentExampleCartShape",
+      "rules": [
+        {
+          "kind": "RequireValue",
+          "requirement": {
+            "subject": "ConsentExampleSharedCart",
+            "path": [
+              "items",
+              "length"
+            ],
+            "relation": "==",
+            "value": 1
+          },
+          "when": {
+            "subject": "ConsentExampleSharedCart",
+            "path": [
+              "phase"
+            ],
+            "relation": "==",
+            "value": "SingleItem"
+          }
+        },
+        {
+          "kind": "RequireValue",
+          "requirement": {
+            "subject": "ConsentExampleOrder",
+            "path": [
+              "total"
+            ],
+            "relation": ">=",
+            "value": 0
+          }
+        },
+        {
+          "kind": "RequireValue",
+          "requirement": {
+            "subject": "ConsentExampleUserSession",
+            "path": [
+              "gdprAccepted"
+            ],
+            "relation": "==",
+            "value": true
+          }
+        }
+      ]
+    }
+  ],
+  "operationPolicies": [
+    {
+      "name": "ConsentExampleSubmitOrderRules",
+      "rules": [
+        {
+          "kind": "RequireBefore",
+          "operation": "submitOrder",
+          "requirement": {
+            "subject": "ConsentExampleSharedCart",
+            "path": [
+              "phase"
+            ],
+            "relation": "==",
+            "value": "SingleItem"
+          }
+        },
+        {
+          "kind": "EnsureAfter",
+          "operation": "submitOrder",
+          "requirement": {
+            "subject": "ConsentExampleOrder",
+            "path": [
+              "status"
+            ],
+            "relation": "==",
+            "value": "Submitted"
+          }
+        }
+      ]
+    }
+  ],
+  "eventPolicies": [
+    {
+      "name": "ConsentExampleProtocol",
+      "rules": [
+        {
+          "kind": "RequirePrecededBy",
+          "event": "AcceptConsent",
+          "precededBy": "ShowConsent",
+          "scope": "ConsentExampleUserSession"
+        }
+      ]
+    }
+  ],
   "permissions": [],
   "permissionPolicies": [],
-  "contracts": [],
-  "componentContracts": [],
+  "contracts": [
+    {
+      "name": "AglcUiApi",
+      "endpoints": [
+        {
+          "kind": "http",
+          "method": "GET",
+          "path": "/api/config",
+          "returnType": "AglcUiConfig"
+        },
+        {
+          "kind": "http",
+          "method": "GET",
+          "path": "/api/runs",
+          "returnType": "AglcUiRun[]"
+        },
+        {
+          "kind": "http",
+          "method": "GET",
+          "path": "/api/runs/:id",
+          "returnType": "AglcUiRun"
+        },
+        {
+          "kind": "http",
+          "method": "GET",
+          "path": "/api/files",
+          "returnType": "AglcUiFile"
+        },
+        {
+          "kind": "http",
+          "method": "POST",
+          "path": "/api/runs",
+          "returnType": "AglcUiRunCreated"
+        }
+      ]
+    }
+  ],
+  "componentContracts": [
+    {
+      "component": "UiWorkbench",
+      "implements": [
+        "AglcUiApi"
+      ],
+      "consumes": []
+    }
+  ],
   "componentData": [],
   "componentMeta": [],
   "componentNodes": {
     "CliCompiler": "node_runtime",
     "LanguageFrontend": "node_runtime",
     "SmtBackend": "node_runtime",
-    "RuntimeGate": "node_runtime",
+    "RuntimeCore": "node_runtime",
+    "PolicyGates": "node_runtime",
+    "SemanticQueryEngine": "node_runtime",
+    "StateMachineRuntime": "node_runtime",
+    "UiWorkbench": "node_runtime",
     "ExtractorAnalyzers": "node_runtime",
     "GraphProjection": "node_runtime",
     "Emitters": "node_runtime",
     "SpecGenerator": "node_runtime",
-    "DocsSite": "node_runtime",
+    "DocsSource": "node_runtime",
+    "GeneratedDocsSite": "node_runtime",
     "PackageMetadata": "node_runtime",
     "AgentSkill": "node_runtime",
     "AgentSkillInstaller": "node_runtime",
     "ReadmeDocs": "node_runtime",
     "CliReferenceDocs": "node_runtime",
     "PublicDocs": "node_runtime",
+    "ConsentExampleConsentModule": "node_runtime",
+    "ConsentExampleCartModule": "node_runtime",
+    "ConsentExampleCheckout": "node_runtime",
+    "ConsentExampleViolationFixtures": "node_runtime",
+    "ConsentExampleDocsAndSpec": "node_runtime",
+    "StripeExampleAndroidApp": "node_runtime",
+    "StripeExampleBackendApi": "node_runtime",
+    "StripeExampleWebhook": "node_runtime",
+    "StripeExampleFulfillmentWorker": "node_runtime",
+    "StripeExampleDocsAndSpec": "node_runtime",
+    "ExampleViolationFixtures": "node_runtime",
+    "ExampleSpecs": "node_runtime",
     "ReleaseWorkflow": "github_actions",
     "DocsWorkflow": "github_actions",
     "VscodeExtension": "node_runtime",
@@ -615,7 +1450,22 @@
         {
           "kind": "RequireTouched",
           "required": "ArchitectureSpec",
-          "trigger": "RuntimeGate"
+          "trigger": "RuntimeCore"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ArchitectureSpec",
+          "trigger": "PolicyGates"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ArchitectureSpec",
+          "trigger": "SemanticQueryEngine"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ArchitectureSpec",
+          "trigger": "StateMachineRuntime"
         },
         {
           "kind": "RequireTouched",

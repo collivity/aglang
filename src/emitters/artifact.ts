@@ -1,5 +1,6 @@
 // Emits the compiled architecture.o artifact
 import type { Program } from '../ast.ts';
+import type { PolicyValue, ValueRelation } from '../ast.ts';
 import { translate } from '../smt/translator.ts';
 import { expandInvariantRules } from '../invariant-selectors.ts';
 import { writeFileSync } from 'fs';
@@ -30,6 +31,13 @@ export type ArtifactDiPolicyRule =
   | { kind: 'DenyLifetime'; from: 'singleton' | 'scoped' | 'transient'; to: 'singleton' | 'scoped' | 'transient' }
   | { kind: 'DenyLifetimeReach'; from: 'singleton' | 'scoped' | 'transient'; to: 'singleton' | 'scoped' | 'transient' }
   | { kind: 'DenyResolve'; service: string; from: string };
+
+export interface ArtifactValueExpression {
+  subject: string;
+  path: string[];
+  relation: ValueRelation;
+  value: PolicyValue;
+}
 
 export interface ArchitectureArtifact {
   schemaVersion: number;
@@ -63,6 +71,31 @@ export interface ArchitectureArtifact {
     onType: string;
     onField: string;
     transitions: Array<{ kind: 'allow' | 'deny'; from: string; to: string }>;
+  }>;
+  valuePolicies: Array<{
+    name: string;
+    rules: Array<{
+      kind: 'RequireValue';
+      requirement: ArtifactValueExpression;
+      when?: ArtifactValueExpression;
+    }>;
+  }>;
+  operationPolicies: Array<{
+    name: string;
+    rules: Array<{
+      kind: 'RequireBefore' | 'EnsureAfter';
+      operation: string;
+      requirement: ArtifactValueExpression;
+    }>;
+  }>;
+  eventPolicies: Array<{
+    name: string;
+    rules: Array<{
+      kind: 'RequirePrecededBy';
+      event: string;
+      precededBy: string;
+      scope: string;
+    }>;
   }>;
   // Permission declarations (advisory — not Z3-enforced yet)
   permissions: Array<{
@@ -173,6 +206,9 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   const enums: ArchitectureArtifact['enums'] = [];
   const dataTypes: ArchitectureArtifact['dataTypes'] = [];
   const stateMachines: ArchitectureArtifact['stateMachines'] = [];
+  const valuePolicies: ArchitectureArtifact['valuePolicies'] = [];
+  const operationPolicies: ArchitectureArtifact['operationPolicies'] = [];
+  const eventPolicies: ArchitectureArtifact['eventPolicies'] = [];
   const permissions: ArchitectureArtifact['permissions'] = [];
   const contracts: ArchitectureArtifact['contracts'] = [];
   const componentContracts: ArchitectureArtifact['componentContracts'] = [];
@@ -281,6 +317,24 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
         onType: decl.onType,
         onField: decl.onField,
         transitions: decl.transitions.map(t => ({ kind: t.kind, from: t.from, to: t.to })),
+      });
+    }
+    if (decl.kind === 'ValuePolicyDecl') {
+      valuePolicies.push({
+        name: decl.name,
+        rules: decl.rules.map(rule => ({ ...rule })),
+      });
+    }
+    if (decl.kind === 'OperationPolicyDecl') {
+      operationPolicies.push({
+        name: decl.name,
+        rules: decl.rules.map(rule => ({ ...rule })),
+      });
+    }
+    if (decl.kind === 'EventPolicyDecl') {
+      eventPolicies.push({
+        name: decl.name,
+        rules: decl.rules.map(rule => ({ ...rule })),
       });
     }
     if (decl.kind === 'PermissionDecl') {
@@ -443,6 +497,21 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
         level: 'formal_z3',
         mechanism: 'Extracted transition facts are asserted against declared state-machine transition rules.',
       },
+      {
+        declaration: 'value_policy',
+        level: 'formal_z3',
+        mechanism: 'Reviewed scalar and collection value facts are asserted against value policy constraints.',
+      },
+      {
+        declaration: 'operation_policy',
+        level: 'formal_z3',
+        mechanism: 'Reviewed operation before/after state facts are asserted against pre/postcondition constraints.',
+      },
+      {
+        declaration: 'event_policy',
+        level: 'formal_z3',
+        mechanism: 'Reviewed event facts are checked against scoped event precedence constraints.',
+      },
     ],
     constraints,
     mappings,
@@ -453,6 +522,9 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
     enums,
     dataTypes,
     stateMachines,
+    valuePolicies,
+    operationPolicies,
+    eventPolicies,
     permissions,
     permissionPolicies: permissions,
     contracts,

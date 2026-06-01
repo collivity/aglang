@@ -1,0 +1,45 @@
+[
+  {
+    "id": "explain_blocking_violations",
+    "when": "violations_present",
+    "instruction": "For each stable violation id, run aglc explain with the same scope and summarize the implementation repair before editing.",
+    "violation_ids": []
+  },
+  {
+    "id": "review_weak_or_missing_evidence",
+    "when": "warnings_or_empty_graph",
+    "instruction": "Review warnings, empty graph projections, and unmapped files. Ask the engineer before changing .ag or .agq.yml.",
+    "warning_count": 0,
+    "graph_fact_count": 679
+  },
+  {
+    "id": "report_scope_to_engineer",
+    "when": "always",
+    "instruction": "Show the engineer which files mapped to which components, which rules were checked, and which evidence was extracted.",
+    "changed_components": [
+      "DocsWorkflow",
+      "ReleaseWorkflow",
+      "AgentContext",
+      "ArchitectureSpec",
+      "CompiledArchitecture",
+      "DocsSite",
+      "PublicDocs",
+      "CliReferenceDocs",
+      "VscodeExtension",
+      "PackageMetadata",
+      "ReadmeDocs",
+      "AgentSkillInstaller",
+      "SkillManifest",
+      "AgentSkill",
+      "ExtractorAnalyzers",
+      "LanguageFrontend",
+      "Emitters",
+      "SpecGenerator",
+      "CliCompiler",
+      "RuntimeGate",
+      "GraphProjection",
+      "SmtBackend",
+      "Tests"
+    ]
+  }
+]

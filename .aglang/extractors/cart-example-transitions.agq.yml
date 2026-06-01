@@ -1,0 +1,15 @@
+id: ConsentExampleCartTransitions
+owner: examples
+version: 1
+confidence: definite
+match:
+  subject: ConsentExampleCartModule
+  kind: assignment
+  property: phase
+  valueEnum: CartPhase
+emit:
+  kind: transition
+  data: ConsentExampleSharedCart
+  field: phase
+  from: "$previousMember"
+  to: "$valueMember"
