@@ -3,13 +3,19 @@ layout: home
 
 hero:
   name: aglang
-  text: Auditable Architecture Verification Layer
-  tagline: "Turn architecture intent, deterministic code facts, and reviewed semantic queries into a checked model of a real system."
+  text: Verifiable specifications for agents and humans
+  tagline: "Write architecture intent once, compile it into machine-checkable artifacts, and let humans, agents, and CI use the same truth. Install: npm install -g @collivity/aglang"
   image:
     src: /hero.svg
     alt: aglang architecture pipeline diagram
   actions:
     - theme: brand
+      text: Install →
+      link: '#install'
+    - theme: alt
+      text: Agent Guide
+      link: /llms
+    - theme: alt
       text: Get Started →
       link: /guide/getting-started
     - theme: alt
@@ -24,8 +30,8 @@ hero:
 
 features:
   - icon: ✅
-    title: Verifies Code Facts
-    details: "aglang compiles a reviewed `.ag` spec into `architecture.o`, extracts tree-sitter and AST facts, and checks those facts against declared rules."
+    title: Verifiable Spec Language
+    details: "aglang turns reviewed architecture specifications into artifacts that humans can read and agents can execute against."
 
   - icon: 🔎
     title: Reviews Semantic Queries
@@ -48,11 +54,37 @@ features:
     details: "Agents are a primary workflow because they benefit from machine-readable architecture context, but the same checks serve humans and CI."
 ---
 
+## Install
+
+```bash
+npm install -g @collivity/aglang
+aglc install-agent-skill
+```
+
+Then create or refresh the architecture interface for a repo:
+
+```bash
+aglc add .
+aglc generate . --out architecture.ag
+aglc compile architecture.ag --out architecture.o
+aglc emit-context --arch architecture.o --out AGENTS.md
+aglc emit-skill --arch architecture.o --out skill.json
+```
+
+After that, agents and humans use the same checks:
+
+```bash
+aglc check-file --arch architecture.o --file src/foo.ts --json
+aglc check --arch architecture.o --project . --all --json
+```
+
+---
+
 ## What aglang is
 
-aglang is an auditable verification layer for architecture and code facts.
+aglang is a verifiable specification language for agents and humans.
 
-You describe components, nodes, contracts, state machines, and rules in a `.ag` file. `aglc` compiles that into `architecture.o`, extracts deterministic facts from the repository, applies reviewed semantic queries from `.agq.yml`, and checks the resulting model with Z3-backed rules and deterministic policy gates.
+You describe components, nodes, contracts, state machines, and rules in a `.ag` file. `aglc` compiles that specification into `architecture.o`, extracts deterministic facts from the repository, applies reviewed semantic queries from `.agq.yml`, and checks the resulting model with Z3-backed rules and deterministic policy gates.
 
 The important point is that aglang is not just documentation, not just a CI check, and not just an agent helper:
 
@@ -182,14 +214,9 @@ This does not remove the need for architecture review. It gives that review an e
 
 ---
 
-## Install
+## Agent-assisted discovery
 
-```bash
-npm install -g @collivity/aglang
-aglc install-agent-skill
-```
-
-Then request agent-assisted discovery:
+Request a repository scan:
 
 ```bash
 aglc request-scan --project /path/to/your/project

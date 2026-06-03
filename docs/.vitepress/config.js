@@ -15,6 +15,7 @@ module.exports = {
       { text: 'CLI Reference', link: '/cli/reference' },
       { text: 'Extractors', link: '/extractors' },
       { text: 'Agents', link: '/agents' },
+      { text: 'LLMs', link: '/llms' },
       { text: 'GitHub', link: 'https://github.com/collivity/aglang' }
     ],
 
@@ -48,6 +49,7 @@ module.exports = {
         items: [
           { text: 'Extractors', link: '/extractors' },
           { text: 'AI Agents', link: '/agents' },
+          { text: 'LLMs and Agents', link: '/llms' },
           { text: 'Agent Protocol', link: '/protocol' },
           { text: 'JSON Verdict API', link: '/api/json-verdict' },
           { text: 'Roadmap', link: '/roadmap' },

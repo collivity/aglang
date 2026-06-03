@@ -1,6 +1,23 @@
 # aglang · Architecture Ground Language
 
-**aglang** is an auditable architecture verification layer for real repositories. Describe topology, components, invariants, workflow policies, state machines, value policies, operation protocols, event protocols, and API contracts in a `.ag` spec file. `aglc` turns those rules into enforceable checks, then validates implementation work continuously while coding, in CI, and at commit time.
+**aglang** is a verifiable specification language for agents and humans. Describe topology, components, invariants, workflow policies, state machines, value policies, operation protocols, event protocols, and API contracts in a `.ag` spec file. `aglc` compiles that specification into machine-checkable artifacts so humans, agents, and CI can work from the same architecture truth.
+
+Install first:
+
+```bash
+npm install -g @collivity/aglang
+aglc install-agent-skill
+```
+
+Create or refresh the architecture interface for a repo:
+
+```bash
+aglc add .
+aglc generate . --out architecture.ag
+aglc compile architecture.ag --out architecture.o
+aglc emit-context --arch architecture.o --out AGENTS.md
+aglc emit-skill --arch architecture.o --out skill.json
+```
 
 Agents are a primary workflow: they read `AGENTS.md`, validate focused edits with `aglc check-file --json`, validate the full guarded project with `aglc check --all --json`, and ask before changing `.ag` or `.agq.yml` architecture source. Engineers can inspect the same evidence locally with `aglc ui`. Under the hood, hard rules are compiled into solver-backed constraints and deterministic policy gates so violations come with source evidence, stable ids, query provenance, and proof details instead of vague warnings.
 
@@ -67,7 +84,7 @@ aglang is also an anti-drift layer for multi-repo systems: once architecture int
 
 ---
 
-## Installation
+## Installation details
 
 ```bash
 # Global install from npm registry

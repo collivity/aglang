@@ -1,0 +1,79 @@
+# aglang
+
+> Architecture Ground Language for coding agents. aglang lets a team describe architecture rules, API contracts, workflow policies, state machines, and reviewed semantic queries in a machine-checkable spec. Agents use the generated `AGENTS.md`, `skill.json`, and `architecture.o` files to understand what code they may change, which boundaries they must preserve, and which checks must pass before commit or release.
+
+## Getting Started
+
+GitHub: https://github.com/collivity/aglang
+Docs: https://collivity.github.io/aglang
+
+Install the CLI:
+
+```bash
+npm install -g @collivity/aglang
+```
+
+Create or refresh architecture files in a project:
+
+```bash
+aglc add .
+aglc generate . --out architecture.ag
+aglc compile architecture.ag --out architecture.o
+aglc emit-context --arch architecture.o --out AGENTS.md
+aglc emit-skill --arch architecture.o --out skill.json
+```
+
+For an existing aglang project, agents should read `AGENTS.md` first, then use:
+
+```bash
+aglc check-file --arch architecture.o --file path/to/file --json
+aglc check --arch architecture.o --project . --all --json
+```
+
+## How Agents Should Use aglang
+
+1. Read `AGENTS.md` before editing. It is generated from the architecture spec and is the local source of truth.
+2. Make code changes inside the declared component boundaries.
+3. When an architecture violation appears, fix the implementation instead of bypassing the rule.
+4. If a real product decision requires changing `architecture.ag`, ask the engineer or make that architecture change explicitly, then regenerate `architecture.o`, `AGENTS.md`, and `skill.json`.
+5. Before finishing, run the relevant `aglc` check and the project test/build commands.
+
+## What aglang Checks
+
+- Component boundaries and forbidden dependencies.
+- Required flow, dataflow, auth, encryption, dependency, and operation evidence.
+- API contract implementation and consumption.
+- GitHub Actions release, deploy, publish, permission, and step-order policies.
+- State-machine transitions from deterministic extractor or reviewed query facts.
+- Value policies, operation pre/postconditions, and event precedence when reviewed facts exist.
+- Change policies that require docs, generated artifacts, or skills to be updated together.
+
+## Key Concepts
+
+- `architecture.ag`: human-authored architecture source.
+- `architecture.o`: compiled machine artifact used by checks.
+- `AGENTS.md`: generated instructions for coding agents.
+- `skill.json`: generated machine manifest for agent/tool integrations.
+- `.aglang/extractors/*.agq.yml`: reviewed semantic queries that turn deterministic graph facts into enforcement facts.
+- `aglc check`: verifies code facts against the compiled architecture.
+
+## What aglang Is
+
+- A machine-checkable architecture contract for a repository.
+- A runtime gate for coding agents and CI.
+- A way to make architecture rules actionable instead of only documented.
+- A deterministic enforcement layer: checks run from code, workflow, and reviewed query evidence.
+
+## What aglang Is Not
+
+- Not an LLM that invents architecture rules during checks.
+- Not a replacement for tests or typechecking.
+- Not a reason to blindly edit architecture specs when code violates them.
+
+## Links
+
+- Website: https://collivity.github.io/aglang
+- GitHub: https://github.com/collivity/aglang
+- CLI reference: https://collivity.github.io/aglang/cli/reference
+- Agent guide: https://collivity.github.io/aglang/agents
+- Extractors: https://collivity.github.io/aglang/extractors
