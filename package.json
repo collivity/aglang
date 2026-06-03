@@ -1,6 +1,6 @@
 {
   "name": "@collivity/aglang",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Architecture Ground Language — auditable architecture verification for code facts, policies, agents, and CI",
   "type": "module",
   "main": "build/aglc.js",
