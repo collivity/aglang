@@ -1,0 +1,66 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug Tree-Sitter Kubernetes Tree",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "scripts/debug-tree-sitter.ts",
+        "--target",
+        "C:\\Users\\pante\\Codespaces\\aglang-analysis-repos\\kubernetes\\cmd\\cloud-controller-manager\\main.go",
+        "--mode",
+        "tree",
+        "--max-chars",
+        "4000"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug Tree-Sitter Kubernetes Imports",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "scripts/debug-tree-sitter.ts",
+        "--target",
+        "C:\\Users\\pante\\Codespaces\\aglang-analysis-repos\\kubernetes\\cmd\\cloud-controller-manager\\main.go",
+        "--mode",
+        "captures",
+        "--query",
+        "IMPORT_QUERY"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug Tree-Sitter Kubernetes Folder Calls",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "scripts/debug-tree-sitter.ts",
+        "--target",
+        "C:\\Users\\pante\\Codespaces\\aglang-analysis-repos\\kubernetes\\cmd\\cloud-controller-manager",
+        "--lang",
+        "golang",
+        "--mode",
+        "captures",
+        "--query",
+        "CALL_QUERY",
+        "--max-files",
+        "5"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}
