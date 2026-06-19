@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import YAML from 'yaml';
 import type { Confidence, FlowFact, GraphFact } from '../analyzers/plugin.ts';
+import type { AgIrGraph, AgIrNode } from '../ir/types.ts';
 
 type Scalar = string | number | boolean | string[];
 
@@ -213,6 +214,67 @@ export interface ExtractionQueryTrace {
     id: string;
   };
   skipped_reason?: string;
+}
+
+function firstEvidence(edge: AgIrGraph['edges'][number]) {
+  return edge.evidence[0];
+}
+
+function nodeProperties(prefix: string, node: AgIrNode): Record<string, Scalar> {
+  const properties: Record<string, Scalar> = {};
+  for (const [key, value] of Object.entries(node.properties ?? {})) {
+    properties[`${prefix}${key}`] = value;
+  }
+  return properties;
+}
+
+export function agIrGraphToExtractionQueryFacts(graph: AgIrGraph): GraphFact[] {
+  const nodes = new Map(graph.nodes.map(node => [node.id, node]));
+  const containingComponentByFile = new Map<string, string>();
+  for (const edge of graph.edges) {
+    if (edge.kind !== 'contains') continue;
+    const from = nodes.get(edge.from);
+    const to = nodes.get(edge.to);
+    if (from?.kind === 'component' && to?.kind === 'file') containingComponentByFile.set(to.id, from.label);
+  }
+
+  return graph.edges.map((edge): GraphFact => {
+    const fromNode = nodes.get(edge.from);
+    const toNode = nodes.get(edge.to);
+    const evidence = firstEvidence(edge);
+    const file = evidence?.span?.file ?? (fromNode?.kind === 'file' ? fromNode.label : undefined);
+    const component =
+      (fromNode?.kind === 'component' ? fromNode.label : undefined) ??
+      (fromNode?.kind === 'file' ? containingComponentByFile.get(fromNode.id) : undefined) ??
+      (typeof fromNode?.properties?.component === 'string' ? fromNode.properties.component : undefined);
+    return {
+      id: `ag-ir:${edge.id}`,
+      kind: edge.kind,
+      subject: component ?? fromNode?.label ?? edge.from,
+      target: toNode?.label ?? edge.to,
+      confidence: evidence?.confidence ?? 'definite',
+      properties: {
+        kind: edge.kind,
+        edge: edge.kind,
+        fromKind: fromNode?.kind ?? 'symbol',
+        from: fromNode?.label ?? edge.from,
+        toKind: toNode?.kind ?? 'symbol',
+        to: toNode?.label ?? edge.to,
+        ...(component ? { component } : {}),
+        ...(file ? { file } : {}),
+        ...(edge.properties ?? {}),
+        ...(fromNode ? nodeProperties('from.', fromNode) : {}),
+        ...(toNode ? nodeProperties('to.', toNode) : {}),
+      },
+      evidence: {
+        extractor: evidence?.extractor ?? 'ag-ir',
+        strategy: evidence?.strategy ?? 'ast',
+        file,
+        line: evidence?.span?.startLine,
+        message: evidence?.message ?? `Ag-IR ${edge.kind} edge`,
+      },
+    };
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

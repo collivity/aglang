@@ -119,6 +119,8 @@ The npm package also attempts that skill installation during `postinstall`. Set 
 
 When extractor behavior needs investigation, run `aglc check-file --json --debug-extractors`. The JSON verdict includes `extractor_debug[]` with parser availability, AST query counts, and regex fallback reasons. Add `--require-ast` to fail immediately when an AST-capable extractor drops to regex for a detected fact.
 
+To inspect the new canonical system graph directly, run `aglc graph --arch architecture.o --file <path> --json --ir`. This emits Ag-IR `nodes[]` and typed `edges[]` from generic tree-sitter extraction plus compatibility adapters for existing graph facts. Edge kinds include `imports`, `calls`, `assigns`, `handles_route`, `depends_on`, and `accesses_resource`, each with source provenance when available.
+
 For broad query health against a real repo, run `npx tsx scripts/tree-sitter-corpus-probe.ts C:\Users\pante\Codespaces\collivity`. The report summarizes files scanned, files with captures, total captures, sample files, and up to three query errors per language/query pair without making that external checkout a CI dependency.
 
 ---
@@ -216,6 +218,7 @@ Commit aborted.
 | **JSON verdicts** | ✅ | All check commands emit structured JSON with Z3 proofs (`--json`) |
 | **Extraction cache** | ✅ | SHA-256 keyed file cache in `.aglang-cache/` — skips re-analysing unchanged files |
 | **Parallel extraction** | ✅ | All extractors run concurrently (CPU-capped pool) |
+| **Ag-IR graph output** | ✅ | `aglc graph --json --ir` emits canonical nodes and typed edges from tree-sitter and graph adapters |
 
 ---
 

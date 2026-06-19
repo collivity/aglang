@@ -161,6 +161,34 @@ The command re-runs the selected check scope, finds the matching violation, and 
 
 ---
 
+## `aglc graph`
+
+Emit extracted graph evidence for a file, project diff, or full guarded project. Use `--ir` to inspect the canonical Ag-IR graph created from generic tree-sitter extraction plus compatibility adapters for existing graph facts.
+
+```bash
+aglc graph --arch <architecture.o> [--file <path> | --project <dir>] [--all] [--json] [--ir] [--debug-extractors] [--require-ast]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--file` | Analyze one file that belongs to a declared component |
+| `--project` | Project root to scan when using diff or `--all` mode |
+| `--all` | Scan all tracked component files instead of the staged diff |
+| `--json` | Output machine-readable graph JSON |
+| `--ir` | Emit Ag-IR `nodes[]` and typed `edges[]` instead of the legacy graph report |
+| `--debug-extractors` | Include extractor trace events and fallback reasons |
+| `--require-ast` | Fail when an AST-capable extractor falls back to regex for a detected fact |
+
+Example:
+
+```bash
+aglc graph --arch architecture.o --file src/api/orders.ts --json --ir
+```
+
+The Ag-IR graph uses closed edge kinds such as `imports`, `calls`, `assigns`, `handles_route`, `depends_on`, and `accesses_resource`. Every edge includes provenance with source span, language, query name, confidence, extractor, and strategy when available.
+
+---
+
 ## `aglc debug`
 
 Write a debug bundle for both agents and engineers. The command runs the same extraction and gates as `check`, then writes structured evidence plus a readable report.

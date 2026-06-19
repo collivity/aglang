@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { emitArtifact } from '../src/emitters/artifact.ts';
 import { tokenize } from '../src/lexer.ts';
 import { parse } from '../src/parser.ts';
@@ -267,5 +270,30 @@ describe('graph-backed extractor path', () => {
 
     expect(delta.graphReport.facts[0]!.evidence.strategy).toBe('regex');
     expect(delta.graphReport.projections.flow[0]!.graphEvidence?.strategy).toBe('regex');
+  });
+
+  it('delta output carries canonical Ag-IR alongside legacy graph facts', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aglang-ir-delta-'));
+    try {
+      const file = join(dir, 'api.ts');
+      writeFileSync(file, `import { Pool } from 'pg';\nconst pool = new Pool();\n`, 'utf8');
+      const artifact = compileSpec(`
+        node runtime : agent_runtime { trust: trusted }
+        component Api { runs_on: runtime paths: "*.ts" }
+      `);
+
+      const delta = await generateDeltaAssertions(
+        [{ componentName: 'Api', files: [file] }],
+        artifact,
+        { projectRoot: dir },
+      );
+
+      expect(delta.irGraph.schema_version).toBe(1);
+      expect(delta.irGraph.nodes.some(node => node.kind === 'file' && node.label === file)).toBe(true);
+      expect(delta.irGraph.edges.some(edge => edge.kind === 'imports')).toBe(true);
+      expect(delta.irGraph.edges.some(edge => edge.kind === 'calls')).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

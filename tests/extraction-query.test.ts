@@ -2,8 +2,9 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
-import { applyExtractionQueries, applyExtractionQueryFacts, loadExtractionQueries } from '../src/runtime/extraction-query.ts';
+import { agIrGraphToExtractionQueryFacts, applyExtractionQueries, applyExtractionQueryFacts, loadExtractionQueries } from '../src/runtime/extraction-query.ts';
 import type { GraphFact } from '../src/analyzers/plugin.ts';
+import { agIrEdge, agIrId, agIrNode, emptyAgIrGraph } from '../src/ir/builders.ts';
 
 describe('extraction query files', () => {
   const dirs: string[] = [];
@@ -239,6 +240,44 @@ emit:
       component: 'Api',
       graphFactId: 'graph-3',
       query: { id: 'SerializationOperations' },
+    });
+  });
+
+  it('matches Ag-IR edge facts with node and edge properties', () => {
+    const project = tempProject();
+    writeQuery(project, 'ir-flow.agq.yml', `
+id: IrImportFlow
+owner: platform
+version: 1
+confidence: definite
+match:
+  edge: imports
+  fromKind: file
+  to: "../data/store"
+emit:
+  kind: flow
+  from: "$component"
+  to: Data
+`);
+    const queries = loadExtractionQueries(project);
+    const graph = emptyAgIrGraph();
+    const component = agIrNode({ kind: 'component', id: agIrId('component', 'Api'), label: 'Api' });
+    const file = agIrNode({ kind: 'file', id: agIrId('file', 'api.ts'), label: 'api.ts', properties: { component: 'Api' } });
+    const imported = agIrNode({ kind: 'symbol', id: agIrId('symbol', '../data/store'), label: '../data/store' });
+    graph.nodes.push(component, file, imported);
+    graph.edges.push(
+      agIrEdge({ kind: 'contains', from: component.id, to: file.id, evidence: [{ extractor: 'test', strategy: 'ast', confidence: 'definite', span: { file: 'api.ts' } }] }),
+      agIrEdge({ kind: 'imports', from: file.id, to: imported.id, properties: { moduleKind: 'relative' }, evidence: [{ extractor: 'test', strategy: 'ast', confidence: 'definite', span: { file: 'api.ts', startLine: 1 }, message: 'import' }] }),
+    );
+
+    const facts = applyExtractionQueryFacts(queries, agIrGraphToExtractionQueryFacts(graph));
+
+    expect(facts.flowFacts).toHaveLength(1);
+    expect(facts.flowFacts[0]).toMatchObject({
+      from: 'Api',
+      to: 'Data',
+      graphEvidence: { graphFactId: expect.stringContaining('ag-ir:') },
+      query: { id: 'IrImportFlow' },
     });
   });
 

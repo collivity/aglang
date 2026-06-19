@@ -13,13 +13,33 @@ import { createHash } from 'crypto';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import type { FlowFact } from '../analyzers/plugin.ts';
+import type { AgIrGraph } from '../ir/types.ts';
+import { mergeAgIrGraphs } from '../ir/builders.ts';
 
 const CACHE_VERSION = 1;
+const IR_CACHE_VERSION = 1;
 
 interface CacheStore {
   version: number;
   artifactHash: string;
   entries: Record<string, FlowFact[]>;  // sha256(fileContent) → FlowFact[]
+}
+
+interface IrCacheStore {
+  version: number;
+  artifactHash: string;
+  schemaVersion: number;
+  registryVersion: string;
+  entries: Record<string, AgIrGraph>;  // sha256(fileContent) → AgIrGraph fragment
+}
+
+export interface ExtractionCacheStats {
+  hits: number;
+}
+
+export interface IrExtractionResult {
+  graph: AgIrGraph;
+  cacheHits: number;
 }
 
 export function hashContent(content: string): string {
@@ -85,6 +105,69 @@ export class ExtractionCache {
   }
 }
 
+export class IrExtractionCache {
+  private store: IrCacheStore;
+  private dirty = false;
+
+  constructor(
+    private readonly cacheFile: string,
+    artifactHash: string,
+    schemaVersion: number,
+    registryVersion: string,
+  ) {
+    this.store = this.load(artifactHash, schemaVersion, registryVersion);
+  }
+
+  static forProject(
+    projectRoot: string,
+    artifactHash: string,
+    schemaVersion: number,
+    registryVersion: string,
+  ): IrExtractionCache {
+    const cacheFile = join(projectRoot, '.aglang-cache', 'ir.json');
+    return new IrExtractionCache(cacheFile, artifactHash, schemaVersion, registryVersion);
+  }
+
+  private load(artifactHash: string, schemaVersion: number, registryVersion: string): IrCacheStore {
+    try {
+      if (existsSync(this.cacheFile)) {
+        const raw = JSON.parse(readFileSync(this.cacheFile, 'utf8')) as IrCacheStore;
+        if (
+          raw.version === IR_CACHE_VERSION &&
+          raw.artifactHash === artifactHash &&
+          raw.schemaVersion === schemaVersion &&
+          raw.registryVersion === registryVersion
+        ) {
+          return raw;
+        }
+      }
+    } catch {
+      // corrupt or missing — start fresh
+    }
+    return { version: IR_CACHE_VERSION, artifactHash, schemaVersion, registryVersion, entries: {} };
+  }
+
+  get(fileHash: string): AgIrGraph | undefined {
+    return this.store.entries[fileHash];
+  }
+
+  set(fileHash: string, graph: AgIrGraph): void {
+    this.store.entries[fileHash] = graph;
+    this.dirty = true;
+  }
+
+  flush(): void {
+    if (!this.dirty) return;
+    try {
+      mkdirSync(dirname(this.cacheFile), { recursive: true });
+      writeFileSync(this.cacheFile, JSON.stringify(this.store), 'utf8');
+    } catch {
+      // swallow — cache write failure is non-fatal
+    }
+    this.dirty = false;
+  }
+}
+
 /**
  * Run an extractor plugin with caching.
  *
@@ -99,6 +182,7 @@ export async function extractWithCache(
   cache: ExtractionCache | null,
   files: string[],
   run: (uncachedFiles: string[]) => Promise<FlowFact[]> | FlowFact[],
+  stats?: ExtractionCacheStats,
 ): Promise<FlowFact[]> {
   if (!cache) {
     // No cache — run plugin on all files
@@ -120,6 +204,7 @@ export async function extractWithCache(
     hashByFile.set(f, hash);
     const cached = cache.get(hash);
     if (cached !== undefined) {
+      if (stats) stats.hits++;
       cachedFacts.push(...cached);
     } else {
       uncachedFiles.push(f);
@@ -149,4 +234,47 @@ export async function extractWithCache(
   }
 
   return [...cachedFacts, ...newFacts];
+}
+
+export async function extractIrWithCache(
+  cache: IrExtractionCache | null,
+  files: string[],
+  run: (file: string) => Promise<AgIrGraph> | AgIrGraph,
+): Promise<IrExtractionResult> {
+  if (!cache) {
+    const graphs = await Promise.all(files.map(file => run(file)));
+    return { graph: mergeAgIrGraphs(graphs), cacheHits: 0 };
+  }
+
+  const graphs: AgIrGraph[] = [];
+  const uncachedFiles: string[] = [];
+  const hashByFile = new Map<string, string>();
+  let cacheHits = 0;
+
+  for (const file of files) {
+    let content: string;
+    try {
+      content = readFileSync(file, 'utf8');
+    } catch {
+      continue;
+    }
+    const hash = hashContent(content);
+    hashByFile.set(file, hash);
+    const cached = cache.get(hash);
+    if (cached) {
+      cacheHits++;
+      graphs.push(cached);
+    } else {
+      uncachedFiles.push(file);
+    }
+  }
+
+  for (const file of uncachedFiles) {
+    const graph = await run(file);
+    graphs.push(graph);
+    const hash = hashByFile.get(file);
+    if (hash) cache.set(hash, graph);
+  }
+
+  return { graph: mergeAgIrGraphs(graphs), cacheHits };
 }

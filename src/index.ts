@@ -48,7 +48,7 @@ Commands:
   aglc check --arch <arch.o> --project <dir> [--repo-filter <Name>] [--diff <ref>] [--all] [--json] [--debug-extractors] [--require-ast]  Check staged, ref diff, or whole project vs architecture
   aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt] [--workflow-z3] [--dump-workflow-smt] [--debug-extractors] [--require-ast]  Analyze a specific file
   aglc explain --arch <arch.o> --project <dir> --violation <id> [--json] [--diff <ref>] [--all]  Explain a violation from the current check scope
-  aglc graph --arch <arch.o> [--file <f> | --project <dir>] [--json] [--debug-extractors] [--require-ast]  Emit graph facts and Z3 flow projections
+  aglc graph --arch <arch.o> [--file <f> | --project <dir>] [--json] [--ir] [--debug-extractors] [--require-ast]  Emit graph facts, Ag-IR, and Z3 flow projections
   aglc debug --arch <arch.o> --project <dir> [--file <f>] [--diff <ref>] [--all] [--out <dir>] [--debug-extractors]  Write debug bundle for agents and engineers
   aglc ui --arch <arch.o> --project <dir> [--all|--diff <ref>|--file <path>] [--port <n>] [--no-open]  Launch local UI workbench
   aglc import-openapi <swagger.json> [--out <file.ag>]       Import OpenAPI 3.x spec → .ag contracts
@@ -59,6 +59,7 @@ Flags:
   --max-depth       Maximum recursive component synthesis depth for generate/add (default: 3)
   --single-file     Inline generated components instead of emitting imported sub-specs
   --debug-extractors   Include extractor trace output and fallback reasons
+  --ir                 With graph, emit the canonical Ag-IR graph instead of the legacy graph report
   --require-ast        Fail when an AST-capable extractor falls back to regex for a detected fact
   --diff <ref>         Check files changed in git range <ref>...HEAD and mark reported violations as new
   --dump-smt           Write the full SMT-LIB script fed to Z3 → examples/debug.smt2
@@ -793,13 +794,15 @@ async function graphCommand(archPath: string, filePath: string | undefined, proj
     const absFile = resolve(filePath);
     const componentName = await componentForFile(artifact, absFile);
     if (!componentName) {
-      const empty = {
-        facts: [],
-        projections: { flow: [] },
-        smt: { assertions: ['; === delta assertions from graph projections ==='] },
-        unresolvedTargets: [],
-        warnings: [{ graphFactId: '', message: `File does not belong to any tracked component: ${absFile}` }],
-      };
+      const empty = args.includes('--ir')
+        ? { schema_version: 1, nodes: [], edges: [], warnings: [{ message: `File does not belong to any tracked component: ${absFile}` }] }
+        : {
+            facts: [],
+            projections: { flow: [] },
+            smt: { assertions: ['; === delta assertions from graph projections ==='] },
+            unresolvedTargets: [],
+            warnings: [{ graphFactId: '', message: `File does not belong to any tracked component: ${absFile}` }],
+          };
       process.stdout.write(JSON.stringify(empty, null, 2) + '\n');
       process.exit(0);
     }
@@ -825,12 +828,29 @@ async function graphCommand(archPath: string, filePath: string | undefined, proj
     process.exit(1);
   }
   if (jsonMode) {
-    process.stdout.write(JSON.stringify({
-      ...delta.graphReport,
-      ...(debugExtractors ? { extractor_debug: delta.extractorDebug } : {}),
-    }, null, 2) + '\n');
+    const payload = args.includes('--ir')
+      ? {
+          ...delta.irGraph,
+          cache: {
+            ir_hits: delta.irCacheHits,
+            legacy_hits: delta.cacheHits,
+          },
+          lowerer: {
+            flow_facts: delta.irLoweringProvenance,
+            unresolved_edges: delta.unresolvedIrEdges,
+            warnings: delta.irLowererWarnings,
+          },
+          ...(debugExtractors ? { extractor_debug: delta.extractorDebug } : {}),
+        }
+      : {
+          ...delta.graphReport,
+          ...(debugExtractors ? { extractor_debug: delta.extractorDebug } : {}),
+        };
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
   } else {
     log(`[aglc] Graph facts: ${delta.graphFacts.length}`);
+    log(`[aglc] Ag-IR nodes: ${delta.irGraph.nodes.length}`);
+    log(`[aglc] Ag-IR edges: ${delta.irGraph.edges.length}`);
     log(`[aglc] Flow projections: ${delta.facts.length}`);
     log(`[aglc] SMT assertions: ${delta.smtAssertions.filter(s => s.startsWith('(assert')).length}`);
     if (debugExtractors && delta.extractorDebug.length > 0) {
@@ -840,6 +860,9 @@ async function graphCommand(archPath: string, filePath: string | undefined, proj
       }
     }
     for (const w of delta.graphWarnings) {
+      log(`  warning: ${w.message}`);
+    }
+    for (const w of delta.irLowererWarnings) {
       log(`  warning: ${w.message}`);
     }
   }

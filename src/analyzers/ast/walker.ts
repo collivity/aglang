@@ -12,6 +12,12 @@ export interface CaptureMatch {
   name: string;
   text: string;
   startRow: number; // 0-indexed
+  nodeKind?: string;
+  startColumn?: number;
+  endRow?: number;
+  endColumn?: number;
+  startByte?: number;
+  endByte?: number;
 }
 
 /**
@@ -31,6 +37,12 @@ export function queryCaptures(
     name,
     text: node.text as string,
     startRow: node.startPosition.row as number,
+    nodeKind: node.type as string,
+    startColumn: node.startPosition.column as number,
+    endRow: node.endPosition.row as number,
+    endColumn: node.endPosition.column as number,
+    startByte: node.startIndex as number,
+    endByte: node.endIndex as number,
   }));
 }
 

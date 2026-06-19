@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { ExtractionCache, extractWithCache, hashContent, hashArtifact } from '../src/runtime/extraction-cache.ts';
+import { ExtractionCache, IrExtractionCache, extractIrWithCache, extractWithCache, hashContent, hashArtifact } from '../src/runtime/extraction-cache.ts';
 import type { FlowFact } from '../src/analyzers/plugin.ts';
+import { agIrNode, emptyAgIrGraph } from '../src/ir/builders.ts';
 
 const fakeFact = (file: string): FlowFact => ({
   from: 'Api', to: 'Db', confidence: 'definite',
@@ -155,3 +156,94 @@ describe('extractWithCache', () => {
     expect(callCount).toBe(2);  // plugin called again
   });
 });
+
+describe('IrExtractionCache', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = join(tmpdir(), 'aglc-ir-cache-test-' + Date.now());
+    mkdirSync(dir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true });
+  });
+
+  it('populates and reuses cached IR fragments', async () => {
+    const file = join(dir, 'orders.ts');
+    writeFileSync(file, `import { x } from './x';\n`);
+    const cacheFile = join(dir, '.aglang-cache', 'ir.json');
+    const cache = new IrExtractionCache(cacheFile, 'artifact-v1', 1, 'registry-v1');
+    let callCount = 0;
+
+    await extractIrWithCache(cache, [file], (f) => {
+      callCount++;
+      return fakeGraph(f);
+    });
+    cache.flush();
+    expect(existsSync(cacheFile)).toBe(true);
+
+    const cache2 = new IrExtractionCache(cacheFile, 'artifact-v1', 1, 'registry-v1');
+    const second = await extractIrWithCache(cache2, [file], (f) => {
+      callCount++;
+      return fakeGraph(f);
+    });
+
+    expect(callCount).toBe(1);
+    expect(second.cacheHits).toBe(1);
+    expect(second.graph.nodes).toContainEqual(expect.objectContaining({ kind: 'file', label: file }));
+  });
+
+  it('invalidates only edited file fragments', async () => {
+    const fileA = join(dir, 'a.ts');
+    const fileB = join(dir, 'b.ts');
+    writeFileSync(fileA, 'a1');
+    writeFileSync(fileB, 'b1');
+    const cacheFile = join(dir, '.aglang-cache', 'ir.json');
+    const cache = new IrExtractionCache(cacheFile, 'artifact-v1', 1, 'registry-v1');
+    let callCount = 0;
+    const run = (file: string) => {
+      callCount++;
+      return fakeGraph(file);
+    };
+
+    await extractIrWithCache(cache, [fileA, fileB], run);
+    cache.flush();
+    writeFileSync(fileA, 'a2');
+
+    const cache2 = new IrExtractionCache(cacheFile, 'artifact-v1', 1, 'registry-v1');
+    const second = await extractIrWithCache(cache2, [fileA, fileB], run);
+
+    expect(second.cacheHits).toBe(1);
+    expect(callCount).toBe(3);
+  });
+
+  it('invalidates when artifact hash or schema registry changes', async () => {
+    const file = join(dir, 'orders.ts');
+    writeFileSync(file, 'content');
+    const cacheFile = join(dir, '.aglang-cache', 'ir.json');
+    const cache = new IrExtractionCache(cacheFile, 'artifact-v1', 1, 'registry-v1');
+    await extractIrWithCache(cache, [file], fakeGraph);
+    cache.flush();
+
+    let artifactMisses = 0;
+    await extractIrWithCache(new IrExtractionCache(cacheFile, 'artifact-v2', 1, 'registry-v1'), [file], (f) => {
+      artifactMisses++;
+      return fakeGraph(f);
+    });
+    let registryMisses = 0;
+    await extractIrWithCache(new IrExtractionCache(cacheFile, 'artifact-v1', 1, 'registry-v2'), [file], (f) => {
+      registryMisses++;
+      return fakeGraph(f);
+    });
+
+    expect(artifactMisses).toBe(1);
+    expect(registryMisses).toBe(1);
+  });
+});
+
+function fakeGraph(file: string) {
+  const graph = emptyAgIrGraph();
+  graph.nodes.push(agIrNode({ kind: 'file', id: `file:${file}`, label: file }));
+  return graph;
+}
