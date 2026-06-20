@@ -19,6 +19,7 @@ import { formatVerdict, formatVerdictJson } from './runtime/diagnostic.ts';
 import type { ArchitectureArtifact } from './emitters/artifact.ts';
 import { generateSpec } from './generate.ts';
 import { createUiRunId, currentCliPath, startUiServer, type UiScope } from './runtime/ui-server.ts';
+import { installExtractorTemplates } from './runtime/install-extractors.ts';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -45,6 +46,7 @@ Commands:
   aglc emit-context --arch <arch.o> [--out <path>]          Emit AGENTS.md for AI agents
   aglc emit-skill   --arch <arch.o> [--out <path>]          Emit skill.json manifest for AI agents
   aglc install-agent-skill [--path <skills-dir>]            Install packaged aglang Codex skill for local agents
+  aglc install-extractors [--project <dir>] [--force]       Scaffold starter .agq.yml templates into .aglang/extractors/
   aglc check --arch <arch.o> --project <dir> [--repo-filter <Name>] [--diff <ref>] [--all] [--json] [--debug-extractors] [--require-ast]  Check staged, ref diff, or whole project vs architecture
   aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt] [--workflow-z3] [--dump-workflow-smt] [--debug-extractors] [--require-ast]  Analyze a specific file
   aglc explain --arch <arch.o> --project <dir> --violation <id> [--json] [--diff <ref>] [--all]  Explain a violation from the current check scope
@@ -774,6 +776,26 @@ function installAgentSkill(outDir: string) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// INSTALL-EXTRACTORS (starter .agq.yml templates shipped with npm package)
+// ─────────────────────────────────────────────────────────────
+function installExtractors(projectRoot: string, force: boolean) {
+  const source = resolve(packageRoot(), 'templates', 'extractors');
+  const target = resolve(projectRoot, '.aglang', 'extractors');
+  let result: ReturnType<typeof installExtractorTemplates>;
+  try {
+    result = installExtractorTemplates(source, target, force);
+  } catch (err) {
+    logErr(`Error: ${(err as Error).message}`);
+    logErr(`Reinstall @collivity/aglang or run from a complete package.`);
+    process.exit(1);
+  }
+  for (const name of result.installed) log(`✓ Installed ${name} → ${resolve(target, name)}`);
+  for (const name of result.skipped) log(`- Skipped ${name} (already exists at ${resolve(target, name)}; use --force to overwrite)`);
+  if (result.installed.length === 0 && result.skipped.length === 0) log(`No extractor templates found in package.`);
+  log(`These are now local, reviewable files in ${target} — edit and commit them like any other source file.`);
+}
+
+// ─────────────────────────────────────────────────────────────
 // GRAPH (debug graph projection output)
 // ─────────────────────────────────────────────────────────────
 async function graphCommand(archPath: string, filePath: string | undefined, projectRoot: string | undefined) {
@@ -1394,6 +1416,9 @@ async function launchUi(archPath: string, projectRoot: string, scope: UiScope, i
 
   } else if (command === 'install-agent-skill') {
     installAgentSkill(getArg('--path') ?? defaultSkillsDir());
+
+  } else if (command === 'install-extractors') {
+    installExtractors(getArg('--project') ?? '.', args.includes('--force'));
 
   } else if (command === 'check') {
     const archPath = getArg('--arch') ?? 'architecture.o';

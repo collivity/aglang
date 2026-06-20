@@ -120,7 +120,7 @@ describe('runContractGate', () => {
       component Ui { runs_on: n paths: "${tmpDir.replace(/\\/g, '/')}/**/*.ts" implements: UiApi }
     `);
 
-    const result = await runContractGate(artifact, [tsFile]);
+    const result = await runContractGate(artifact, [tsFile], { projectRoot: tmpDir, checkCompleteness: true });
     expect(result.violations.filter(v => v.severity === 'error')).toHaveLength(0);
 
     rmSync(tmpDir, { recursive: true });

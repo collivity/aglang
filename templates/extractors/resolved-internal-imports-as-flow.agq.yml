@@ -1,0 +1,24 @@
+# Starter template shipped with aglang (`aglc install-extractors`).
+#
+# Promotes a resolved internal (relative-path) import into a `flow` fact, so
+# importing a symbol from another declared component counts as a structural
+# capability to reach it — the same way importing an external DB driver
+# package already does automatically.
+#
+# Scope: only fires where the extractor stamped `resolved: true` on an
+# `imports` edge. Today that is TypeScript/JavaScript/C# only — see
+# `resolved-calls-as-flow.agq.yml` for why.
+#
+# `confidence: probable` means this is non-blocking by default (only
+# enforced under `--strict`) — review what it surfaces before tightening it.
+id: ResolvedInternalImportsAsFlow
+owner: architecture
+version: 1
+confidence: probable
+match:
+  kind: imports
+  resolved: true
+emit:
+  kind: flow
+  from: "$component"
+  to: "$targetComponent"

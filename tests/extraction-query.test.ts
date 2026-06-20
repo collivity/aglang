@@ -5,6 +5,7 @@ import { tmpdir } from 'os';
 import { agIrGraphToExtractionQueryFacts, applyExtractionQueries, applyExtractionQueryFacts, loadExtractionQueries } from '../src/runtime/extraction-query.ts';
 import type { GraphFact } from '../src/analyzers/plugin.ts';
 import { agIrEdge, agIrId, agIrNode, emptyAgIrGraph } from '../src/ir/builders.ts';
+import { installExtractorTemplates } from '../src/runtime/install-extractors.ts';
 
 describe('extraction query files', () => {
   const dirs: string[] = [];
@@ -279,6 +280,39 @@ emit:
       graphEvidence: { graphFactId: expect.stringContaining('ag-ir:') },
       query: { id: 'IrImportFlow' },
     });
+  });
+
+  it('shipped resolved-calls/imports templates promote resolved edges and ignore unresolved ones', () => {
+    const project = tempProject();
+    installExtractorTemplates(resolve(import.meta.dirname, '..', 'templates', 'extractors'), join(project, '.aglang', 'extractors'));
+    const queries = loadExtractionQueries(project);
+    expect(queries.map(q => q.id).sort()).toEqual(['ResolvedCallsAsFlow', 'ResolvedInternalImportsAsFlow']);
+
+    const graph = emptyAgIrGraph();
+    const api = agIrNode({ kind: 'component', id: agIrId('component', 'OrdersService'), label: 'OrdersService' });
+    const apiFile = agIrNode({ kind: 'file', id: agIrId('file', 'orders/service.ts'), label: 'orders/service.ts' });
+    const resolvedCallTarget = agIrNode({ kind: 'symbol', id: agIrId('symbol', 'DataAccess.save'), label: 'save' });
+    const unresolvedCallTarget = agIrNode({ kind: 'operation', id: agIrId('operation', 'unknownFn'), label: 'unknownFn' });
+    const resolvedImportTarget = agIrNode({ kind: 'file', id: agIrId('file', 'data/repo.ts'), label: 'data/repo.ts' });
+    const unresolvedImportTarget = agIrNode({ kind: 'symbol', id: agIrId('symbol', 'left-pad'), label: 'left-pad' });
+    graph.nodes.push(api, apiFile, resolvedCallTarget, unresolvedCallTarget, resolvedImportTarget, unresolvedImportTarget);
+
+    const ev = (message: string) => [{ extractor: 'test', strategy: 'ast' as const, confidence: 'definite' as const, span: { file: 'orders/service.ts', startLine: 1 }, message }];
+    graph.edges.push(
+      agIrEdge({ kind: 'contains', from: api.id, to: apiFile.id, evidence: ev('contains') }),
+      agIrEdge({ kind: 'calls', from: apiFile.id, to: resolvedCallTarget.id, properties: { resolved: true, targetComponent: 'DataAccess' }, evidence: ev('repo.save(order)') }),
+      agIrEdge({ kind: 'calls', from: apiFile.id, to: unresolvedCallTarget.id, properties: { unresolved: true }, evidence: ev('unknownFn()') }),
+      agIrEdge({ kind: 'imports', from: apiFile.id, to: resolvedImportTarget.id, properties: { resolved: true, targetComponent: 'DataAccess' }, evidence: ev("import { OrderRepository } from '../data/repo'") }),
+      agIrEdge({ kind: 'imports', from: apiFile.id, to: unresolvedImportTarget.id, properties: { moduleKind: 'package' }, evidence: ev("import padStart from 'left-pad'") }),
+    );
+
+    const facts = applyExtractionQueryFacts(queries, agIrGraphToExtractionQueryFacts(graph));
+
+    expect(facts.flowFacts).toHaveLength(2);
+    expect(facts.flowFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: 'OrdersService', to: 'DataAccess', query: expect.objectContaining({ id: 'ResolvedCallsAsFlow' }) }),
+      expect.objectContaining({ from: 'OrdersService', to: 'DataAccess', query: expect.objectContaining({ id: 'ResolvedInternalImportsAsFlow' }) }),
+    ]));
   });
 
   it('loads the root self-spec extraction queries', () => {

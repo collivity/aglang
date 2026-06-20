@@ -52,6 +52,25 @@ describe('tree-sitter only extraction primitives', () => {
     expect([...namedImports, ...imports, ...requires, ...constructors].some(c => c.text === 'mongoose')).toBe(false);
   });
 
+  it('captures Node http route guards without regex fallback', () => {
+    const { parser, language } = requireTreeSitter('typescript');
+    const source = [
+      `if (req.method === 'GET' && url.pathname === '/api/files') res.end('{}');`,
+      `else if (req.method === 'GET' && url.pathname.startsWith('/api/runs/')) res.end('{}');`,
+      '',
+    ].join('\n');
+
+    const routes = parseAndQuery(parser, language, source, tsQueries.NODE_HTTP_ROUTE_QUERY);
+
+    expect(routes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'method', text: 'GET', startRow: 0 }),
+      expect.objectContaining({ name: 'route_path', text: '/api/files', startRow: 0 }),
+      expect.objectContaining({ name: 'method', text: 'GET', startRow: 1 }),
+      expect.objectContaining({ name: 'starts_with', text: 'startsWith', startRow: 1 }),
+      expect.objectContaining({ name: 'route_path', text: '/api/runs/', startRow: 1 }),
+    ]));
+  });
+
   it('captures Python imports, aliases, from-imports, decorators, and calls without regex fallback', () => {
     const { parser, language } = requireTreeSitter('python');
     const source = [

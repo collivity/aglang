@@ -72,6 +72,19 @@ Project-specific semantic extraction can live in committed `.aglang/extractors/*
 
 Root self-spec queries should be scoped to the component that owns the evidence, usually with an exact `subject` filter. Do not target tests, generated site output, or intentional violation fixtures unless the goal is to make those files block normal checks.
 
+### Starter templates
+
+```bash
+aglc install-extractors [--project <dir>] [--force]
+```
+
+Scaffolds two starter `.agq.yml` files into `<project>/.aglang/extractors/`. They become normal, locally-owned, reviewable files at that point — edit, narrow, or delete them like any other committed source file. Re-running the command skips files that already exist unless `--force` is passed.
+
+- `resolved-calls-as-flow.agq.yml` — promotes a resolved cross-component method call (e.g. `repo.save(order)` resolving into a data-access component) into a `flow` fact, the same way importing a database driver package already does automatically.
+- `resolved-internal-imports-as-flow.agq.yml` — does the same for a resolved relative import between components.
+
+Both match on the `resolved: true` property that the extractor stamps on `calls`/`imports` edges once it has traced the call or import to its target across files. **That cross-file resolution exists for TypeScript, JavaScript, and C# today** (`src/ir/semantic-index.ts`); Python, Go, Rust, Java, and Swift extractors emit `imports`/`calls` edges but don't yet resolve them across files, so these two templates are a no-op there until that resolver is extended. Both ship with `confidence: probable`, which `aglc check` treats as non-blocking evidence rather than a violation (only `confidence: definite` facts block by default) — review what they surface in your own call graph before tightening the confidence level.
+
 ```yaml
 id: OrderLifecycleTransitions
 owner: payments

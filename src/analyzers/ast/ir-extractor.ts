@@ -1,5 +1,6 @@
 import { readFileSync } from 'fs';
 import { extname } from 'path';
+import type Parser from 'tree-sitter';
 import type { Confidence } from '../plugin.ts';
 import { getTreeSitter, makeParser } from './loader.ts';
 import { queryCaptures, type CaptureMatch } from './walker.ts';
@@ -45,6 +46,7 @@ const QUERY_REGISTRY: Record<TreeSitterIrLanguage, QuerySpec[]> = {
     { intent: 'routes', queryName: 'EXPRESS_ROUTE_QUERY', querySource: tsQueries.EXPRESS_ROUTE_QUERY },
     { intent: 'routes', queryName: 'NESTJS_CONTROLLER_QUERY', querySource: tsQueries.NESTJS_CONTROLLER_QUERY },
     { intent: 'routes', queryName: 'NESTJS_METHOD_QUERY', querySource: tsQueries.NESTJS_METHOD_QUERY },
+    { intent: 'routes', queryName: 'NODE_HTTP_ROUTE_QUERY', querySource: tsQueries.NODE_HTTP_ROUTE_QUERY },
   ],
   javascript: [
     { intent: 'imports', queryName: 'IMPORT_QUERY', querySource: tsQueries.IMPORT_QUERY },
@@ -52,6 +54,7 @@ const QUERY_REGISTRY: Record<TreeSitterIrLanguage, QuerySpec[]> = {
     { intent: 'imports', queryName: 'REQUIRE_QUERY', querySource: tsQueries.REQUIRE_QUERY },
     { intent: 'calls', queryName: 'NEW_EXPR_QUERY', querySource: tsQueries.NEW_EXPR_QUERY },
     { intent: 'routes', queryName: 'EXPRESS_ROUTE_QUERY', querySource: tsQueries.EXPRESS_ROUTE_QUERY },
+    { intent: 'routes', queryName: 'NODE_HTTP_ROUTE_QUERY', querySource: tsQueries.NODE_HTTP_ROUTE_QUERY },
   ],
   python: [
     { intent: 'imports', queryName: 'IMPORT_QUERY', querySource: pythonQueries.IMPORT_QUERY },
@@ -97,6 +100,14 @@ function languageForFile(file: string): TreeSitterIrLanguage | undefined {
 
 function stripQuotes(value: string): string {
   return value.replace(/^['"`]/, '').replace(/['"`]$/, '');
+}
+
+function normalizeHttpMethod(method: string): string {
+  return method.replace(/^Http/i, '').toUpperCase();
+}
+
+function nodePrefixRoutePath(path: string): string {
+  return `${path.replace(/\/$/, '')}/:id`;
 }
 
 function first(captures: CaptureMatch[], ...names: string[]): CaptureMatch | undefined {
@@ -183,15 +194,71 @@ function addSemanticEdge(graph: AgIrGraph, input: {
   evidence: AgIrEvidence;
 }) {
   const target = nodeForSemanticTarget(input.targetKind, input.targetLabel, input.targetProperties);
+  const edgeDiscriminator = input.edgeKind === 'handles_route'
+    ? `${input.edgeProperties?.method ?? ''}:${input.edgeProperties?.path ?? input.targetLabel}`
+    : input.edgeProperties?.intent;
   graph.nodes.push(target);
   graph.edges.push(agIrEdge({
     kind: input.edgeKind,
-    id: agIrId('edge', input.edgeKind, input.from, target.id, input.edgeProperties?.intent),
+    id: agIrId('edge', input.edgeKind, input.from, target.id, edgeDiscriminator),
     from: input.from,
     to: target.id,
     ...(input.edgeProperties ? { properties: input.edgeProperties } : {}),
     evidence: [input.evidence],
   }));
+}
+
+function addRouteEdge(graph: AgIrGraph, input: {
+  file: string;
+  language: TreeSitterIrLanguage;
+  fileNodeId: string;
+  method: string;
+  path: string;
+  queryName: string;
+  capture: CaptureMatch;
+  properties?: Record<string, string | number | boolean | string[]>;
+}) {
+  const method = normalizeHttpMethod(input.method);
+  const path = input.path.startsWith('/') ? input.path : `/${input.path}`;
+  addSemanticEdge(graph, {
+    edgeKind: 'handles_route',
+    from: input.fileNodeId,
+    targetKind: 'route',
+    targetLabel: path,
+    targetProperties: {
+      language: input.language,
+      intent: 'routes',
+    },
+    edgeProperties: {
+      intent: 'routes',
+      query: input.queryName,
+      method,
+      path,
+      ...(input.properties ?? {}),
+    },
+    evidence: {
+      extractor: 'tree-sitter-ir',
+      strategy: 'ast',
+      confidence: 'definite',
+      language: input.language,
+      query: input.queryName,
+      capture: input.capture.name,
+      message: `${method} ${path}`,
+      span: {
+        file: input.file,
+        startLine: input.capture.startRow + 1,
+        startColumn: input.capture.startColumn,
+        endLine: input.capture.endRow === undefined ? undefined : input.capture.endRow + 1,
+        endColumn: input.capture.endColumn,
+        startByte: input.capture.startByte,
+        endByte: input.capture.endByte,
+      },
+      raw: {
+        nodeKind: input.capture.nodeKind,
+        text: input.capture.text,
+      },
+    },
+  });
 }
 
 function captureToEdge(query: QuerySpec, row: CaptureMatch[], file: string, language: TreeSitterIrLanguage, fileNodeId: string, sourceLines: string[]): { label: string; edge: AgIrEdgeKind; node: AgIrNodeKind; capture: CaptureMatch; properties?: Record<string, string | number | boolean | string[]> } | undefined {
@@ -232,15 +299,19 @@ function captureToEdge(query: QuerySpec, row: CaptureMatch[], file: string, lang
     const capture = first(row, 'route_path', 'route_suffix', 'controller_prefix');
     const method = first(row, 'method', 'http_method', 'decorator_method', 'fn_name')?.text;
     if (!capture && !method) return undefined;
-    const label = capture ? stripQuotes(capture.text) : method!;
+    const prefixCapture = first(row, 'starts_with');
+    const rawPath = capture ? stripQuotes(capture.text) : undefined;
+    const path = rawPath && prefixCapture ? nodePrefixRoutePath(rawPath) : rawPath;
+    const label = path ?? method!;
     return {
       label,
       edge: 'handles_route',
       node: 'route',
       capture: capture ?? first(row, 'method', 'http_method', 'decorator_method', 'fn_name')!,
       properties: {
-        ...(method ? { method } : {}),
-        ...(capture ? { path: stripQuotes(capture.text) } : {}),
+        ...(method ? { method: normalizeHttpMethod(method) } : {}),
+        ...(path ? { path } : {}),
+        ...(prefixCapture ? { prefix: true } : {}),
       },
     };
   }
@@ -267,6 +338,80 @@ function captureToEdge(query: QuerySpec, row: CaptureMatch[], file: string, lang
   return undefined;
 }
 
+function addCompositeTypeScriptRoutes(graph: AgIrGraph, input: {
+  file: string;
+  languageName: TreeSitterIrLanguage;
+  fileNodeId: string;
+  language: unknown;
+  tree: Parser.Tree;
+}) {
+  if (input.languageName !== 'typescript' && input.languageName !== 'javascript') return;
+
+  const controllerCaptures = queryCaptures(input.tree, input.language, tsQueries.NESTJS_CONTROLLER_QUERY);
+  const controllerPrefix = controllerCaptures.find(capture => capture.name === 'controller_prefix')?.text ?? '';
+  const methodCaptures = queryCaptures(input.tree, input.language, tsQueries.NESTJS_METHOD_QUERY);
+  for (let i = 0; i < methodCaptures.length; i++) {
+    const cap = methodCaptures[i]!;
+    if (cap.name !== 'http_method') continue;
+    const nextCap = methodCaptures[i + 1];
+    const subPath = nextCap?.name === 'route_suffix' ? nextCap.text : '';
+    const path = (`/${controllerPrefix}/${subPath}`).replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+    addRouteEdge(graph, {
+      file: input.file,
+      language: input.languageName,
+      fileNodeId: input.fileNodeId,
+      method: cap.text,
+      path,
+      queryName: 'NESTJS_COMPOSITE_ROUTE',
+      capture: cap,
+      properties: { framework: 'nestjs' },
+    });
+  }
+}
+
+function addCompositeCSharpRoutes(graph: AgIrGraph, input: {
+  file: string;
+  languageName: TreeSitterIrLanguage;
+  fileNodeId: string;
+  language: unknown;
+  tree: Parser.Tree;
+}) {
+  if (input.languageName !== 'csharp') return;
+
+  const attrCaptures = queryCaptures(input.tree, input.language, csharpQueries.ATTRIBUTE_QUERY);
+  let classRoute = '';
+  const httpMethods: Array<{ method: string; subPath: string; capture: CaptureMatch }> = [];
+
+  for (let i = 0; i < attrCaptures.length; i++) {
+    const nameCap = attrCaptures[i];
+    if (nameCap?.name !== 'attr_name') continue;
+    const argCap = attrCaptures[i + 1]?.name === 'attr_arg' ? attrCaptures[i + 1] : undefined;
+    if (nameCap.text === 'Route' && argCap) {
+      classRoute = stripQuotes(argCap.text);
+      i++;
+      continue;
+    }
+    const method = /^Http(Get|Post|Put|Delete|Patch|Head|Options)$/i.exec(nameCap.text)?.[1];
+    if (!method) continue;
+    httpMethods.push({ method, subPath: argCap ? stripQuotes(argCap.text) : '', capture: nameCap });
+    if (argCap) i++;
+  }
+
+  for (const route of httpMethods) {
+    const path = (`/${classRoute}/${route.subPath}`).replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+    addRouteEdge(graph, {
+      file: input.file,
+      language: input.languageName,
+      fileNodeId: input.fileNodeId,
+      method: route.method,
+      path,
+      queryName: 'CSHARP_COMPOSITE_ROUTE',
+      capture: route.capture,
+      properties: { framework: 'aspnet' },
+    });
+  }
+}
+
 export function extractTreeSitterIrForFile(file: string, componentName?: string): AgIrGraph {
   try {
     const languageName = languageForFile(file);
@@ -281,6 +426,9 @@ export function extractTreeSitterIrForFile(file: string, componentName?: string)
     const content = readFileSync(file, 'utf8');
     const sourceLines = content.split(/\r?\n/);
     const tree = parser.parse(content);
+
+    addCompositeTypeScriptRoutes(graph, { file, languageName, fileNodeId, language, tree });
+    addCompositeCSharpRoutes(graph, { file, languageName, fileNodeId, language, tree });
 
     for (const query of QUERY_REGISTRY[languageName]) {
       let captures: CaptureMatch[] = [];

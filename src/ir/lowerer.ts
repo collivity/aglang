@@ -22,6 +22,7 @@ export interface IrUnresolvedEdge {
   from: string;
   to: string;
   reason: string;
+  file?: string;
 }
 
 export interface IrLoweredFlowProvenance {
@@ -102,12 +103,18 @@ function possibleImportTargets(importerFile: string, specifier: string): string[
 }
 
 function resolveRelativeImport(edge: AgIrEdge, fromNode: AgIrNode, target: AgIrNode, artifact: ArchitectureArtifact, fileNodes: AgIrNode[]): string | undefined {
-  if (fromNode.kind !== 'file' || target.kind !== 'symbol') return undefined;
-  if (!target.label.startsWith('.')) return undefined;
-  const candidates = new Set(possibleImportTargets(fromNode.label, target.label));
+  if (fromNode.kind !== 'file') return undefined;
+  if (edge.properties?.policyFlow !== true) return undefined;
+  if (target.kind === 'file') {
+    return componentForFile(target.label, artifact) ?? (typeof target.properties?.component === 'string' ? target.properties.component : undefined);
+  }
+  if (target.kind !== 'symbol') return undefined;
+  const specifier = typeof edge.properties?.specifier === 'string' ? edge.properties.specifier : target.label;
+  if (!specifier.startsWith('.')) return undefined;
+  const candidates = new Set(possibleImportTargets(fromNode.label, specifier));
   const matchedFile = fileNodes.find(file => candidates.has(normalizeForMatch(file.label)));
   if (matchedFile) return componentForFile(matchedFile.label, artifact) ?? (typeof matchedFile.properties?.component === 'string' ? matchedFile.properties.component : undefined);
-  const resolvedPath = possibleImportTargets(fromNode.label, target.label)[0];
+  const resolvedPath = possibleImportTargets(fromNode.label, specifier)[0];
   if (resolvedPath) return componentForFile(resolvedPath, artifact);
   return undefined;
 }
@@ -160,7 +167,14 @@ export function derivePolicyFactsFromAgIr(
 
     const from = componentForNode(fromNode, artifact, containsFileComponent);
     if (!from) {
-      unresolvedEdges.push({ edgeId: edge.id, kind: edge.kind, from: edge.from, to: edge.to, reason: 'source component could not be resolved' });
+      unresolvedEdges.push({
+        edgeId: edge.id,
+        kind: edge.kind,
+        from: edge.from,
+        to: edge.to,
+        reason: 'source component could not be resolved',
+        file: evidenceFile(edge.evidence) || (fromNode.kind === 'file' ? fromNode.label : undefined),
+      });
       warnings.push({ edgeId: edge.id, message: `Could not resolve source component for Ag-IR ${edge.kind} edge` });
       continue;
     }
@@ -176,13 +190,41 @@ export function derivePolicyFactsFromAgIr(
         if (component) targets = [component];
       }
     } else if (edge.kind === 'calls') {
+      if (edge.properties?.policyFlow !== true) {
+        unresolvedEdges.push({
+          edgeId: edge.id,
+          kind: edge.kind,
+          from: fromNode.label,
+          to: targetNode.label,
+          reason: 'call edge is observational and is not mapped to policy flow',
+          file: evidenceFile(edge.evidence) || (fromNode.kind === 'file' ? fromNode.label : undefined),
+        });
+        warnings.push({
+          edgeId: edge.id,
+          message:
+            `Observed Ag-IR call '${targetNode.label}' is not policy-mapped; ` +
+            `emit a reviewed .agq.yml flow fact or mark the edge policyFlow=true to enforce it`,
+        });
+        continue;
+      }
       if (targetNode.kind === 'component' || targetNode.kind === 'resource') {
         targets = resolveDeclaredTarget(targetNode.label, artifact, declaredEntities);
+      } else {
+        const component = componentForNode(targetNode, artifact, containsFileComponent)
+          ?? (typeof edge.properties?.targetComponent === 'string' ? edge.properties.targetComponent : undefined);
+        if (component) targets = [component];
       }
     }
 
     if (targets.length === 0) {
-      unresolvedEdges.push({ edgeId: edge.id, kind: edge.kind, from: fromNode.label, to: targetNode.label, reason: 'target could not be resolved to a declared component or resource' });
+      unresolvedEdges.push({
+        edgeId: edge.id,
+        kind: edge.kind,
+        from: fromNode.label,
+        to: targetNode.label,
+        reason: 'target could not be resolved to a declared component or resource',
+        file: evidenceFile(edge.evidence) || (fromNode.kind === 'file' ? fromNode.label : undefined),
+      });
       warnings.push({ edgeId: edge.id, message: `Could not resolve Ag-IR ${edge.kind} target '${targetNode.label}'` });
       continue;
     }

@@ -8,7 +8,7 @@ import { parse } from '../src/parser.ts';
 import { projectGraphToFlows } from '../src/runtime/graph-projection.ts';
 import { generateDeltaAssertions } from '../src/runtime/delta-assert.ts';
 import { runGate } from '../src/runtime/gate.ts';
-import type { ExtractorPlugin, GraphFact } from '../src/analyzers/plugin.ts';
+import type { ExtractorPlugin, FlowFact, GraphFact } from '../src/analyzers/plugin.ts';
 
 function compileSpec(source: string) {
   const tokens = tokenize(source);
@@ -183,6 +183,59 @@ describe('graph to flow projection', () => {
     expect(verdict.passed).toBe(false);
     expect(verdict.violations[0]!.graph_evidence?.graphFactId).toBe('fact-1');
     expect(verdict.violations[0]!.graph_evidence?.extractor).toBe('test-graph');
+  });
+
+  it('reports unmatched blocking flow facts as unresolved warnings, not unknown violations', async () => {
+    const artifact = compileSpec(`
+      node runtime : node_runtime { trust: trusted }
+      component A { runs_on: runtime paths: "**/*.mock" }
+      component B { runs_on: runtime paths: "**/*.mock" }
+      component C { runs_on: runtime paths: "**/*.mock" }
+      component D { runs_on: runtime paths: "**/*.mock" }
+      invariant NamedBoundary {
+        deny flow A -> B
+      }
+    `);
+    const facts: FlowFact[] = [
+      {
+        from: 'A',
+        to: 'B',
+        confidence: 'definite',
+        evidence: 'A calls B',
+        file: 'x.mock',
+      },
+      {
+        from: 'C',
+        to: 'D',
+        confidence: 'definite',
+        evidence: 'C calls D',
+        file: 'x.mock',
+      },
+    ];
+    const plugin: ExtractorPlugin = {
+      name: 'flow-mock',
+      extensions: ['.mock'],
+      extract: () => facts,
+    };
+
+    const delta = await generateDeltaAssertions(
+      [{ componentName: 'A', files: ['x.mock'] }],
+      artifact,
+      { plugins: [plugin] },
+    );
+    const verdict = await runGate(artifact, delta);
+
+    expect(verdict.passed).toBe(false);
+    expect(verdict.violations).toHaveLength(1);
+    expect(verdict.violations[0]!.invariant).toBe('NamedBoundary');
+    expect(verdict.violations.some(violation => violation.invariant === 'unknown')).toBe(false);
+    expect(verdict.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        from: 'C',
+        to: 'D',
+        evidence: expect.stringContaining('unresolved'),
+      }),
+    ]));
   });
 });
 

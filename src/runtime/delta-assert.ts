@@ -33,6 +33,7 @@ import { mergeAgIrGraphs } from '../ir/builders.ts';
 import { graphFactsToAgIr } from '../ir/adapters.ts';
 import { extractTreeSitterIrForFile, TREE_SITTER_IR_QUERY_REGISTRY_VERSION } from '../analyzers/ast/ir-extractor.ts';
 import { derivePolicyFactsFromAgIr, type IrLoweredFlowProvenance, type IrLowererWarning, type IrUnresolvedEdge } from '../ir/lowerer.ts';
+import { enrichAgIrWithSemanticIndex, type SemanticIndexInput } from '../ir/semantic-index.ts';
 
 export type { FlowFact, GraphFact };
 
@@ -371,27 +372,33 @@ function computeReachFacts(flowFacts: FlowFact[]): ReachFact[] {
   const seen = new Set<string>();
   for (const start of byFrom.keys()) {
     const queue: Array<{ current: string; path: string[]; first: FlowFact; confidence: FlowFact['confidence'] }> = [];
+    const enqueued = new Set<string>();
     for (const edge of byFrom.get(start) ?? []) {
+      const key = `${start}::${edge.to}`;
+      if (enqueued.has(key)) continue;
+      enqueued.add(key);
       queue.push({ current: edge.to, path: [edge.from, edge.to], first: edge, confidence: edge.confidence });
     }
     while (queue.length > 0) {
       const item = queue.shift()!;
       const key = `${start}::${item.current}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        reachFacts.push({
-          from: start,
-          to: item.current,
-          path: item.path,
-          confidence: item.confidence,
-          evidence: `Reachability path: ${item.path.join(' -> ')}`,
-          file: item.first.file,
-          line: item.first.line,
-          graphEvidence: item.first.graphEvidence,
-        });
-      }
+      if (seen.has(key)) continue;
+      seen.add(key);
+      reachFacts.push({
+        from: start,
+        to: item.current,
+        path: item.path,
+        confidence: item.confidence,
+        evidence: `Reachability path: ${item.path.join(' -> ')}`,
+        file: item.first.file,
+        line: item.first.line,
+        graphEvidence: item.first.graphEvidence,
+      });
       for (const next of byFrom.get(item.current) ?? []) {
         if (item.path.includes(next.to)) continue;
+        const nextKey = `${start}::${next.to}`;
+        if (seen.has(nextKey) || enqueued.has(nextKey)) continue;
+        enqueued.add(nextKey);
         queue.push({
           current: next.to,
           path: [...item.path, next.to],
@@ -691,6 +698,7 @@ export async function generateDeltaAssertions(
 
   const allGraphFacts: GraphFact[] = [];
   const allIrGraphs: AgIrGraph[] = [];
+  const semanticInputs: SemanticIndexInput[] = [];
   const csharpInputs: Array<{ componentName: string; files: string[] }> = [];
   let cacheHits = 0;
   let irCacheHits = 0;
@@ -712,6 +720,7 @@ export async function generateDeltaAssertions(
     if (csFiles.length > 0) {
       csharpInputs.push({ componentName, files: csFiles });
     }
+    semanticInputs.push({ componentName, files });
     const irResult = await extractIrWithCache(irCache, files, file => extractTreeSitterIrForFile(file, componentName));
     allIrGraphs.push(irResult.graph);
     irCacheHits += irResult.cacheHits;
@@ -774,10 +783,11 @@ export async function generateDeltaAssertions(
     }
   }
 
-  const irGraph = mergeAgIrGraphs([
+  const baseIrGraph = mergeAgIrGraphs([
     ...allIrGraphs,
     graphFactsToAgIr(uniqueGraphFacts),
   ]);
+  const irGraph = enrichAgIrWithSemanticIndex(baseIrGraph, semanticInputs);
   const extractionQueries = loadExtractionQueries(options.projectRoot);
   const queryFacts = applyQueriesAgIrFirst(extractionQueries, irGraph, uniqueGraphFacts);
   const irLowering = derivePolicyFactsFromAgIr(irGraph, artifact);

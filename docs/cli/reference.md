@@ -264,6 +264,18 @@ AGLANG_SKIP_AGENT_SKILL_INSTALL=1 npm install -g @collivity/aglang
 
 ---
 
+## `aglc install-extractors`
+
+Scaffold starter `.agq.yml` extraction-query templates into a project.
+
+```bash
+aglc install-extractors [--project <dir>] [--force]
+```
+
+Copies the templates shipped in the npm package (currently `resolved-calls-as-flow.agq.yml` and `resolved-internal-imports-as-flow.agq.yml` — see [Extractors → Starter templates](../extractors.md#starter-templates)) into `<project>/.aglang/extractors/`. Default `--project` is `.`. Files become normal, locally-owned, reviewable artifacts at that point — `aglc check` only ever reads what's committed there. Re-running without `--force` skips files that already exist so local edits aren't clobbered; `--force` overwrites them.
+
+---
+
 ## `aglc emit-context`
 
 Generate an `AGENTS.md` file describing the architecture for AI agents.

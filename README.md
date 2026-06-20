@@ -477,6 +477,7 @@ import "relative/path/other.ag"
 | `aglc emit-context --arch <arch.o> [--out <path>]` | Write `AGENTS.md` (agent context brief) |
 | `aglc emit-skill --arch <arch.o> [--out <path>]` | Write `skill.json` (agent skill manifest) |
 | `aglc install-agent-skill [--path <skills-dir>]` | Install the packaged generic Codex skill |
+| `aglc install-extractors [--project <dir>] [--force]` | Scaffold starter `.agq.yml` templates into `.aglang/extractors/` |
 | `aglc import-openapi <swagger.json> [--out <f.ag>]` | Import OpenAPI 3.x → `.ag` contracts |
 | `aglc import-tf <main.tf> [--out <f.ag>]` | Import Terraform → `.ag` node declarations |
 

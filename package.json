@@ -54,6 +54,7 @@
     "docs/**/*.md",
     "docs/public",
     "stdlib",
+    "templates",
     "README.md",
     "LICENSE"
   ],
