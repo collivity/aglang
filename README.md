@@ -81,6 +81,7 @@ aglang is also an anti-drift layer for multi-repo systems: once architecture int
 
 - **Node.js ≥ 18** (WASM-based Z3 solver requires async/WASM support)
 - Git (for diff-aware `aglc check`)
+- Native tree-sitter bindings require `tree-sitter@^0.22.1` (bumped from `^0.21.x` to add `tree-sitter-swift`); all currently-wired language grammars (TypeScript/JavaScript/Python/C#/Go/Rust/Java) were verified compatible with this core version. `tree-sitter-swift` is currently a dependency only — it is not yet wired into extraction (no `EXTENSION_TO_LANGUAGE`/`QUERY_REGISTRY` entry), so Swift parsing is not available yet.
 
 ---
 

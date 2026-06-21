@@ -8,6 +8,18 @@ export const IMPORT_QUERY = `
   (scoped_identifier) @import_path)
 ` as const;
 
+// package com.acme.orders;
+export const PACKAGE_DECLARATION_QUERY = `
+(package_declaration
+  (scoped_identifier) @package_name)
+` as const;
+
+// ── Declarations (classes/methods this file defines) ─────────────────────────
+export const DECL_QUERY = `
+(class_declaration name: (identifier) @type_name)
+(method_declaration name: (identifier) @type_name)
+` as const;
+
 // ── Annotation (route) detection ──────────────────────────────────────────────
 // @GetMapping("/path")  @PostMapping  @RequestMapping(value="/path", method=RequestMethod.GET)
 // @RestController  @Controller
@@ -30,5 +42,5 @@ export const NEW_OBJECT_QUERY = `
 export const METHOD_INVOCATION_QUERY = `
 (method_invocation
   object: (identifier) @receiver
-  name: (identifier) @method_name)
+  name: (identifier) @method)
 ` as const;

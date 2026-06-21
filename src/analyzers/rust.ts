@@ -3,11 +3,12 @@
 // Uses tree-sitter AST when available, falls back to regex silently.
 
 import { readFileSync } from 'fs';
-import type { ExtractorPlugin, ExtractorInput, FlowFact, ExtractionStrategy } from './plugin.ts';
+import type { ExtractorPlugin, ExtractorInput, FlowFact, GraphFact, ExtractionStrategy } from './plugin.ts';
 import { normalizeRoute } from './typescript.ts';
 import { makeParser, getTreeSitter } from './ast/loader.ts';
 import { groupByRow, parseAndQuery } from './ast/walker.ts';
 import { USE_QUERY, ROUTE_ATTR_QUERY, CALL_QUERY } from './ast/queries/rust.ts';
+import { extractAssignmentGraphFacts } from './assignment-guard.ts';
 
 export interface RouteFact {
   method: string;
@@ -221,5 +222,33 @@ export const rustPlugin: ExtractorPlugin = {
         : withStrategy(analyzeFileRegex(content, filePath, input.componentName), 'regex')));
     }
     return facts;
+  },
+  async extractGraph(input: ExtractorInput): Promise<GraphFact[]> {
+    const graphFacts: GraphFact[] = [];
+    const flowFacts = await this.extract!(input);
+    graphFacts.push(...flowFacts.map((fact, index) => ({
+      id: `rust-flow:${index}:${fact.from}:${fact.to}:${fact.file}:${fact.line ?? 0}`,
+      kind: 'accesses_technology',
+      subject: fact.from,
+      technology: fact.to,
+      confidence: fact.confidence,
+      evidence: {
+        extractor: rustPlugin.name,
+        strategy: fact.strategy ?? 'legacy-flow',
+        file: fact.file,
+        line: fact.line,
+        message: fact.evidence,
+      },
+    } satisfies GraphFact)));
+    for (const filePath of input.files) {
+      let content: string;
+      try { content = readFileSync(filePath, 'utf8'); } catch { continue; }
+      // Struct-field access uses '.' but enum variants use '::' (Status::Active, not Status.Active).
+      graphFacts.push(...extractAssignmentGraphFacts(content, filePath, input.componentName, rustPlugin.name, {
+        enumSeparator: '::',
+        guardOperators: ['=='],
+      }));
+    }
+    return graphFacts;
   },
 };

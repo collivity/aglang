@@ -9,11 +9,12 @@ import * as goQueries from './queries/golang.ts';
 import * as javaQueries from './queries/java.ts';
 import * as pythonQueries from './queries/python.ts';
 import * as rustQueries from './queries/rust.ts';
+import * as swiftQueries from './queries/swift.ts';
 import * as tsQueries from './queries/typescript.ts';
 import { agIrEdge, agIrId, agIrNode, emptyAgIrGraph, mergeAgIrGraphs } from '../../ir/builders.ts';
 import type { AgIrEdgeKind, AgIrEvidence, AgIrGraph, AgIrNodeKind } from '../../ir/types.ts';
 
-export type TreeSitterIrLanguage = 'typescript' | 'javascript' | 'python' | 'csharp' | 'golang' | 'rust' | 'java';
+export type TreeSitterIrLanguage = 'typescript' | 'javascript' | 'python' | 'csharp' | 'golang' | 'rust' | 'java' | 'swift';
 
 type SemanticIntent = 'imports' | 'calls' | 'assignments' | 'routes' | 'types';
 
@@ -35,6 +36,7 @@ const EXTENSION_TO_LANGUAGE: Record<string, TreeSitterIrLanguage> = {
   '.go': 'golang',
   '.rs': 'rust',
   '.java': 'java',
+  '.swift': 'swift',
 };
 
 const QUERY_REGISTRY: Record<TreeSitterIrLanguage, QuerySpec[]> = {
@@ -60,10 +62,12 @@ const QUERY_REGISTRY: Record<TreeSitterIrLanguage, QuerySpec[]> = {
     { intent: 'imports', queryName: 'IMPORT_QUERY', querySource: pythonQueries.IMPORT_QUERY },
     { intent: 'imports', queryName: 'IMPORT_ALIAS_QUERY', querySource: pythonQueries.IMPORT_ALIAS_QUERY },
     { intent: 'imports', queryName: 'FROM_IMPORT_QUERY', querySource: pythonQueries.FROM_IMPORT_QUERY },
+    { intent: 'imports', queryName: 'FROM_IMPORT_RELATIVE_QUERY', querySource: pythonQueries.FROM_IMPORT_RELATIVE_QUERY },
     { intent: 'calls', queryName: 'CALL_EXPR_QUERY', querySource: pythonQueries.CALL_EXPR_QUERY },
     { intent: 'routes', queryName: 'DECORATOR_ROUTE_QUERY', querySource: pythonQueries.DECORATOR_ROUTE_QUERY },
     { intent: 'routes', queryName: 'FLASK_ROUTE_QUERY', querySource: pythonQueries.FLASK_ROUTE_QUERY },
     { intent: 'routes', queryName: 'DJANGO_PATH_QUERY', querySource: pythonQueries.DJANGO_PATH_QUERY },
+    { intent: 'types', queryName: 'DECL_QUERY', querySource: pythonQueries.DECL_QUERY },
   ],
   csharp: [
     { intent: 'imports', queryName: 'USING_QUERY', querySource: csharpQueries.USING_QUERY },
@@ -76,19 +80,29 @@ const QUERY_REGISTRY: Record<TreeSitterIrLanguage, QuerySpec[]> = {
   ],
   golang: [
     { intent: 'imports', queryName: 'IMPORT_QUERY', querySource: goQueries.IMPORT_QUERY },
+    { intent: 'imports', queryName: 'IMPORT_ALIASED_QUERY', querySource: goQueries.IMPORT_ALIASED_QUERY },
     { intent: 'calls', queryName: 'CALL_QUERY', querySource: goQueries.CALL_QUERY },
     { intent: 'routes', queryName: 'ROUTE_QUERY', querySource: goQueries.ROUTE_QUERY },
+    { intent: 'types', queryName: 'DECL_QUERY', querySource: goQueries.DECL_QUERY },
   ],
   rust: [
     { intent: 'imports', queryName: 'USE_QUERY', querySource: rustQueries.USE_QUERY },
+    { intent: 'imports', queryName: 'USE_ALIASED_QUERY', querySource: rustQueries.USE_ALIASED_QUERY },
     { intent: 'calls', queryName: 'CALL_QUERY', querySource: rustQueries.CALL_QUERY },
     { intent: 'routes', queryName: 'ROUTE_ATTR_QUERY', querySource: rustQueries.ROUTE_ATTR_QUERY },
+    { intent: 'types', queryName: 'DECL_QUERY', querySource: rustQueries.DECL_QUERY },
   ],
   java: [
     { intent: 'imports', queryName: 'IMPORT_QUERY', querySource: javaQueries.IMPORT_QUERY },
     { intent: 'calls', queryName: 'METHOD_INVOCATION_QUERY', querySource: javaQueries.METHOD_INVOCATION_QUERY },
     { intent: 'calls', queryName: 'NEW_OBJECT_QUERY', querySource: javaQueries.NEW_OBJECT_QUERY },
     { intent: 'routes', queryName: 'ANNOTATION_QUERY', querySource: javaQueries.ANNOTATION_QUERY },
+    { intent: 'types', queryName: 'DECL_QUERY', querySource: javaQueries.DECL_QUERY },
+  ],
+  swift: [
+    { intent: 'imports', queryName: 'IMPORT_QUERY', querySource: swiftQueries.IMPORT_QUERY },
+    { intent: 'calls', queryName: 'CALL_EXPR_QUERY', querySource: swiftQueries.CALL_EXPR_QUERY },
+    { intent: 'types', queryName: 'DECL_QUERY', querySource: swiftQueries.DECL_QUERY },
   ],
 };
 
@@ -269,6 +283,8 @@ function captureToEdge(query: QuerySpec, row: CaptureMatch[], file: string, lang
       return undefined;
     }
     const specifier = stripQuotes(capture.text);
+    const alias = first(row, 'alias', 'import_alias')?.text;
+    const importedName = first(row, 'import_name')?.text;
     return {
       label: specifier,
       edge: 'imports',
@@ -277,6 +293,10 @@ function captureToEdge(query: QuerySpec, row: CaptureMatch[], file: string, lang
       properties: {
         specifier,
         moduleKind: specifier.startsWith('.') ? 'relative' : 'package',
+        ...(alias ? { alias } : {}),
+        // For "from X import Y" forms, Y (not anything derived from X) is the name
+        // bound in the importing file's scope — see cross-file-linker.ts.
+        ...(importedName ? { importedName } : {}),
       },
     };
   }

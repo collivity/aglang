@@ -5,9 +5,10 @@
 // Combine Input/Output view models, Keychain, and UserDefaults.
 
 import { readFileSync } from 'fs';
-import type { ExtractorPlugin, ExtractorInput, FlowFact } from './plugin.ts';
+import type { ExtractorPlugin, ExtractorInput, FlowFact, GraphFact } from './plugin.ts';
 import { normalizeRoute } from './typescript.ts';
 import type { RouteFact } from './python.ts';
+import { extractAssignmentGraphFacts } from './assignment-guard.ts';
 
 // ── Server-side route extraction (Vapor) ─────────────────────────────────────
 
@@ -433,5 +434,38 @@ export const swiftPlugin: ExtractorPlugin = {
       facts.push(...analyzeSwift(content, filePath, input.componentName, input.mappings));
     }
     return dedupeFacts(facts);
+  },
+  async extractGraph(input: ExtractorInput): Promise<GraphFact[]> {
+    const graphFacts: GraphFact[] = [];
+    const flowFacts = await this.extract!(input);
+    graphFacts.push(...flowFacts.map((fact, index) => ({
+      id: `swift-flow:${index}:${fact.from}:${fact.to}:${fact.file}:${fact.line ?? 0}`,
+      kind: 'accesses_technology',
+      subject: fact.from,
+      technology: fact.to,
+      confidence: fact.confidence,
+      evidence: {
+        extractor: swiftPlugin.name,
+        strategy: fact.strategy ?? 'legacy-flow',
+        file: fact.file,
+        line: fact.line,
+        message: fact.evidence,
+      },
+    } satisfies GraphFact)));
+    for (const filePath of input.files) {
+      let content: string;
+      try { content = readFileSync(filePath, 'utf8'); } catch { continue; }
+      // Only the explicit EnumType.Member RHS form is detected. Idiomatic Swift very
+      // commonly uses the type-inferred shorthand (order.status = .active) instead —
+      // that form is NOT matched here. Catching it would require knowing the declared
+      // type of `object.property` to infer the enum name, which this regex-based
+      // detector (like the other languages' equivalents) does not do. Documented gap,
+      // not a silent miss — see round 4 plan and the corresponding test.
+      graphFacts.push(...extractAssignmentGraphFacts(content, filePath, input.componentName, swiftPlugin.name, {
+        enumSeparator: '.',
+        guardOperators: ['=='],
+      }));
+    }
+    return graphFacts;
   },
 };

@@ -59,9 +59,8 @@ const cases: QueryCase[] = [
   { language: 'rust', queryName: 'CALL_QUERY', querySource: rustQueries.CALL_QUERY, snippet: `fn main() { PgPool::connect(); }`, minCaptures: 2 },
 
   { language: 'swift', queryName: 'IMPORT_QUERY', querySource: swiftQueries.IMPORT_QUERY, snippet: `import Foundation`, minCaptures: 1 },
-  { language: 'swift', queryName: 'CLASS_DECL_QUERY', querySource: swiftQueries.CLASS_DECL_QUERY, snippet: `class HomeViewController {}`, minCaptures: 1 },
-  { language: 'swift', queryName: 'STRUCT_DECL_QUERY', querySource: swiftQueries.STRUCT_DECL_QUERY, snippet: `struct ItemView {}`, minCaptures: 1 },
-  { language: 'swift', queryName: 'CALL_EXPR_QUERY', querySource: swiftQueries.CALL_EXPR_QUERY, snippet: `client.get()`, minCaptures: 1 },
+  { language: 'swift', queryName: 'DECL_QUERY', querySource: swiftQueries.DECL_QUERY, snippet: `class HomeViewController {}\nstruct ItemView {}`, minCaptures: 2 },
+  { language: 'swift', queryName: 'CALL_EXPR_QUERY', querySource: swiftQueries.CALL_EXPR_QUERY, snippet: `client.get()`, minCaptures: 2 },
 ];
 
 describe('tree-sitter query benchmark', () => {

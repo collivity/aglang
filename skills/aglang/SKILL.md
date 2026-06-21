@@ -54,6 +54,7 @@ aglc explain --arch architecture.o --project . --violation <id> [--json] [--diff
 aglc debug --arch architecture.o --project . [--file <path>] [--all] [--diff <ref>] [--out .aglang/debug]
 aglc emit-context --arch architecture.o --out AGENTS.md
 aglc emit-skill --arch architecture.o --out skill.json
+aglc install-extractors [--project <dir>] [--force]
 aglc import-openapi <swagger.json> [--out <file.ag>]
 aglc import-tf <main.tf> [--out <file.ag>]
 ```

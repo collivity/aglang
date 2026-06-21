@@ -24,6 +24,15 @@ export const FROM_IMPORT_QUERY = `
   name: (dotted_name) @import_name)
 ` as const;
 
+// from .models import User  →  module_name = ".models" (relative_import node text)
+// from . import models     →  module_name = "."        (bare dots, no dotted_name)
+// from ..shared import util → module_name = "..shared"
+export const FROM_IMPORT_RELATIVE_QUERY = `
+(import_from_statement
+  module_name: (relative_import) @module_name
+  name: (dotted_name) @import_name)
+` as const;
+
 // ── Route decorators ──────────────────────────────────────────────────────────
 // @app.get("/path")   @router.post("/path")
 // Captures: decorator_method (get/post/..) and route_path
@@ -63,12 +72,20 @@ export const DJANGO_PATH_QUERY = `
     (_) @route_view))
 ` as const;
 
+// ── Declarations (functions/classes this file defines) ───────────────────────
+export const DECL_QUERY = `
+(function_definition name: (identifier) @type_name)
+(class_definition name: (identifier) @type_name)
+` as const;
+
 // ── Infrastructure call expressions ──────────────────────────────────────────
-// MongoClient(uri)  redis.Redis(...)  create_engine(...)
+// MongoClient(uri)  redis.Redis(...)  create_engine(...)  store.save_order(...)
 export const CALL_EXPR_QUERY = `
 (call
   function: [
     (identifier) @fn_name
-    (attribute attribute: (identifier) @fn_name)
+    (attribute
+      object: (identifier) @receiver
+      attribute: (identifier) @fn_name)
   ])
 ` as const;

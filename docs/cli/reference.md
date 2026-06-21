@@ -147,6 +147,8 @@ The JSON payload will include `extractor_debug[]` with parser availability, AST 
 
 If a declared extractor plugin fails before emitting facts, JSON mode returns `extractor_error` in the verdict envelope.
 
+`extractor_debug[]`'s parser-availability check reflects the native `tree-sitter` core version (`^0.22.1`) and the currently-wired grammars: TypeScript, JavaScript, Python, C#, Go, Rust, Java. `tree-sitter-swift` ships as a dependency but has no extraction wiring yet, so it never appears in this output.
+
 ---
 
 ## `aglc explain`

@@ -34,6 +34,7 @@ import { graphFactsToAgIr } from '../ir/adapters.ts';
 import { extractTreeSitterIrForFile, TREE_SITTER_IR_QUERY_REGISTRY_VERSION } from '../analyzers/ast/ir-extractor.ts';
 import { derivePolicyFactsFromAgIr, type IrLoweredFlowProvenance, type IrLowererWarning, type IrUnresolvedEdge } from '../ir/lowerer.ts';
 import { enrichAgIrWithSemanticIndex, type SemanticIndexInput } from '../ir/semantic-index.ts';
+import { enrichAgIrWithCrossFileLinks } from '../ir/cross-file-linker.ts';
 
 export type { FlowFact, GraphFact };
 
@@ -787,7 +788,10 @@ export async function generateDeltaAssertions(
     ...allIrGraphs,
     graphFactsToAgIr(uniqueGraphFacts),
   ]);
-  const irGraph = enrichAgIrWithSemanticIndex(baseIrGraph, semanticInputs);
+  const semanticIrGraph = enrichAgIrWithSemanticIndex(baseIrGraph, semanticInputs);
+  const irGraph = options.projectRoot
+    ? enrichAgIrWithCrossFileLinks(semanticIrGraph, artifact, options.projectRoot)
+    : semanticIrGraph;
   const extractionQueries = loadExtractionQueries(options.projectRoot);
   const queryFacts = applyQueriesAgIrFirst(extractionQueries, irGraph, uniqueGraphFacts);
   const irLowering = derivePolicyFactsFromAgIr(irGraph, artifact);

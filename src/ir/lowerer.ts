@@ -72,7 +72,7 @@ function normalizeForMatch(path: string): string {
   return normalize(path).replace(/\\/g, '/');
 }
 
-function componentForFile(file: string, artifact: ArchitectureArtifact): string | undefined {
+export function componentForFile(file: string, artifact: ArchitectureArtifact): string | undefined {
   const normalized = normalizeForMatch(file);
   for (const [component, glob] of Object.entries(artifact.mappings ?? {})) {
     const pattern = normalizeForMatch(glob);

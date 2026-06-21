@@ -55,9 +55,11 @@ These logical components map your code files to the architecture nodes above.
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `CliCompiler`
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `StateMachineRuntime` must NOT directly access `CliCompiler`
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `CliCompiler`
+  - [CompilerEntrypointBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `CliCompiler`
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `GraphProjection` must NOT directly access `CliCompiler`
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `Emitters` must NOT directly access `CliCompiler`
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `SpecGenerator` must NOT directly access `CliCompiler`
+  - [IrCoreBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `CliCompiler`
   - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `CliCompiler`
   - [SemanticQueryEngineIsolation] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `CliCompiler`
 
@@ -83,6 +85,7 @@ These logical components map your code files to the architecture nodes above.
   - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `SemanticQueryEngine`
   - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `StateMachineRuntime`
   - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `ExtractorAnalyzers`
+  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `IrCore`
   - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `GraphProjection`
   - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `UiWorkbench`
   - [SemanticQueryEngineIsolation] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `SmtBackend`
@@ -93,6 +96,7 @@ These logical components map your code files to the architecture nodes above.
 - **File glob**: `src/runtime/{delta-assert,diff-parser,diagnostic,extraction-cache,gate}.ts`
 - **Rules affecting this component:**
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `RuntimeCore` must NOT directly access `CliCompiler`
+  - [IrCoreBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `RuntimeCore`
   - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `RuntimeCore`
   - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `RuntimeCore`
   - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `RuntimeCore`
@@ -103,6 +107,7 @@ These logical components map your code files to the architecture nodes above.
 - **File glob**: `src/runtime/{contract-gate,workflow-gate,change-gate}.ts`
 - **Rules affecting this component:**
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `PolicyGates` must NOT directly access `CliCompiler`
+  - [IrCoreBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `PolicyGates`
   - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `PolicyGates`
   - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `PolicyGates`
   - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `PolicyGates`
@@ -113,6 +118,7 @@ These logical components map your code files to the architecture nodes above.
 - **File glob**: `src/runtime/extraction-query.ts`
 - **Rules affecting this component:**
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `CliCompiler`
+  - [IrCoreBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `SemanticQueryEngine`
   - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `SemanticQueryEngine`
   - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `SemanticQueryEngine`
   - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `SemanticQueryEngine`
@@ -129,6 +135,7 @@ These logical components map your code files to the architecture nodes above.
 - **File glob**: `src/runtime/state-machine.ts`
 - **Rules affecting this component:**
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `StateMachineRuntime` must NOT directly access `CliCompiler`
+  - [IrCoreBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `StateMachineRuntime`
   - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `StateMachineRuntime`
   - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `StateMachineRuntime`
   - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `StateMachineRuntime`
@@ -138,6 +145,7 @@ These logical components map your code files to the architecture nodes above.
 ### `UiWorkbench`
 - **File glob**: `src/runtime/ui-server.ts`
 - **Rules affecting this component:**
+  - [IrCoreBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `UiWorkbench`
   - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `UiWorkbench`
   - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `UiWorkbench`
   - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `UiWorkbench`
@@ -145,6 +153,7 @@ These logical components map your code files to the architecture nodes above.
   - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `LanguageFrontend`
   - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `SmtBackend`
   - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `ExtractorAnalyzers`
+  - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `IrCore`
   - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `GraphProjection`
   - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `StateMachineRuntime`
   - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `SemanticQueryEngine`
@@ -165,6 +174,21 @@ These logical components map your code files to the architecture nodes above.
   - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `ExtractorAnalyzers`
   - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `ExtractorAnalyzers`
 
+### `IrCore`
+- **File glob**: `src/ir/**/*.ts`
+- **Rules affecting this component:**
+  - [CompilerEntrypointBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `CliCompiler`
+  - [IrCoreBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `CliCompiler`
+  - [IrCoreBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `Emitters`
+  - [IrCoreBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `RuntimeCore`
+  - [IrCoreBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `PolicyGates`
+  - [IrCoreBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `SemanticQueryEngine`
+  - [IrCoreBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `StateMachineRuntime`
+  - [IrCoreBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `UiWorkbench`
+  - [SmtBackendIsolation] **FORBIDDEN**: `SmtBackend` must NOT directly access `IrCore`
+  - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `IrCore`
+  - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `IrCore`
+
 ### `GraphProjection`
 - **File glob**: `src/runtime/graph-projection.ts`
 - **Rules affecting this component:**
@@ -179,6 +203,7 @@ These logical components map your code files to the architecture nodes above.
 - **File glob**: `src/emitters/**/*.ts`
 - **Rules affecting this component:**
   - [CompilerEntrypointBoundary] **FORBIDDEN**: `Emitters` must NOT directly access `CliCompiler`
+  - [IrCoreBoundary] **FORBIDDEN**: `IrCore` must NOT directly access `Emitters`
   - [LanguageFrontendPurity] **FORBIDDEN**: `LanguageFrontend` must NOT directly access `Emitters`
   - [ExtractorAnalyzerBoundary] **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `Emitters`
 
@@ -261,6 +286,7 @@ These logical components map your code files to the architecture nodes above.
   - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `SemanticQueryEngine`
   - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `StateMachineRuntime`
   - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `ExtractorAnalyzers`
+  - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `IrCore`
   - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `SmtBackend`
   - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `GraphProjection`
   - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `UiWorkbench`
@@ -295,9 +321,19 @@ These are universal laws — they apply to ALL code, not just tests.
 - **FORBIDDEN**: `SemanticQueryEngine` must NOT directly access `CliCompiler`
 - **FORBIDDEN**: `StateMachineRuntime` must NOT directly access `CliCompiler`
 - **FORBIDDEN**: `ExtractorAnalyzers` must NOT directly access `CliCompiler`
+- **FORBIDDEN**: `IrCore` must NOT directly access `CliCompiler`
 - **FORBIDDEN**: `GraphProjection` must NOT directly access `CliCompiler`
 - **FORBIDDEN**: `Emitters` must NOT directly access `CliCompiler`
 - **FORBIDDEN**: `SpecGenerator` must NOT directly access `CliCompiler`
+
+### `IrCoreBoundary`
+- **FORBIDDEN**: `IrCore` must NOT directly access `CliCompiler`
+- **FORBIDDEN**: `IrCore` must NOT directly access `Emitters`
+- **FORBIDDEN**: `IrCore` must NOT directly access `RuntimeCore`
+- **FORBIDDEN**: `IrCore` must NOT directly access `PolicyGates`
+- **FORBIDDEN**: `IrCore` must NOT directly access `SemanticQueryEngine`
+- **FORBIDDEN**: `IrCore` must NOT directly access `StateMachineRuntime`
+- **FORBIDDEN**: `IrCore` must NOT directly access `UiWorkbench`
 
 ### `LanguageFrontendPurity`
 - **FORBIDDEN**: `LanguageFrontend` must NOT directly access `RuntimeCore`
@@ -314,6 +350,7 @@ These are universal laws — they apply to ALL code, not just tests.
 - **FORBIDDEN**: `SmtBackend` must NOT directly access `SemanticQueryEngine`
 - **FORBIDDEN**: `SmtBackend` must NOT directly access `StateMachineRuntime`
 - **FORBIDDEN**: `SmtBackend` must NOT directly access `ExtractorAnalyzers`
+- **FORBIDDEN**: `SmtBackend` must NOT directly access `IrCore`
 - **FORBIDDEN**: `SmtBackend` must NOT directly access `GraphProjection`
 - **FORBIDDEN**: `SmtBackend` must NOT directly access `UiWorkbench`
 
@@ -338,6 +375,7 @@ These are universal laws — they apply to ALL code, not just tests.
 - **FORBIDDEN**: `UiWorkbench` must NOT directly access `LanguageFrontend`
 - **FORBIDDEN**: `UiWorkbench` must NOT directly access `SmtBackend`
 - **FORBIDDEN**: `UiWorkbench` must NOT directly access `ExtractorAnalyzers`
+- **FORBIDDEN**: `UiWorkbench` must NOT directly access `IrCore`
 - **FORBIDDEN**: `UiWorkbench` must NOT directly access `GraphProjection`
 - **FORBIDDEN**: `UiWorkbench` must NOT directly access `StateMachineRuntime`
 - **FORBIDDEN**: `UiWorkbench` must NOT directly access `SemanticQueryEngine`
@@ -348,6 +386,7 @@ These are universal laws — they apply to ALL code, not just tests.
 - **FORBIDDEN**: `VscodeExtension` must NOT directly access `SemanticQueryEngine`
 - **FORBIDDEN**: `VscodeExtension` must NOT directly access `StateMachineRuntime`
 - **FORBIDDEN**: `VscodeExtension` must NOT directly access `ExtractorAnalyzers`
+- **FORBIDDEN**: `VscodeExtension` must NOT directly access `IrCore`
 - **FORBIDDEN**: `VscodeExtension` must NOT directly access `SmtBackend`
 - **FORBIDDEN**: `VscodeExtension` must NOT directly access `GraphProjection`
 - **FORBIDDEN**: `VscodeExtension` must NOT directly access `UiWorkbench`
@@ -519,6 +558,7 @@ These are the canonical data shapes for this system.
 - **REQUIRE TOUCHED** `PublicDocs` when `AgentSkill` changes
 - **REQUIRE TOUCHED** `ArchitectureSpec` when `LanguageFrontend` changes
 - **REQUIRE TOUCHED** `ArchitectureSpec` when `RuntimeCore` changes
+- **REQUIRE TOUCHED** `ArchitectureSpec` when `IrCore` changes
 - **REQUIRE TOUCHED** `ArchitectureSpec` when `PolicyGates` changes
 - **REQUIRE TOUCHED** `ArchitectureSpec` when `SemanticQueryEngine` changes
 - **REQUIRE TOUCHED** `ArchitectureSpec` when `StateMachineRuntime` changes
