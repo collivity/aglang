@@ -198,13 +198,14 @@ Commit aborted.
 | **Multi-file specs** | ✅ | Split large specs with `import "other.ag"` — shared DAG imports are deduplicated |
 | **`aglc request-scan`** | ✅ | Emit an agent task packet for semantic architecture discovery and proposal work |
 | **`aglc generate`** | ✅ | Legacy deterministic draft generator; review output before use |
+| **`aglc query-test`** | ✅ | Validate a `.agq.yml` query against fixture facts before wiring it into a real check |
 | **Import OpenAPI** | ✅ | `aglc import-openapi swagger.json` → `.ag` contract blocks |
 | **Import Terraform** | ✅ | `aglc import-tf main.tf` → `.ag` node declarations |
 | **Plugin protocol** | ✅ | Extend extraction via npm packages implementing the `aglc-plugin` protocol |
 | **Agent context** | ✅ | `aglc emit-context` produces `AGENTS.md` — machine-verified architectural brief |
 | **Skill manifest** | ✅ | `aglc emit-skill` produces `skill.json` for agent tool registries |
 | **Packaged agent skill** | ✅ | `aglc install-agent-skill` installs a generic Codex skill interface from the npm package |
-| **Work-in-progress validation** | ✅ | Agents run `check-file --json` during focused edits and `check --all --json` before finishing |
+| **Work-in-progress validation** | ✅ | Agents run `check-file --json` during focused edits and `check --diff <ref> --json` before finishing |
 | **JSON verdicts** | ✅ | All check commands emit structured JSON with Z3 proofs (`--json`) |
 | **Extraction cache** | ✅ | SHA-256 keyed file cache in `.aglang-cache/` — skips re-analysing unchanged files |
 | **Parallel extraction** | ✅ | All extractors run concurrently (CPU-capped pool) |
@@ -468,6 +469,7 @@ import "relative/path/other.ag"
 | `aglc emit-skill --arch <arch.o> [--out <path>]` | Write `skill.json` (agent skill manifest) |
 | `aglc install-agent-skill [--path <skills-dir>]` | Install the packaged generic Codex skill |
 | `aglc install-extractors [--project <dir>] [--force]` | Scaffold starter `.agq.yml` templates into `.aglang/extractors/` |
+| `aglc query-test --query <f.agq.yml> [--fixture <facts.yml>\|--init-fixture] [--json]` | Validate a query against fixture facts before wiring it into a real check |
 | `aglc import-openapi <swagger.json> [--out <f.ag>]` | Import OpenAPI 3.x → `.ag` contracts |
 | `aglc import-tf <main.tf> [--out <f.ag>]` | Import Terraform → `.ag` node declarations |
 

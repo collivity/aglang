@@ -55,6 +55,7 @@ aglc debug --arch architecture.o --project . [--file <path>] [--all] [--diff <re
 aglc emit-context --arch architecture.o --out AGENTS.md
 aglc emit-skill --arch architecture.o --out skill.json
 aglc install-extractors [--project <dir>] [--force]
+aglc query-test --query <file.agq.yml> [--fixture <facts.yml>|--init-fixture] [--json]
 aglc import-openapi <swagger.json> [--out <file.ag>]
 aglc import-tf <main.tf> [--out <file.ag>]
 ```
@@ -73,6 +74,8 @@ State machines and other semantic rules are enforced from extracted facts, not f
 4. The JSON violation includes `type: "state_machine_violation"`, stable `id`, source evidence, query id/version/file, graph fact id when available, and the Z3 proof.
 
 Transitions without a resolved `from` state are warning-only. Do not "fix" these by weakening the machine unless the requested architecture change is explicit.
+
+Before adding or editing a `.agq.yml` query, validate it with `aglc query-test --query <file> --fixture <facts.yml>` (or `--init-fixture` to scaffold a starter fixture from the query's own `match` clause). This checks the query in isolation against hand-written facts — confirm it matches and emits what's intended before it's wired into a real check, where a wrong `match` clause fails silently rather than with a clear error.
 
 `require flow A -> B via C`, `require dataflow D -> T via C`, `require auth on flow A -> B`, `require encryption on flow A -> B`, `require dependency A -> B via interface I`, and `require operation serialization in Serializer` are blocking when definite reviewed counterexample evidence exists. These readable rules compile to deny-counterexample enforcement; teams may also write explicit forms such as `deny unauthenticated flow A -> B` or `deny dependency A -> B without interface I`. Operation, auth, encryption, and dependency facts come from deterministic extractors or reviewed `.agq.yml` files, not ad hoc LLM inference during `check`. If a require violation appears to need a changed `.ag` or `.agq.yml` rule, ask the engineer before editing architecture intent.
 

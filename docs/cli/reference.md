@@ -278,6 +278,20 @@ Copies the templates shipped in the npm package (currently `resolved-calls-as-fl
 
 ---
 
+## `aglc query-test`
+
+Validate a single `.agq.yml` query against hand-written fixture facts, before it's wired into a real check.
+
+```bash
+aglc query-test --query <file.agq.yml> --fixture <facts.yml>
+aglc query-test --query <file.agq.yml> --init-fixture
+aglc query-test --query <file.agq.yml> --fixture <facts.yml> --json
+```
+
+A fixture is a short YAML list — each entry needs only `kind` and `properties`; `id`/`subject`/`evidence` get sensible defaults. Reports, per fixture fact, whether it matched the query's `match` clause, what it would emit with capture variables substituted, or the exact reason it didn't (missing a captured property vs. no match at all). `--init-fixture` scaffolds a starter fixture from the query's own `match` clause instead of running a test. `--json` emits the raw trace array for scripting. See [Extractors → Testing a query before wiring it in](../extractors.md#testing-a-query-before-wiring-it-in) for a full worked example, including a deliberately broken query.
+
+---
+
 ## `aglc emit-context`
 
 Generate an `AGENTS.md` file describing the architecture for AI agents.
