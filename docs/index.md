@@ -75,7 +75,7 @@ After that, agents and humans use the same checks:
 
 ```bash
 aglc check-file --arch architecture.o --file src/foo.ts --json
-aglc check --arch architecture.o --project . --all --json
+aglc check --arch architecture.o --project . --diff <ref> --json
 ```
 
 ---
@@ -86,7 +86,7 @@ aglang is a verifiable specification language for agents and humans.
 
 You describe components, nodes, contracts, state machines, and rules in a `.ag` file. `aglc` compiles that specification into `architecture.o`, extracts deterministic facts from the repository, applies reviewed semantic queries from `.agq.yml`, and checks the resulting model with Z3-backed rules and deterministic policy gates.
 
-The important point is that aglang is not just documentation, not just a CI check, and not just an agent helper:
+The important point: engineers, agents, and CI all check the same machine-readable architecture truth, not three separate copies of it.
 
 - it gives engineers, agents, and CI the same machine-readable architecture truth
 - it separates extracted facts from reviewed semantic interpretation
@@ -140,8 +140,6 @@ aglang lets a reviewed architecture contract coordinate those surfaces. Componen
 
 ## What it does not do yet
 
-The limits matter.
-
 - It does **not** prove arbitrary program correctness.
 - It does **not** infer perfect architecture from source code automatically.
 - It verifies extracted and reviewed architecture facts against declared rules; weak extraction means weak evidence.
@@ -176,8 +174,10 @@ aglc compile architecture.ag
 
 ```bash
 aglc check-file --arch architecture.o --file src/foo.cs --json
-aglc check --arch architecture.o --project . --all --json
+aglc check --arch architecture.o --project . --diff <ref> --json
 ```
+
+Use `--diff <ref>` for the change you're actually making — it diffs against the base branch/commit and is the only mode that can catch `change_policy` violations. Reserve `--all` for a full-repo baseline check; it marks every file "touched," which makes it structurally unable to tell whether a companion file was really updated alongside the one that changed.
 
 ### 5. Let local checks and CI enforce the same rules
 

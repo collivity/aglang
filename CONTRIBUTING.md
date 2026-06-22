@@ -57,3 +57,5 @@ Vitest, run via `npm test` / `npx vitest run`. Conventions worth following, esta
 ## Docs
 
 `docs/` is a VitePress site (`npm run docs:dev` to preview, `npm run docs:build` to build). If you change CLI behavior, update `docs/cli/reference.md`; the `DocsFreshness` policy may require it for changes to `src/index.ts` or `package.json`.
+
+If you change language coverage (a new resolved-call shape, a new heuristic, a closed gap), update `known_limitations` in `src/emitters/skill.ts` too — it's hand-maintained prose, the same as `advisory_note`, and it's the thing agents actually read to know what not to over-trust. It goes stale exactly the way README.md did if nobody's job is to touch it.
