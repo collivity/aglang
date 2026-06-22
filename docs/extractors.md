@@ -314,4 +314,57 @@ These facts carry the same provenance fields as transitions: query id, version, 
 
 ### Numeric requirements get real Z3 arithmetic, not symbol matching
 
-When a `value_policy`/`operation_policy` requirement's field resolves to a numeric `data` type (`Int`, `Float`, or `Money`), the compiled check uses real SMT-LIB `Int`/`Real` comparisons (`FieldValueInt`/`FieldValueReal`, with genuine literals and operators) instead of treating the relation and value as opaque atoms. `require Order.total <= 1000` compiles to an actual arithmetic constraint; if an extracted fact later asserts the observed total is `1500`, Z3 derives the contradiction itself — `1500 > 1000` — rather than being told one exists. String/bool/enum comparisons (`require Cart.phase == SingleItem`) are unaffected and still use the original symbolic model, since there's no arithmetic to do there. A bare `$capture` of a numeric `GraphFact` property (no surrounding text in the `value:` template) preserves its numeric-ness through extraction; a captured property embedded in a larger string template, or one that isn't a number at all, falls back to the symbolic path automatically — no `.agq.yml` authoring changes are needed either way.
+When a `value_policy`/`operation_policy` requirement's field resolves to a numeric `data` type (`Int`, `Float`, or `Money`), the compiled check uses real SMT-LIB `Int`/`Real` comparisons instead of treating the relation and value as opaque atoms:
+
+```ag
+data Order {
+  total: Int
+}
+
+value_policy OrderShape {
+  require Order.total <= 1000
+}
+```
+
+```yaml
+# .aglang/extractors/order-total.agq.yml
+id: ObservedOrderTotal
+owner: checkout
+version: 1
+confidence: definite
+match:
+  kind: value
+emit:
+  kind: value
+  subject: "$subject"
+  path: "$path"
+  relation: "$relation"
+  value: "$value"
+```
+
+You can check the query alone first with `aglc query-test` (see above) using a fixture like:
+
+```yaml
+- kind: value
+  subject: Order
+  properties:
+    subject: Order
+    path: total
+    relation: "=="
+    value: 1500
+```
+
+Once wired into a real check, an extracted fact reporting an observed total of `1500` makes the JSON verdict's `z3_proof` show a real arithmetic derivation, not a restated decision:
+
+```jsonc
+{
+  "type": "value_policy_violation",
+  "z3_proof": {
+    "permanent_constraint": "(assert (=> (> (FieldValueInt Order FieldPath__Order__total) 1000) false))",
+    "delta_assertion": "(assert (= (FieldValueInt Order FieldPath__Order__total) 1500))",
+    "explanation": "Z3 returned UNSAT because reviewed value evidence from query 'ObservedOrderTotal' contradicts value_policy 'OrderShape'."
+  }
+}
+```
+
+Z3 genuinely derives `1500 > 1000`; it isn't told the answer. String/bool/enum comparisons (`require Cart.phase == SingleItem`) are unaffected and still use the original symbolic model, since there's no arithmetic to do there. Numeric-ness is detected automatically — from the field's declared type, and from whether the captured value is a bare `$capture` (no surrounding text in the `value:` template) — so no `.agq.yml` authoring changes are needed either way.
