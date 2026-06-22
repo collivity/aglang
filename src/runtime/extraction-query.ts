@@ -216,6 +216,41 @@ export interface ExtractionQueryTrace {
   skipped_reason?: string;
 }
 
+export function loadExtractionQueryFile(file: string): ExtractionQuery {
+  let raw: unknown;
+  try {
+    raw = YAML.parse(readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw new Error(`failed to parse extraction query '${file}': ${(err as Error).message}`);
+  }
+  return parseQuery(raw, file);
+}
+
+export function normalizeFixtureFacts(raw: unknown, file: string): GraphFact[] {
+  if (!Array.isArray(raw)) throw new Error(`fixture '${file}' must be an array of facts`);
+  return raw.map((entry, index) => {
+    if (!isRecord(entry)) throw new Error(`fixture '${file}'[${index}] must be an object`);
+    if (typeof entry.kind !== 'string' || entry.kind.length === 0) {
+      throw new Error(`fixture '${file}'[${index}] missing kind`);
+    }
+    const confidence = entry.confidence === undefined ? 'definite' : validateConfidence(entry.confidence);
+    return {
+      id: typeof entry.id === 'string' && entry.id.length > 0 ? entry.id : `fixture-${index}`,
+      kind: entry.kind,
+      subject: typeof entry.subject === 'string' ? entry.subject : 'FixtureSubject',
+      ...(typeof entry.target === 'string' ? { target: entry.target } : {}),
+      ...(isRecord(entry.properties) ? { properties: entry.properties as GraphFact['properties'] } : {}),
+      confidence,
+      evidence: {
+        extractor: 'query-test',
+        strategy: 'graph',
+        file,
+        message: `fixture entry ${index}`,
+      },
+    };
+  });
+}
+
 function firstEvidence(edge: AgIrGraph['edges'][number]) {
   return edge.evidence[0];
 }
@@ -301,7 +336,7 @@ function validateScalarMap(value: unknown, label: string): Record<string, Scalar
   return out;
 }
 
-function parseQuery(raw: unknown, file: string): ExtractionQuery {
+export function parseQuery(raw: unknown, file: string): ExtractionQuery {
   if (!isRecord(raw)) throw new Error(`query file '${file}' must contain an object`);
   if (typeof raw.id !== 'string' || raw.id.length === 0) throw new Error(`query '${file}' missing id`);
   if (typeof raw.owner !== 'string' || raw.owner.length === 0) throw new Error(`query '${raw.id}' missing owner`);
@@ -502,7 +537,7 @@ function emitTemplates(query: ExtractionQuery): Record<string, string | undefine
   );
 }
 
-function traceExtractionQueries(queries: ExtractionQuery[], graphFacts: GraphFact[]): ExtractionQueryTrace[] {
+export function traceExtractionQueries(queries: ExtractionQuery[], graphFacts: GraphFact[]): ExtractionQueryTrace[] {
   const traces: ExtractionQueryTrace[] = [];
   for (const query of queries) {
     for (const graphFact of graphFacts) {

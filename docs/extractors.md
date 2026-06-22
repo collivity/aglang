@@ -144,6 +144,94 @@ emit:
 
 When a query emits a blocking fact, JSON verdicts include the query id, version, query file, and matched graph fact id when available so the extraction result is auditable. Transition facts without a resolved `from` state are warning-only: they are reported as evidence, but are not asserted into Z3.
 
+A query can match the abstraction-resolution edges from the section above directly — no new code, just a `match` clause on `kind` and `resolved`:
+
+```yaml
+id: RepositoryInterfaceFlow
+owner: platform
+version: 1
+confidence: probable
+match:
+  kind: [extends, implements]
+  resolved: true
+emit:
+  kind: flow
+  from: "$subject"
+  to: "$targetComponent"
+```
+
+## Testing a query before wiring it in
+
+Real bugs have shipped in this project's *own* `.agq.yml` queries — a typo'd capture variable, a `match` clause that looked right but never matched a real fact — because there was no way to check a query in isolation. `aglc query-test` closes that gap: it runs one query against hand-written fixture facts and reports, per fact, whether it matched, what it would emit, or exactly why it didn't.
+
+A fixture is a short YAML list — only `kind` and `properties` are required, everything else (id, subject, evidence) gets a sensible default:
+
+```yaml
+# facts.yml
+- kind: calls
+  properties:
+    resolved: true
+    component: ApiControllers
+    targetComponent: DataLayer
+```
+
+```bash
+aglc query-test --query resolved-calls-as-flow.agq.yml --fixture facts.yml
+```
+
+```
+Query: ResolvedCallsAsFlow (resolved-calls-as-flow.agq.yml)
+
+✓ fixture-0: matched, emits flow — from=ApiControllers, to=DataLayer
+
+1/1 fixture fact(s) matched and emitted.
+```
+
+Don't already know what fields to put in the fixture? `aglc query-test --query <file> --init-fixture` scaffolds a starter fixture from the query's own `match` clause.
+
+**Here's the exact bug class this catches**, shown deliberately broken. This query has a typo — `propery` instead of `property` — that's easy to miss reading the YAML:
+
+```yaml
+# typo-transition.agq.yml — note "propery", not "property"
+id: OrderLifecycleTransitionsBroken
+owner: payments
+version: 1
+confidence: definite
+match:
+  kind: assignment
+  propery: status
+emit:
+  kind: transition
+  data: Order
+  field: status
+  from: "$previousMember"
+  to: "$valueMember"
+```
+
+```yaml
+# facts.yml
+- kind: assignment
+  properties:
+    property: status
+    valueEnum: OrderStatus
+    valueMember: Archived
+    previousMember: Active
+```
+
+```bash
+aglc query-test --query typo-transition.agq.yml --fixture facts.yml
+```
+
+```
+Query: OrderLifecycleTransitionsBroken (typo-transition.agq.yml)
+
+✗ fixture-0: match criteria did not match graph fact
+
+0/1 fixture fact(s) matched and emitted.
+```
+
+The `match` clause asked for a field called `propery`, which doesn't exist on the fact, so the match silently fails — exactly the kind of mistake that, without this command, would only surface as "the query isn't catching anything in real code," with no indication of why. `aglc query-test` turns that into an immediate, specific answer before the query is ever wired into `.aglang/extractors/`.
+
 ## OpenAPI import
 
 If you have an existing OpenAPI 3.x spec, skip extraction entirely:

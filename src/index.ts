@@ -20,6 +20,13 @@ import type { ArchitectureArtifact } from './emitters/artifact.ts';
 import { generateSpec } from './generate.ts';
 import { createUiRunId, currentCliPath, startUiServer, type UiScope } from './runtime/ui-server.ts';
 import { installExtractorTemplates } from './runtime/install-extractors.ts';
+import YAML from 'yaml';
+import {
+  loadExtractionQueryFile,
+  normalizeFixtureFacts,
+  traceExtractionQueries,
+  type ExtractionQuery,
+} from './runtime/extraction-query.ts';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -47,6 +54,7 @@ Commands:
   aglc emit-skill   --arch <arch.o> [--out <path>]          Emit skill.json manifest for AI agents
   aglc install-agent-skill [--path <skills-dir>]            Install packaged aglang Codex skill for local agents
   aglc install-extractors [--project <dir>] [--force]       Scaffold starter .agq.yml templates into .aglang/extractors/
+  aglc query-test --query <file.agq.yml> [--fixture <facts.yml>] [--init-fixture] [--json]  Test a query against hand-written fixture facts before wiring it into a real check
   aglc check --arch <arch.o> --project <dir> [--repo-filter <Name>] [--diff <ref>] [--all] [--json] [--debug-extractors] [--require-ast]  Check staged, ref diff, or whole project vs architecture
   aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt] [--workflow-z3] [--dump-workflow-smt] [--debug-extractors] [--require-ast]  Analyze a specific file
   aglc explain --arch <arch.o> --project <dir> --violation <id> [--json] [--diff <ref>] [--all]  Explain a violation from the current check scope
@@ -796,6 +804,73 @@ function installExtractors(projectRoot: string, force: boolean) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// QUERY-TEST (validate a single .agq.yml against hand-written fixture facts)
+// ─────────────────────────────────────────────────────────────
+function queryTest(queryPath: string, fixturePath: string | undefined, initFixture: boolean) {
+  if (!existsSync(queryPath)) {
+    logErr(`Error: query file not found: ${queryPath}`);
+    process.exit(1);
+  }
+  let query: ExtractionQuery;
+  try {
+    query = loadExtractionQueryFile(queryPath);
+  } catch (err) {
+    logErr(`Error: ${(err as Error).message}`);
+    process.exit(1);
+  }
+
+  if (initFixture) {
+    const { kind, ...rest } = query.match;
+    const scaffold = [{
+      kind: typeof kind === 'string' ? kind : 'REPLACE_WITH_KIND',
+      properties: rest,
+    }];
+    console.log(YAML.stringify(scaffold));
+    log(`# Scaffolded from '${query.id}'s match clause. Fill in real values, save as a .yml file, then:`);
+    log(`# aglc query-test --query ${queryPath} --fixture <file>`);
+    return;
+  }
+
+  if (!fixturePath) {
+    logErr('Error: --fixture <file> is required (or pass --init-fixture to scaffold a starter fixture)');
+    process.exit(1);
+  }
+  if (!existsSync(fixturePath)) {
+    logErr(`Error: fixture file not found: ${fixturePath}`);
+    process.exit(1);
+  }
+
+  let traces: ReturnType<typeof traceExtractionQueries>;
+  try {
+    const raw = YAML.parse(readFileSync(fixturePath, 'utf8'));
+    const facts = normalizeFixtureFacts(raw, fixturePath);
+    traces = traceExtractionQueries([query], facts);
+  } catch (err) {
+    logErr(`Error: ${(err as Error).message}`);
+    process.exit(1);
+  }
+
+  if (jsonMode) {
+    console.log(JSON.stringify({ schema_version: 2, query: queryPath, fixture: fixturePath, traces }, null, 2));
+    return;
+  }
+
+  log(`Query: ${query.id} (${queryPath})`);
+  log('');
+  for (const trace of traces) {
+    if (trace.emitted) {
+      const subs = Object.entries(trace.substitutions).map(([k, v]) => `${k}=${v}`).join(', ');
+      log(`✓ ${trace.graphFactId}: matched, emits ${trace.emitted.kind} — ${subs}`);
+    } else {
+      log(`✗ ${trace.graphFactId}: ${trace.skipped_reason}`);
+    }
+  }
+  const matchedCount = traces.filter(t => t.emitted).length;
+  log('');
+  log(`${matchedCount}/${traces.length} fixture fact(s) matched and emitted.`);
+}
+
+// ─────────────────────────────────────────────────────────────
 // GRAPH (debug graph projection output)
 // ─────────────────────────────────────────────────────────────
 async function graphCommand(archPath: string, filePath: string | undefined, projectRoot: string | undefined) {
@@ -1419,6 +1494,11 @@ async function launchUi(archPath: string, projectRoot: string, scope: UiScope, i
 
   } else if (command === 'install-extractors') {
     installExtractors(getArg('--project') ?? '.', args.includes('--force'));
+
+  } else if (command === 'query-test') {
+    const queryPath = getArg('--query');
+    if (!queryPath) usage();
+    queryTest(queryPath!, getArg('--fixture'), args.includes('--init-fixture'));
 
   } else if (command === 'check') {
     const archPath = getArg('--arch') ?? 'architecture.o';
