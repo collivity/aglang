@@ -9,6 +9,8 @@ npm install -g @collivity/aglang
 aglc install-agent-skill
 ```
 
+If you're an AI coding agent (or setting this up for one), read [docs/agents.md](docs/agents.md) for the workflow and why it exists, or [docs/llms.md](docs/llms.md) for a condensed quickstart.
+
 Create or refresh the architecture interface for a repo:
 
 ```bash
@@ -19,7 +21,7 @@ aglc emit-context --arch architecture.o --out AGENTS.md
 aglc emit-skill --arch architecture.o --out skill.json
 ```
 
-Agents are a primary workflow: they read `AGENTS.md`, validate focused edits with `aglc check-file --json`, validate the full guarded project with `aglc check --all --json`, and ask before changing `.ag` or `.agq.yml` architecture source. Engineers can inspect the same evidence locally with `aglc ui`. Under the hood, hard rules are compiled into solver-backed constraints and deterministic policy gates so violations come with source evidence, stable ids, query provenance, and proof details instead of vague warnings.
+Agents are a primary workflow: they read `AGENTS.md`, validate focused edits with `aglc check-file --json`, validate their change with `aglc check --diff <ref> --json` (or `--all` for a full-repo baseline check, which is the right choice less often than it looks — `--all` can't catch `change_policy` violations since it marks every file "touched"), and ask before changing `.ag` or `.agq.yml` architecture source. Engineers can inspect the same evidence locally with `aglc ui`. Under the hood, hard rules are compiled into solver-backed constraints and deterministic policy gates so violations come with source evidence, stable ids, query provenance, and proof details instead of vague warnings. See [docs/agents.md](docs/agents.md) for the full agent workflow, or [docs/llms.md](docs/llms.md) for a condensed agent quickstart.
 
 Readable `require` invariants compile to deny-counterexample enforcement. For example, `require auth on flow Client -> Api` blocks only when deterministic extractors or reviewed `.agq.yml` files emit definite unauthenticated evidence; teams can also author the explicit `deny unauthenticated flow Client -> Api` form. The same model applies to dataflow-via, encryption, dependency-interface, and operation-placement rules.
 
@@ -53,27 +55,13 @@ aglang is also an anti-drift layer for multi-repo systems: once architecture int
   Allow      Reject + structured JSON proof
 ```
 
-1. **Architecture build** — `aglc compile spec.ag` produces `architecture.o` (a JSON artifact with SMT-LIB2 constraints + component→path mappings).
-2. **Work-in-progress validation** — agents run `aglc check-file --json` while editing and `aglc check --all --json` before finishing.
-3. **Local and CI enforcement** — `aglc check` extracts flow, reachability, propagated dataflow, trust-boundary, dependency-injection, workflow, and contract facts, feeds formal facts with the compiled constraints to the solver, and fails if any hard rule is violated.
-4. **Agent-assisted discovery** — `aglc request-scan` and `aglc request-review` emit task packets so agents can propose and review architecture artifacts while aglc remains the deterministic verifier.
+1. **Architecture build** — `aglc compile spec.ag` parses/typechecks the `.ag` file and produces `architecture.o` (SMT-LIB2 constraints + component→path glob mappings).
+2. **Component resolution** — `aglc check` expands each component's path globs, groups matched files by component, and picks an extractor per file extension (`.ts`, `.cs`, `.py`, `.go`, `.rs`, `.java`, `.kt`, `.swift`, ...).
+3. **Fact extraction** — extractors emit flow, reachability, dataflow, trust-boundary, DI, workflow, and contract facts using AST/tree-sitter where available and regex fallback where needed, then normalize them through graph projection.
+4. **Solver check** — facts are fed alongside the compiled constraints to Z3; the check fails if any hard rule is violated.
+5. **Agent-assisted discovery** — `aglc request-scan` and `aglc request-review` emit task packets so agents can propose and review architecture artifacts while aglc remains the deterministic verifier.
 
-
-
- The flow is:
-
-  1. aglc compile architecture.ag parses/typechecks the .ag file and emits architecture.o.
-  2. aglc check --arch architecture.o --project . --all loads architecture.o.
-  3. It expands the component paths globs from the artifact.
-  4. It groups matched files by component.
-  5. It chooses extractors by file extension, for example .ts, .cs, .py, .go, .rs, .java, .kt.
-  6. Extractors emit flow facts, using AST where available and regex fallback where needed.
-  7. Those facts are normalized through graph projection.
-  8. The solver checks the projected flows against the invariant constraints from architecture.o.
-
-  If you edit architecture.ag, run npm run arch:compile before npm run arch:check.
-
-
+If you edit `architecture.ag`, run `npm run arch:compile` before `npm run arch:check`.
 
 ---
 
@@ -81,6 +69,7 @@ aglang is also an anti-drift layer for multi-repo systems: once architecture int
 
 - **Node.js ≥ 18** (WASM-based Z3 solver requires async/WASM support)
 - Git (for diff-aware `aglc check`)
+- Native tree-sitter bindings require `tree-sitter@^0.22.1` (bumped from `^0.21.x` to add `tree-sitter-swift`); all wired language grammars (TypeScript/JavaScript/Python/C#/Go/Rust/Java/Swift) are verified compatible with this core version.
 
 ---
 
@@ -113,11 +102,13 @@ The npm package also attempts that skill installation during `postinstall`. Set 
 
 1. Read `AGENTS.md` before changing implementation code.
 2. Run `aglc check-file --arch architecture.o --file <path> --json` during focused edits.
-3. Run `aglc check --arch architecture.o --project . --all --json` before finishing.
+3. Run `aglc check --arch architecture.o --project . --diff <ref> --json` before finishing (diff-aware against the base branch/commit — use `--all` only for a full-repo baseline, not as the default per-change check).
 4. Ask before creating, editing, regenerating, or compiling `.ag` architecture specs or generated architecture artifacts.
 5. Use planning/design sessions for architecture authoring so engineers can review intended spec changes.
 
 When extractor behavior needs investigation, run `aglc check-file --json --debug-extractors`. The JSON verdict includes `extractor_debug[]` with parser availability, AST query counts, and regex fallback reasons. Add `--require-ast` to fail immediately when an AST-capable extractor drops to regex for a detected fact.
+
+To inspect the new canonical system graph directly, run `aglc graph --arch architecture.o --file <path> --json --ir`. This emits Ag-IR `nodes[]` and typed `edges[]` from generic tree-sitter extraction plus compatibility adapters for existing graph facts. Edge kinds include `imports`, `calls`, `assigns`, `handles_route`, `depends_on`, and `accesses_resource`, each with source provenance when available.
 
 For broad query health against a real repo, run `npx tsx scripts/tree-sitter-corpus-probe.ts C:\Users\pante\Codespaces\collivity`. The report summarizes files scanned, files with captures, total captures, sample files, and up to three query errors per language/query pair without making that external checkout a CI dependency.
 
@@ -170,7 +161,8 @@ aglc compile myapp.ag
 # ✔ Compiled → architecture.o
 #   Components: 3  Invariants: 1  Contracts: 0
 
-aglc check --arch architecture.o --project . --all
+aglc check --arch architecture.o --project . --diff <ref>
+# or: aglc check --arch architecture.o --project . --all   (full-repo baseline)
 ```
 
 Run `aglc check` locally or in CI. Violations are reported with evidence:
@@ -216,6 +208,7 @@ Commit aborted.
 | **JSON verdicts** | ✅ | All check commands emit structured JSON with Z3 proofs (`--json`) |
 | **Extraction cache** | ✅ | SHA-256 keyed file cache in `.aglang-cache/` — skips re-analysing unchanged files |
 | **Parallel extraction** | ✅ | All extractors run concurrently (CPU-capped pool) |
+| **Ag-IR graph output** | ✅ | `aglc graph --json --ir` emits canonical nodes and typed edges from tree-sitter and graph adapters |
 
 ---
 
@@ -474,6 +467,7 @@ import "relative/path/other.ag"
 | `aglc emit-context --arch <arch.o> [--out <path>]` | Write `AGENTS.md` (agent context brief) |
 | `aglc emit-skill --arch <arch.o> [--out <path>]` | Write `skill.json` (agent skill manifest) |
 | `aglc install-agent-skill [--path <skills-dir>]` | Install the packaged generic Codex skill |
+| `aglc install-extractors [--project <dir>] [--force]` | Scaffold starter `.agq.yml` templates into `.aglang/extractors/` |
 | `aglc import-openapi <swagger.json> [--out <f.ag>]` | Import OpenAPI 3.x → `.ag` contracts |
 | `aglc import-tf <main.tf> [--out <f.ag>]` | Import Terraform → `.ag` node declarations |
 
@@ -587,7 +581,7 @@ aglang is designed as a first-class tool for AI coding agents:
 - **`AGENTS.md`** — generated by `aglc emit-context`, gives agents a precise brief: topology, component paths, allowed flows, contracts, state machines, and permission rules. Fits in any context window.
 - **`skill.json`** — a machine-readable skill descriptor agents can register as a tool.
 - **Packaged Codex skill** — `aglc install-agent-skill` installs the generic aglang interface so agents know the CLI workflows after npm install.
-- **Continuous validation** — agents run `aglc check-file --json` while editing and `aglc check --all --json` before finishing; engineers can add `--ui` to `check` or `debug` to persist a `.aglang/ui` run and open the local workbench.
+- **Continuous validation** — agents run `aglc check-file --json` while editing and `aglc check --diff <ref> --json` before finishing (`--all` for a full-repo baseline); engineers can add `--ui` to `check` or `debug` to persist a `.aglang/ui` run and open the local workbench.
 - **Structured JSON errors** — every Z3 violation includes exact file paths, component names, and the Z3 proof object so agents can locate and fix violations without hallucinating.
 - **Fail-closed** — git diff failures and Z3 `unknown` results block the commit; nothing is silently allowed.
 - **Engineer-guided architecture source** — agents should ask before changing `.ag`, `architecture.o`, `AGENTS.md`, or `skill.json`.
@@ -602,9 +596,11 @@ aglang is designed as a first-class tool for AI coding agents:
 
 2. Coding agents: read AGENTS.md → edit code
    → run: aglc check-file --arch architecture.o --file <path> --json
-   → run: aglc check --arch architecture.o --project . --all --json
+   → run: aglc check --arch architecture.o --project . --diff <ref> --json
    → agent fixes structured JSON violations in implementation code
 ```
+
+See [docs/agents.md](docs/agents.md) for why this workflow exists and [docs/llms.md](docs/llms.md) for the condensed quickstart.
 
 ---
 
@@ -623,17 +619,18 @@ aglang is designed as a first-class tool for AI coding agents:
 
 All extractors run in parallel with a CPU-capped concurrency pool. Results are cached by file SHA-256 in `.aglang-cache/` — unchanged files are never re-analysed.
 
+This table covers the route/dependency extraction baseline. Cross-file import/call resolution, state-machine transition detection, and extends/implements abstraction resolution exist for these languages too, with real per-language coverage differences (e.g. Go's interface satisfaction is a structural heuristic, never definite) — see [docs/extractors.md](docs/extractors.md) for the accurate, current breakdown rather than a second copy of it here.
+
 ### Plugin protocol
 
 Third-party extractors can be loaded as npm packages:
 
 ```ag
 // In your .ag spec file
-plugin "@collivity/aglc-roslyn"
 plugin "aglc-plugin-my-extractor"
 ```
 
-Each package is discovered by npm package name and must implement the subprocess protocol:
+Each package is discovered by npm package name and must implement the subprocess protocol. (`@collivity/aglc-roslyn` in this repo's own `plugins/` directory is a reference implementation of the protocol used in tests — it's a regex-based mock, not a real Roslyn/`Microsoft.CodeAnalysis` integration. Don't take its presence as evidence that real C# semantic analysis is wired in yet.)
 
 ```bash
 <plugin> --info
@@ -653,32 +650,21 @@ git clone https://github.com/collivity/aglang
 cd aglang
 npm install
 npm run build    # tsup -> build/aglc.js
-npm test         # vitest — 127 tests across 9 test files
+npm test         # vitest
 ```
 
 ```bash
 # Try the bundled Collivity example
 node build/aglc.js compile examples/collivity.ag
-node build/aglc.js check-file --arch examples/architecture.o --file examples/BadController.cs
+node build/aglc.js check-file --arch examples/architecture.o --file examples/web/api/Controllers/BadController.cs
 node build/aglc.js emit-context --arch examples/architecture.o
 ```
 
 ---
 
-## Protocol roadmap
+## Roadmap
 
-The next step for aglang is not more syntax. It is turning the tool into a stable protocol that agents, subagents, editors, and CI systems can all consume the same way.
-
-- **`v0.3` - Stable machine interfaces**
-  Freeze the JSON verdict schema, formalize `architecture.o`, add capability discovery, tighten TS/JS extraction, and publish the default agent behavior contract.
-- **`v0.4` - Multi-agent integration**
-  Ship an official MCP server, add protocol-style operations such as `check_file` and `explain_violation`, and improve shared task context for subagents.
-- **`v0.5` - Easier policy authoring**
-  Add better starter generation, stack-specific templates, stronger diagnostics, and better editor support.
-- **`v1.0` - Protocol status**
-  Publish a standalone protocol spec, guarantee compatibility for artifacts and verdict schemas, add reference integrations, and ship conformance tests.
-
-The detailed milestone plan lives in [docs/roadmap.md](docs/roadmap.md). The repository also includes an issue template for turning milestone items into tracked epics.
+The next step for aglang is not more syntax — it's turning the tool into a stable protocol that agents, subagents, editors, and CI systems can all consume the same way. The full, current milestone plan (through v1.1) lives in [docs/roadmap.md](docs/roadmap.md) rather than a second copy here.
 
 ---
 

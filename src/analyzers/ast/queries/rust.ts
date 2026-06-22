@@ -1,10 +1,40 @@
 // Tree-sitter S-expression queries for Rust (.rs) files.
 
 // ── Use declarations ──────────────────────────────────────────────────────────
-// use sqlx::PgPool;  use mongodb::Client;  use redis::Client as RedisClient;
+// use sqlx::PgPool;  use mongodb::Client;  use crate::data::store;  use super::utils;
+// Excludes use_as_clause (see USE_ALIASED_QUERY) so the captured path text never
+// includes a trailing " as alias".
 export const USE_QUERY = `
 (use_declaration
-  argument: (_) @use_path)
+  argument: [
+    (scoped_identifier) @import_path
+    (identifier) @import_path
+  ])
+` as const;
+
+// use redis::Client as RedisClient;
+export const USE_ALIASED_QUERY = `
+(use_declaration
+  argument: (use_as_clause
+    path: (_) @import_path
+    alias: (identifier) @import_alias))
+` as const;
+
+// ── Declarations (functions/types/traits this file defines) ──────────────────
+export const DECL_QUERY = `
+(function_item name: (identifier) @type_name)
+(struct_item name: (type_identifier) @type_name)
+(enum_item name: (type_identifier) @type_name)
+(trait_item name: (type_identifier) @type_name)
+` as const;
+
+// impl Repo for OrderRepository {}  →  interface_name = Repo (trait), type_name = OrderRepository
+// Inherent impls (`impl OrderRepository {}`, no trait) have no `trait:` field — excluded,
+// since they're not a conformance relationship.
+export const INHERITANCE_QUERY = `
+(impl_item
+  trait: (type_identifier) @interface_name
+  type: (type_identifier) @type_name)
 ` as const;
 
 // ── Attribute macros (Actix-web / Axum routes) ────────────────────────────────

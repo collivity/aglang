@@ -19,6 +19,14 @@ import { formatVerdict, formatVerdictJson } from './runtime/diagnostic.ts';
 import type { ArchitectureArtifact } from './emitters/artifact.ts';
 import { generateSpec } from './generate.ts';
 import { createUiRunId, currentCliPath, startUiServer, type UiScope } from './runtime/ui-server.ts';
+import { installExtractorTemplates } from './runtime/install-extractors.ts';
+import YAML from 'yaml';
+import {
+  loadExtractionQueryFile,
+  normalizeFixtureFacts,
+  traceExtractionQueries,
+  type ExtractionQuery,
+} from './runtime/extraction-query.ts';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -45,10 +53,12 @@ Commands:
   aglc emit-context --arch <arch.o> [--out <path>]          Emit AGENTS.md for AI agents
   aglc emit-skill   --arch <arch.o> [--out <path>]          Emit skill.json manifest for AI agents
   aglc install-agent-skill [--path <skills-dir>]            Install packaged aglang Codex skill for local agents
+  aglc install-extractors [--project <dir>] [--force]       Scaffold starter .agq.yml templates into .aglang/extractors/
+  aglc query-test --query <file.agq.yml> [--fixture <facts.yml>] [--init-fixture] [--json]  Test a query against hand-written fixture facts before wiring it into a real check
   aglc check --arch <arch.o> --project <dir> [--repo-filter <Name>] [--diff <ref>] [--all] [--json] [--debug-extractors] [--require-ast]  Check staged, ref diff, or whole project vs architecture
   aglc check-file --arch <arch.o> --file <f> [--json] [--dump-smt] [--workflow-z3] [--dump-workflow-smt] [--debug-extractors] [--require-ast]  Analyze a specific file
   aglc explain --arch <arch.o> --project <dir> --violation <id> [--json] [--diff <ref>] [--all]  Explain a violation from the current check scope
-  aglc graph --arch <arch.o> [--file <f> | --project <dir>] [--json] [--debug-extractors] [--require-ast]  Emit graph facts and Z3 flow projections
+  aglc graph --arch <arch.o> [--file <f> | --project <dir>] [--json] [--ir] [--debug-extractors] [--require-ast]  Emit graph facts, Ag-IR, and Z3 flow projections
   aglc debug --arch <arch.o> --project <dir> [--file <f>] [--diff <ref>] [--all] [--out <dir>] [--debug-extractors]  Write debug bundle for agents and engineers
   aglc ui --arch <arch.o> --project <dir> [--all|--diff <ref>|--file <path>] [--port <n>] [--no-open]  Launch local UI workbench
   aglc import-openapi <swagger.json> [--out <file.ag>]       Import OpenAPI 3.x spec → .ag contracts
@@ -59,6 +69,7 @@ Flags:
   --max-depth       Maximum recursive component synthesis depth for generate/add (default: 3)
   --single-file     Inline generated components instead of emitting imported sub-specs
   --debug-extractors   Include extractor trace output and fallback reasons
+  --ir                 With graph, emit the canonical Ag-IR graph instead of the legacy graph report
   --require-ast        Fail when an AST-capable extractor falls back to regex for a detected fact
   --diff <ref>         Check files changed in git range <ref>...HEAD and mark reported violations as new
   --dump-smt           Write the full SMT-LIB script fed to Z3 → examples/debug.smt2
@@ -773,6 +784,93 @@ function installAgentSkill(outDir: string) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// INSTALL-EXTRACTORS (starter .agq.yml templates shipped with npm package)
+// ─────────────────────────────────────────────────────────────
+function installExtractors(projectRoot: string, force: boolean) {
+  const source = resolve(packageRoot(), 'templates', 'extractors');
+  const target = resolve(projectRoot, '.aglang', 'extractors');
+  let result: ReturnType<typeof installExtractorTemplates>;
+  try {
+    result = installExtractorTemplates(source, target, force);
+  } catch (err) {
+    logErr(`Error: ${(err as Error).message}`);
+    logErr(`Reinstall @collivity/aglang or run from a complete package.`);
+    process.exit(1);
+  }
+  for (const name of result.installed) log(`✓ Installed ${name} → ${resolve(target, name)}`);
+  for (const name of result.skipped) log(`- Skipped ${name} (already exists at ${resolve(target, name)}; use --force to overwrite)`);
+  if (result.installed.length === 0 && result.skipped.length === 0) log(`No extractor templates found in package.`);
+  log(`These are now local, reviewable files in ${target} — edit and commit them like any other source file.`);
+}
+
+// ─────────────────────────────────────────────────────────────
+// QUERY-TEST (validate a single .agq.yml against hand-written fixture facts)
+// ─────────────────────────────────────────────────────────────
+function queryTest(queryPath: string, fixturePath: string | undefined, initFixture: boolean) {
+  if (!existsSync(queryPath)) {
+    logErr(`Error: query file not found: ${queryPath}`);
+    process.exit(1);
+  }
+  let query: ExtractionQuery;
+  try {
+    query = loadExtractionQueryFile(queryPath);
+  } catch (err) {
+    logErr(`Error: ${(err as Error).message}`);
+    process.exit(1);
+  }
+
+  if (initFixture) {
+    const { kind, ...rest } = query.match;
+    const scaffold = [{
+      kind: typeof kind === 'string' ? kind : 'REPLACE_WITH_KIND',
+      properties: rest,
+    }];
+    console.log(YAML.stringify(scaffold));
+    log(`# Scaffolded from '${query.id}'s match clause. Fill in real values, save as a .yml file, then:`);
+    log(`# aglc query-test --query ${queryPath} --fixture <file>`);
+    return;
+  }
+
+  if (!fixturePath) {
+    logErr('Error: --fixture <file> is required (or pass --init-fixture to scaffold a starter fixture)');
+    process.exit(1);
+  }
+  if (!existsSync(fixturePath)) {
+    logErr(`Error: fixture file not found: ${fixturePath}`);
+    process.exit(1);
+  }
+
+  let traces: ReturnType<typeof traceExtractionQueries>;
+  try {
+    const raw = YAML.parse(readFileSync(fixturePath, 'utf8'));
+    const facts = normalizeFixtureFacts(raw, fixturePath);
+    traces = traceExtractionQueries([query], facts);
+  } catch (err) {
+    logErr(`Error: ${(err as Error).message}`);
+    process.exit(1);
+  }
+
+  if (jsonMode) {
+    console.log(JSON.stringify({ schema_version: 2, query: queryPath, fixture: fixturePath, traces }, null, 2));
+    return;
+  }
+
+  log(`Query: ${query.id} (${queryPath})`);
+  log('');
+  for (const trace of traces) {
+    if (trace.emitted) {
+      const subs = Object.entries(trace.substitutions).map(([k, v]) => `${k}=${v}`).join(', ');
+      log(`✓ ${trace.graphFactId}: matched, emits ${trace.emitted.kind} — ${subs}`);
+    } else {
+      log(`✗ ${trace.graphFactId}: ${trace.skipped_reason}`);
+    }
+  }
+  const matchedCount = traces.filter(t => t.emitted).length;
+  log('');
+  log(`${matchedCount}/${traces.length} fixture fact(s) matched and emitted.`);
+}
+
+// ─────────────────────────────────────────────────────────────
 // GRAPH (debug graph projection output)
 // ─────────────────────────────────────────────────────────────
 async function graphCommand(archPath: string, filePath: string | undefined, projectRoot: string | undefined) {
@@ -793,13 +891,15 @@ async function graphCommand(archPath: string, filePath: string | undefined, proj
     const absFile = resolve(filePath);
     const componentName = await componentForFile(artifact, absFile);
     if (!componentName) {
-      const empty = {
-        facts: [],
-        projections: { flow: [] },
-        smt: { assertions: ['; === delta assertions from graph projections ==='] },
-        unresolvedTargets: [],
-        warnings: [{ graphFactId: '', message: `File does not belong to any tracked component: ${absFile}` }],
-      };
+      const empty = args.includes('--ir')
+        ? { schema_version: 1, nodes: [], edges: [], warnings: [{ message: `File does not belong to any tracked component: ${absFile}` }] }
+        : {
+            facts: [],
+            projections: { flow: [] },
+            smt: { assertions: ['; === delta assertions from graph projections ==='] },
+            unresolvedTargets: [],
+            warnings: [{ graphFactId: '', message: `File does not belong to any tracked component: ${absFile}` }],
+          };
       process.stdout.write(JSON.stringify(empty, null, 2) + '\n');
       process.exit(0);
     }
@@ -825,12 +925,29 @@ async function graphCommand(archPath: string, filePath: string | undefined, proj
     process.exit(1);
   }
   if (jsonMode) {
-    process.stdout.write(JSON.stringify({
-      ...delta.graphReport,
-      ...(debugExtractors ? { extractor_debug: delta.extractorDebug } : {}),
-    }, null, 2) + '\n');
+    const payload = args.includes('--ir')
+      ? {
+          ...delta.irGraph,
+          cache: {
+            ir_hits: delta.irCacheHits,
+            legacy_hits: delta.cacheHits,
+          },
+          lowerer: {
+            flow_facts: delta.irLoweringProvenance,
+            unresolved_edges: delta.unresolvedIrEdges,
+            warnings: delta.irLowererWarnings,
+          },
+          ...(debugExtractors ? { extractor_debug: delta.extractorDebug } : {}),
+        }
+      : {
+          ...delta.graphReport,
+          ...(debugExtractors ? { extractor_debug: delta.extractorDebug } : {}),
+        };
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
   } else {
     log(`[aglc] Graph facts: ${delta.graphFacts.length}`);
+    log(`[aglc] Ag-IR nodes: ${delta.irGraph.nodes.length}`);
+    log(`[aglc] Ag-IR edges: ${delta.irGraph.edges.length}`);
     log(`[aglc] Flow projections: ${delta.facts.length}`);
     log(`[aglc] SMT assertions: ${delta.smtAssertions.filter(s => s.startsWith('(assert')).length}`);
     if (debugExtractors && delta.extractorDebug.length > 0) {
@@ -840,6 +957,9 @@ async function graphCommand(archPath: string, filePath: string | undefined, proj
       }
     }
     for (const w of delta.graphWarnings) {
+      log(`  warning: ${w.message}`);
+    }
+    for (const w of delta.irLowererWarnings) {
       log(`  warning: ${w.message}`);
     }
   }
@@ -1371,6 +1491,14 @@ async function launchUi(archPath: string, projectRoot: string, scope: UiScope, i
 
   } else if (command === 'install-agent-skill') {
     installAgentSkill(getArg('--path') ?? defaultSkillsDir());
+
+  } else if (command === 'install-extractors') {
+    installExtractors(getArg('--project') ?? '.', args.includes('--force'));
+
+  } else if (command === 'query-test') {
+    const queryPath = getArg('--query');
+    if (!queryPath) usage();
+    queryTest(queryPath!, getArg('--fixture'), args.includes('--init-fixture'));
 
   } else if (command === 'check') {
     const archPath = getArg('--arch') ?? 'architecture.o';

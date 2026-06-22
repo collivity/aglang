@@ -459,10 +459,48 @@ export async function runGate(
   artifact: ArchitectureArtifact,
   delta: DeltaResult,
 ): Promise<GateVerdict> {
+  const lowererWarningByEdge = new Map((delta.irLowererWarnings ?? []).map(warning => [warning.edgeId, warning.message]));
+  const unresolvedIrWarningSummaries = (() => {
+    const groups = new Map<string, {
+      count: number;
+      kind: string;
+      from: string;
+      to: string;
+      reason: string;
+      file?: string;
+      message?: string;
+    }>();
+    for (const edge of delta.unresolvedIrEdges ?? []) {
+      const key = `${edge.kind}::${edge.reason}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.count += 1;
+        continue;
+      }
+      groups.set(key, {
+        count: 1,
+        kind: edge.kind,
+        from: edge.from,
+        to: edge.to,
+        reason: edge.reason,
+        file: edge.file,
+        message: lowererWarningByEdge.get(edge.edgeId),
+      });
+    }
+    return Array.from(groups.values()).slice(0, 20).map(group => ({
+      from: `Ag-IR ${group.kind}`,
+      to: 'unresolved',
+      evidence:
+        `${group.count} unresolved Ag-IR ${group.kind} edge${group.count === 1 ? '' : 's'}: ` +
+        `${group.message ?? group.reason}. Example: ${group.from} -> ${group.to}`,
+      file: group.file ?? '',
+    }));
+  })();
   const warnings = [
     ...delta.warningFacts.map(f => ({
     from: f.from, to: f.to, evidence: f.evidence, file: f.file,
     })),
+    ...unresolvedIrWarningSummaries,
     ...(delta.transitionWarningFacts ?? []).map(f => ({
       from: `${f.data}.${f.field}`,
       to: f.to,
@@ -613,28 +651,14 @@ export async function runGate(
         }
       }
     }
-    // Generic violation only when no dataflow rule could explain UNSAT.
-    if (!matched && blockingReachFacts.length === 0 && blockingRequireFlowFacts.length === 0 && blockingRequireDataFlowFacts.length === 0 && blockingAuthCounterexampleFacts.length === 0 && blockingEncryptionCounterexampleFacts.length === 0 && blockingDependencyFacts.length === 0 && blockingDataFlowFacts.length === 0 && blockingTrustPolicyFacts.length === 0 && blockingDiFacts.length === 0 && blockingTransitionFacts.length === 0 && blockingOperationFacts.length === 0 && blockingValuePolicyFacts.length === 0 && blockingOperationPolicyFacts.length === 0 && blockingEventPolicyFacts.length === 0) {
-      violations.push({
-        type: 'flow_violation',
-        invariant: 'unknown',
-        rule: { kind: 'DenyFlow', from: fact.from, to: fact.to },
-        detected: {
-          from: fact.from,
-          to: fact.to,
-          confidence: fact.confidence,
-          evidence: fact.evidence,
-          file: fact.file,
-        },
-        ...(fact.graphEvidence ? { graph_evidence: fact.graphEvidence } : {}),
-        message: `Component '${fact.from}' flow to '${fact.to}' violates architectural constraints`,
-        z3_proof: {
-          permanent_constraint: `(assert (=> (Flow ${smtId(fact.from)} ${smtId(fact.to)}) false))`,
-          delta_assertion: deltaAssertion,
-          explanation:
-            `Z3 returned UNSAT: a deny-flow constraint for '${fact.from}→${fact.to}' contradicts ` +
-            `the detected flow in ${fact.file}.`,
-        },
+    if (!matched) {
+      warnings.push({
+        from: fact.from,
+        to: fact.to,
+        evidence:
+          `${fact.evidence} (unresolved: observed flow '${fact.from}' -> '${fact.to}' is not mapped to a named .ag invariant; ` +
+          `add a deny/require rule or reviewed .agq.yml flow query to enforce it)`,
+        file: fact.file,
       });
     }
   }
@@ -869,25 +893,13 @@ export async function runGate(
       }
     }
     if (!matched) {
-      violations.push({
-        type: 'dataflow_violation',
-        invariant: 'unknown',
-        rule: { kind: 'DenyDataFlow', data: fact.data, to: fact.to },
-        detected: {
-          from: fact.via,
-          to: fact.to,
-          data: fact.data,
-          via: fact.via,
-          confidence: fact.confidence,
-          evidence: fact.evidence,
-          file: fact.file,
-        },
-        message: `Data '${fact.data}' flow to '${fact.to}' violates architectural constraints`,
-        z3_proof: {
-          permanent_constraint: `(assert (=> (DataCanReach ${smtId(fact.data)} ${smtId(fact.to)}) false))`,
-          delta_assertion: deltaAssertion,
-          explanation: `Z3 returned UNSAT: a deny-dataflow constraint for '${fact.data}→${fact.to}' contradicts the detected dataflow in ${fact.file}.`,
-        },
+      warnings.push({
+        from: fact.via,
+        to: fact.to,
+        evidence:
+          `${fact.evidence} (unresolved: observed dataflow '${fact.data}' via '${fact.via}' to '${fact.to}' is not mapped to a named .ag invariant/data_policy; ` +
+          `add a data policy, invariant, or reviewed .agq.yml dataflow query to enforce it)`,
+        file: fact.file,
       });
     }
   }
@@ -1212,36 +1224,24 @@ export async function runGate(
     }
 
     if (!matched) {
-      violations.push({
-        type: 'di_violation',
-        invariant: 'unknown',
-        rule: fact.kind === 'lifetime_dependency'
-          ? { kind: 'DenyLifetime', from: fact.fromLifetime, to: fact.toLifetime }
-          : fact.kind === 'resolve'
-            ? { kind: 'DenyResolve', service: fact.service, from: fact.from }
-            : { kind: 'DenyInject', from: fact.from, to: fact.to },
-        detected: {
-          from: fact.from,
-          to: fact.kind === 'resolve' ? fact.service : fact.to,
-          confidence: fact.confidence,
-          evidence: fact.evidence,
-          file: fact.file,
-        },
-        message: `Dependency injection fact violates architectural constraints`,
-        z3_proof: {
-          permanent_constraint: '(di_policy constraint)',
-          delta_assertion: buildDiDeltaAssertion(fact),
-          explanation: `Z3 returned UNSAT for a dependency injection policy fact derived from ${fact.file}.`,
-        },
+      const target = fact.kind === 'resolve' ? fact.service : fact.to;
+      warnings.push({
+        from: fact.from,
+        to: target,
+        evidence:
+          `${fact.evidence} (unresolved: observed DI ${fact.kind} '${fact.from}' -> '${target}' is not mapped to a named di_policy; ` +
+          `add a di_policy rule or reviewed .agq.yml query to enforce it)`,
+        file: fact.file,
       });
     }
   }
 
+  const stableViolations = withStableViolationIds(violations);
   return {
-    passed: false,
-    violations: withStableViolationIds(violations),
+    passed: stableViolations.length === 0,
+    violations: stableViolations,
     warnings,
     ...(solverDiagnostics.length > 0 ? { solver_diagnostics: solverDiagnostics } : {}),
-    model: result.model,
+    ...(stableViolations.length > 0 ? { model: result.model } : {}),
   };
 }

@@ -132,6 +132,14 @@ component ExtractorAnalyzers {
   paths: "src/analyzers/**/*.ts"
 }
 
+// Includes cross-file-linker.ts (imports/calls resolution), specifier-resolvers.ts,
+// and abstraction-resolver.ts (extends/implements graph + Go's structural interface
+// heuristic) alongside the core graph types/builders/lowerer.
+component IrCore {
+  runs_on: node_runtime
+  paths: "src/ir/**/*.ts"
+}
+
 component GraphProjection {
   runs_on: node_runtime
   paths: "src/runtime/graph-projection.ts"
@@ -257,6 +265,11 @@ component DocsWorkflow {
   paths: ".github/workflows/docs.yml"
 }
 
+component CiWorkflow {
+  runs_on: github_actions
+  paths: ".github/workflows/ci.yml"
+}
+
 component VscodeExtension {
   runs_on: node_runtime
   paths: "editors/vscode-aglang/src/**/*.ts"
@@ -300,9 +313,20 @@ invariant CompilerEntrypointBoundary {
   deny flow SemanticQueryEngine -> CliCompiler
   deny flow StateMachineRuntime -> CliCompiler
   deny flow ExtractorAnalyzers -> CliCompiler
+  deny flow IrCore -> CliCompiler
   deny flow GraphProjection -> CliCompiler
   deny flow Emitters -> CliCompiler
   deny flow SpecGenerator -> CliCompiler
+}
+
+invariant IrCoreBoundary {
+  deny flow IrCore -> CliCompiler
+  deny flow IrCore -> Emitters
+  deny flow IrCore -> RuntimeCore
+  deny flow IrCore -> PolicyGates
+  deny flow IrCore -> SemanticQueryEngine
+  deny flow IrCore -> StateMachineRuntime
+  deny flow IrCore -> UiWorkbench
 }
 
 invariant LanguageFrontendPurity {
@@ -321,6 +345,7 @@ invariant SmtBackendIsolation {
   deny flow SmtBackend -> SemanticQueryEngine
   deny flow SmtBackend -> StateMachineRuntime
   deny flow SmtBackend -> ExtractorAnalyzers
+  deny flow SmtBackend -> IrCore
   deny flow SmtBackend -> GraphProjection
   deny flow SmtBackend -> UiWorkbench
 }
@@ -348,6 +373,7 @@ invariant UiWorkbenchBoundary {
   deny flow UiWorkbench -> LanguageFrontend
   deny flow UiWorkbench -> SmtBackend
   deny flow UiWorkbench -> ExtractorAnalyzers
+  deny flow UiWorkbench -> IrCore
   deny flow UiWorkbench -> GraphProjection
   deny flow UiWorkbench -> StateMachineRuntime
   deny flow UiWorkbench -> SemanticQueryEngine
@@ -359,6 +385,7 @@ invariant VscodeApiBoundary {
   deny flow VscodeExtension -> SemanticQueryEngine
   deny flow VscodeExtension -> StateMachineRuntime
   deny flow VscodeExtension -> ExtractorAnalyzers
+  deny flow VscodeExtension -> IrCore
   deny flow VscodeExtension -> SmtBackend
   deny flow VscodeExtension -> GraphProjection
   deny flow VscodeExtension -> UiWorkbench
@@ -422,6 +449,11 @@ workflow_policy ReleaseSafety {
   deny permission * contents: write when pull_request
 }
 
+workflow_policy CiSafety {
+  require before CiWorkflow "npm run typecheck" -> "npm run build"
+  require before CiWorkflow "npm run build" -> "npm run arch:check"
+}
+
 change_policy DocsFreshness {
   require touched CliReferenceDocs when touched CliCompiler
   require touched ReadmeDocs when touched CliCompiler
@@ -432,6 +464,7 @@ change_policy DocsFreshness {
   require touched PublicDocs when touched AgentSkill
   require touched ArchitectureSpec when touched LanguageFrontend
   require touched ArchitectureSpec when touched RuntimeCore
+  require touched ArchitectureSpec when touched IrCore
   require touched ArchitectureSpec when touched PolicyGates
   require touched ArchitectureSpec when touched SemanticQueryEngine
   require touched ArchitectureSpec when touched StateMachineRuntime

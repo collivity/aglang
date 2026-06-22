@@ -18,15 +18,24 @@ import { javaPlugin, scalaPlugin } from '../analyzers/java.ts';
 import { typescriptServerPlugin } from '../analyzers/typescript-server.ts';
 import { swiftPlugin } from '../analyzers/swift.ts';
 import { loadBalancerConfigPlugin } from '../analyzers/load-balancer.ts';
-import { ExtractionCache, hashArtifact, extractWithCache } from './extraction-cache.ts';
+import { ExtractionCache, IrExtractionCache, hashArtifact, extractWithCache, extractIrWithCache } from './extraction-cache.ts';
 import {
   buildGraphReport,
   flowFactToGraphFact,
   projectGraphToFlows,
   type GraphReport,
 } from './graph-projection.ts';
-import { applyExtractionQueryFacts, loadExtractionQueries, type AuthCounterexampleFact, type DependencyFact, type EncryptionCounterexampleFact, type EventFact, type ExtractionQueryTrace, type OperationEventFact, type OperationFact, type TransitionFact, type ValueFact } from './extraction-query.ts';
+import { agIrGraphToExtractionQueryFacts, applyExtractionQueryFacts, loadExtractionQueries, type AuthCounterexampleFact, type DependencyFact, type EncryptionCounterexampleFact, type EventFact, type ExtractionQueryFacts, type ExtractionQueryTrace, type OperationEventFact, type OperationFact, type TransitionFact, type ValueFact } from './extraction-query.ts';
 import { buildTransitionDeltaAssertions, shouldBlockTransitionFact } from './state-machine.ts';
+import type { AgIrGraph } from '../ir/types.ts';
+import { AG_IR_SCHEMA_VERSION } from '../ir/types.ts';
+import { mergeAgIrGraphs } from '../ir/builders.ts';
+import { graphFactsToAgIr } from '../ir/adapters.ts';
+import { extractTreeSitterIrForFile, TREE_SITTER_IR_QUERY_REGISTRY_VERSION } from '../analyzers/ast/ir-extractor.ts';
+import { derivePolicyFactsFromAgIr, type IrLoweredFlowProvenance, type IrLowererWarning, type IrUnresolvedEdge } from '../ir/lowerer.ts';
+import { enrichAgIrWithSemanticIndex, type SemanticIndexInput } from '../ir/semantic-index.ts';
+import { enrichAgIrWithCrossFileLinks } from '../ir/cross-file-linker.ts';
+import { enrichAgIrWithAbstractionResolution } from '../ir/abstraction-resolver.ts';
 
 export type { FlowFact, GraphFact };
 
@@ -139,6 +148,7 @@ export interface DeltaResult {
   dataFlowFacts: DataFlowFact[];
   reachFacts: ReachFact[];
   graphFacts: GraphFact[];
+  irGraph: AgIrGraph;
   blockingFacts: FlowFact[];   // confidence=definite (or probable in strict mode)
   blockingDataFlowFacts: DataFlowFact[];
   blockingReachFacts: ReachFact[];
@@ -178,6 +188,11 @@ export interface DeltaResult {
   graphWarnings: Array<{ graphFactId: string; message: string }>;
   /** Number of files whose extraction result came from cache */
   cacheHits: number;
+  /** Number of files whose Ag-IR fragment came from cache */
+  irCacheHits: number;
+  irLowererWarnings: IrLowererWarning[];
+  unresolvedIrEdges: IrUnresolvedEdge[];
+  irLoweringProvenance: IrLoweredFlowProvenance[];
   extractorDebug: ExtractorDebugEvent[];
 }
 
@@ -359,27 +374,33 @@ function computeReachFacts(flowFacts: FlowFact[]): ReachFact[] {
   const seen = new Set<string>();
   for (const start of byFrom.keys()) {
     const queue: Array<{ current: string; path: string[]; first: FlowFact; confidence: FlowFact['confidence'] }> = [];
+    const enqueued = new Set<string>();
     for (const edge of byFrom.get(start) ?? []) {
+      const key = `${start}::${edge.to}`;
+      if (enqueued.has(key)) continue;
+      enqueued.add(key);
       queue.push({ current: edge.to, path: [edge.from, edge.to], first: edge, confidence: edge.confidence });
     }
     while (queue.length > 0) {
       const item = queue.shift()!;
       const key = `${start}::${item.current}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        reachFacts.push({
-          from: start,
-          to: item.current,
-          path: item.path,
-          confidence: item.confidence,
-          evidence: `Reachability path: ${item.path.join(' -> ')}`,
-          file: item.first.file,
-          line: item.first.line,
-          graphEvidence: item.first.graphEvidence,
-        });
-      }
+      if (seen.has(key)) continue;
+      seen.add(key);
+      reachFacts.push({
+        from: start,
+        to: item.current,
+        path: item.path,
+        confidence: item.confidence,
+        evidence: `Reachability path: ${item.path.join(' -> ')}`,
+        file: item.first.file,
+        line: item.first.line,
+        graphEvidence: item.first.graphEvidence,
+      });
       for (const next of byFrom.get(item.current) ?? []) {
         if (item.path.includes(next.to)) continue;
+        const nextKey = `${start}::${next.to}`;
+        if (seen.has(nextKey) || enqueued.has(nextKey)) continue;
+        enqueued.add(nextKey);
         queue.push({
           current: next.to,
           path: [...item.path, next.to],
@@ -589,6 +610,57 @@ function defaultStrategyForPlugin(plugin: ExtractorPlugin): ExtractionStrategy {
   return /regex/i.test(plugin.name) ? 'regex' : 'legacy-flow';
 }
 
+function emptyQueryFacts(): ExtractionQueryFacts {
+  return {
+    transitionFacts: [],
+    flowFacts: [],
+    operationFacts: [],
+    authFacts: [],
+    encryptionFacts: [],
+    dependencyFacts: [],
+    valueFacts: [],
+    operationEventFacts: [],
+    eventFacts: [],
+    traces: [],
+  };
+}
+
+function mergeQueryFacts(left: ExtractionQueryFacts, right: ExtractionQueryFacts): ExtractionQueryFacts {
+  return {
+    transitionFacts: [...left.transitionFacts, ...right.transitionFacts],
+    flowFacts: [...left.flowFacts, ...right.flowFacts],
+    operationFacts: [...left.operationFacts, ...right.operationFacts],
+    authFacts: [...left.authFacts, ...right.authFacts],
+    encryptionFacts: [...left.encryptionFacts, ...right.encryptionFacts],
+    dependencyFacts: [...left.dependencyFacts, ...right.dependencyFacts],
+    valueFacts: [...left.valueFacts, ...right.valueFacts],
+    operationEventFacts: [...left.operationEventFacts, ...right.operationEventFacts],
+    eventFacts: [...left.eventFacts, ...right.eventFacts],
+    traces: [...(left.traces ?? []), ...(right.traces ?? [])],
+  };
+}
+
+function applyQueriesAgIrFirst(extractionQueries: ReturnType<typeof loadExtractionQueries>, irGraph: AgIrGraph, graphFacts: GraphFact[]): ExtractionQueryFacts {
+  const irFacts = agIrGraphToExtractionQueryFacts(irGraph);
+  const irQueryFacts = applyExtractionQueryFacts(extractionQueries, irFacts);
+  const emittedQueryIds = new Set([
+    ...irQueryFacts.transitionFacts.map(f => f.query.id),
+    ...irQueryFacts.flowFacts.map(f => f.query.id),
+    ...irQueryFacts.operationFacts.map(f => f.query.id),
+    ...irQueryFacts.authFacts.map(f => f.query.id),
+    ...irQueryFacts.encryptionFacts.map(f => f.query.id),
+    ...irQueryFacts.dependencyFacts.map(f => f.query.id),
+    ...irQueryFacts.valueFacts.map(f => f.query.id),
+    ...irQueryFacts.operationEventFacts.map(f => f.query.id),
+    ...irQueryFacts.eventFacts.map(f => f.query.id),
+  ]);
+  const fallbackQueries = extractionQueries.filter(query => !emittedQueryIds.has(query.id));
+  const legacyFacts = fallbackQueries.length > 0
+    ? applyExtractionQueryFacts(fallbackQueries, graphFacts)
+    : emptyQueryFacts();
+  return mergeQueryFacts(irQueryFacts, legacyFacts);
+}
+
 // Simple concurrency limiter — runs up to `limit` async tasks at a time.
 async function runConcurrent<T>(
   items: T[],
@@ -622,10 +694,16 @@ export async function generateDeltaAssertions(
   const cache = options.projectRoot
     ? ExtractionCache.forProject(options.projectRoot, artifactHash)
     : null;
+  const irCache = options.projectRoot
+    ? IrExtractionCache.forProject(options.projectRoot, artifactHash, AG_IR_SCHEMA_VERSION, TREE_SITTER_IR_QUERY_REGISTRY_VERSION)
+    : null;
 
   const allGraphFacts: GraphFact[] = [];
+  const allIrGraphs: AgIrGraph[] = [];
+  const semanticInputs: SemanticIndexInput[] = [];
   const csharpInputs: Array<{ componentName: string; files: string[] }> = [];
   let cacheHits = 0;
+  let irCacheHits = 0;
   const concurrency = cpus().length || 4;
   let graphFactSequence = 0;
 
@@ -644,32 +722,48 @@ export async function generateDeltaAssertions(
     if (csFiles.length > 0) {
       csharpInputs.push({ componentName, files: csFiles });
     }
+    semanticInputs.push({ componentName, files });
+    const irResult = await extractIrWithCache(irCache, files, file => extractTreeSitterIrForFile(file, componentName));
+    allIrGraphs.push(irResult.graph);
+    irCacheHits += irResult.cacheHits;
 
     await Promise.all(
       Array.from(byExt.entries()).map(async ([ext, batch]) => {
         const pluginsForExt = extensionMap.get(ext)!;
         await Promise.all(pluginsForExt.map(async (plugin) => {
-          if (plugin.extractGraph) {
-            const facts = await plugin.extractGraph({ componentName, files: batch, mappings: artifact.mappings, debug: debugSession, requireAst: options.requireAst });
-            allGraphFacts.push(...facts.map(f => ({
-              ...f,
-              evidence: {
-                ...f.evidence,
-                extractor: f.evidence.extractor ?? plugin.name,
-                strategy: f.evidence.strategy ?? 'graph',
-              },
-            })));
-          } else {
-            const facts = await extractWithCache(cache, batch, (uncached) =>
-              plugin.extract({ componentName, files: uncached, mappings: artifact.mappings, debug: debugSession, requireAst: options.requireAst }),
-            );
-            allGraphFacts.push(...facts.map(f =>
-              flowFactToGraphFact(
-                f.strategy ? f : { ...f, strategy: defaultStrategyForPlugin(plugin) },
-                graphFactSequence++,
-                plugin.name,
-              )
-            ));
+          try {
+            if (plugin.extractIr) {
+              allIrGraphs.push(await plugin.extractIr({ componentName, files: batch, mappings: artifact.mappings, debug: debugSession, requireAst: options.requireAst }));
+            }
+            if (plugin.extractGraph) {
+              const facts = await plugin.extractGraph({ componentName, files: batch, mappings: artifact.mappings, debug: debugSession, requireAst: options.requireAst });
+              allGraphFacts.push(...facts.map(f => ({
+                ...f,
+                evidence: {
+                  ...f.evidence,
+                  extractor: f.evidence.extractor ?? plugin.name,
+                  strategy: f.evidence.strategy ?? 'graph',
+                },
+              })));
+            } else {
+              const stats = { hits: 0 };
+              const facts = await extractWithCache(
+                cache,
+                batch,
+                (uncached) => plugin.extract({ componentName, files: uncached, mappings: artifact.mappings, debug: debugSession, requireAst: options.requireAst }),
+                stats,
+              );
+              cacheHits += stats.hits;
+              allGraphFacts.push(...facts.map(f =>
+                flowFactToGraphFact(
+                  f.strategy ? f : { ...f, strategy: defaultStrategyForPlugin(plugin) },
+                  graphFactSequence++,
+                  plugin.name,
+                )
+              ));
+            }
+          } catch (error) {
+            throw new Error(`${plugin.name} failed for ${componentName} ${ext} batch (${batch[0] ?? 'no files'}): ${(error as Error).message}`);
           }
         }));
       }),
@@ -677,12 +771,9 @@ export async function generateDeltaAssertions(
 
   });
 
-  // Count cache hits by checking which facts are from cached files
-  // (Approximate: actual hit counting happens inside extractWithCache)
-  cacheHits; // reported as 0 unless we thread it through — kept for future instrumentation
-
   // Flush cache to disk
   cache?.flush();
+  irCache?.flush();
 
   // Deduplicate graph facts by stable ID, then project to flow facts.
   const graphSeen = new Set<string>();
@@ -694,19 +785,46 @@ export async function generateDeltaAssertions(
     }
   }
 
+  const baseIrGraph = mergeAgIrGraphs([
+    ...allIrGraphs,
+    graphFactsToAgIr(uniqueGraphFacts),
+  ]);
+  const semanticIrGraph = enrichAgIrWithSemanticIndex(baseIrGraph, semanticInputs);
+  const linkedIrGraph = options.projectRoot
+    ? enrichAgIrWithCrossFileLinks(semanticIrGraph, artifact, options.projectRoot)
+    : semanticIrGraph;
+  const irGraph = enrichAgIrWithAbstractionResolution(linkedIrGraph, artifact);
   const extractionQueries = loadExtractionQueries(options.projectRoot);
-  const queryFacts = applyExtractionQueryFacts(extractionQueries, uniqueGraphFacts);
+  const queryFacts = applyQueriesAgIrFirst(extractionQueries, irGraph, uniqueGraphFacts);
+  const irLowering = derivePolicyFactsFromAgIr(irGraph, artifact);
   const projection = projectGraphToFlows(uniqueGraphFacts, artifact, { strict });
   const factSmtMap = new Map(projection.factSmtMap);
+  const irLoweredSmtAssertions: string[] = [];
+  const blockingIrFlowFacts = irLowering.flowFacts.filter(f => isBlocking(f, strict));
+  if (blockingIrFlowFacts.length > 0) {
+    irLoweredSmtAssertions.push('; === delta assertions from Ag-IR lowerer ===');
+  }
+  for (const fact of blockingIrFlowFacts) {
+    const assertion = `(assert (Flow ${smtId(fact.from)} ${smtId(fact.to)}))`;
+    factSmtMap.set(`${fact.from}::${fact.to}`, assertion);
+    irLoweredSmtAssertions.push(`; [${fact.confidence}] ${fact.evidence}`);
+    irLoweredSmtAssertions.push(`; Ag-IR edge: ${fact.graphEvidence?.graphFactId ?? 'unknown'}`);
+    irLoweredSmtAssertions.push(`; File: ${fact.file}`);
+    irLoweredSmtAssertions.push(assertion);
+  }
   const queryFlowSmtAssertions: string[] = [];
   for (const fact of queryFacts.flowFacts) {
     const assertion = `(assert (Flow ${smtId(fact.from)} ${smtId(fact.to)}))`;
     factSmtMap.set(`${fact.from}::${fact.to}`, assertion);
     if (isBlocking(fact, strict)) queryFlowSmtAssertions.push(assertion);
   }
-  const flowFacts = [...projection.flowFacts, ...queryFacts.flowFacts];
-  const blockingFlowFacts = [...projection.blockingFacts, ...queryFacts.flowFacts.filter(f => isBlocking(f, strict))];
-  const warningFlowFacts = [...projection.warningFacts, ...queryFacts.flowFacts.filter(f => !isBlocking(f, strict) && f.confidence === 'probable')];
+  const flowFacts = [...irLowering.flowFacts, ...projection.flowFacts, ...queryFacts.flowFacts];
+  const blockingFlowFacts = [...irLowering.flowFacts.filter(f => isBlocking(f, strict)), ...projection.blockingFacts, ...queryFacts.flowFacts.filter(f => isBlocking(f, strict))];
+  const warningFlowFacts = [
+    ...irLowering.flowFacts.filter(f => !isBlocking(f, strict) && f.confidence === 'probable'),
+    ...projection.warningFacts,
+    ...queryFacts.flowFacts.filter(f => !isBlocking(f, strict) && f.confidence === 'probable'),
+  ];
   const graphReport = buildGraphReport(uniqueGraphFacts, projection);
   const transitionFacts = queryFacts.transitionFacts;
   const blockingTransitionFacts = transitionFacts.filter(f => shouldBlockTransitionFact(f, artifact, strict));
@@ -823,6 +941,7 @@ export async function generateDeltaAssertions(
     dataFlowFacts,
     reachFacts,
     graphFacts: uniqueGraphFacts,
+    irGraph,
     blockingFacts: blockingFlowFacts,
     blockingDataFlowFacts,
     blockingReachFacts,
@@ -852,7 +971,7 @@ export async function generateDeltaAssertions(
     dependencyFacts,
     blockingDependencyFacts,
     warningFacts: warningFlowFacts,
-    smtAssertions: [...projection.smtAssertions, ...queryFlowSmtAssertions, ...reachAssertions, ...dataFlowAssertions, ...diAssertions, ...transitionAssertions, ...operationAssertions, ...requireFlowAssertions, ...requireDataFlowAssertions, ...authCounterexampleAssertions, ...encryptionCounterexampleAssertions, ...dependencyAssertions, ...valuePolicyAssertions, ...operationPolicyAssertions, ...eventPolicyAssertions],
+    smtAssertions: [...irLoweredSmtAssertions, ...projection.smtAssertions, ...queryFlowSmtAssertions, ...reachAssertions, ...dataFlowAssertions, ...diAssertions, ...transitionAssertions, ...operationAssertions, ...requireFlowAssertions, ...requireDataFlowAssertions, ...authCounterexampleAssertions, ...encryptionCounterexampleAssertions, ...dependencyAssertions, ...valuePolicyAssertions, ...operationPolicyAssertions, ...eventPolicyAssertions],
     factSmtMap,
     diFactSmtMap,
     graphReport,
@@ -860,6 +979,10 @@ export async function generateDeltaAssertions(
     unresolvedTargets: projection.unresolvedTargets,
     graphWarnings: projection.warnings,
     cacheHits,
+    irCacheHits,
+    irLowererWarnings: irLowering.warnings,
+    unresolvedIrEdges: irLowering.unresolvedEdges,
+    irLoweringProvenance: irLowering.provenance,
     extractorDebug: debugSession.events,
   };
 }

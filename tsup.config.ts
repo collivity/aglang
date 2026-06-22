@@ -7,8 +7,19 @@ export default defineConfig({
   outDir: 'build',
   clean: false,
   splitting: false,
-  // z3-solver ships its own WASM — don't bundle it, keep as external dep
-  external: ['z3-solver'],
+  // Native/WASM packages must stay external so the published CLI loads their
+  // package-local bindings instead of trying to require them from the ESM bundle.
+  external: [
+    'z3-solver',
+    'tree-sitter',
+    'tree-sitter-c-sharp',
+    'tree-sitter-go',
+    'tree-sitter-java',
+    'tree-sitter-javascript',
+    'tree-sitter-python',
+    'tree-sitter-rust',
+    'tree-sitter-typescript',
+  ],
   treeshake: true,
   minify: false,
   sourcemap: false,

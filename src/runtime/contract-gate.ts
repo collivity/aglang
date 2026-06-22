@@ -6,8 +6,9 @@ import { resolve, join } from 'path';
 import micromatch from 'micromatch';
 import type { ArchitectureArtifact, ArtifactEndpoint } from '../emitters/artifact.ts';
 import { normalizeRoute } from '../analyzers/typescript.ts';
-import { extractServerRoutes, extractClientRoutes } from '../analyzers/routes.ts';
-import type { RouteFact } from '../analyzers/routes.ts';
+import { extractClientRoutes } from '../analyzers/routes.ts';
+import type { RouteFact } from '../analyzers/typescript.ts';
+import { extractTreeSitterIrForFiles } from '../analyzers/ast/ir-extractor.ts';
 
 export interface ContractViolation {
   type: 'implements_undeclared' | 'consumes_undeclared' | 'consumes_method_mismatch';
@@ -29,6 +30,42 @@ export interface ContractViolation {
 // Normalize a declared contract path (from .ag spec) to positional form
 function normalizeContractPath(path: string): string {
   return normalizeRoute(path);
+}
+
+function stringProperty(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function routeMethod(value: unknown): string | undefined {
+  const method = stringProperty(value)?.toUpperCase();
+  return method && /^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)$/.test(method) ? method : undefined;
+}
+
+function routesFromAgIr(files: string[], componentName: string): RouteFact[] {
+  const graph = extractTreeSitterIrForFiles(files, componentName);
+  const nodes = new Map(graph.nodes.map(node => [node.id, node]));
+  const routes: RouteFact[] = [];
+  const seen = new Set<string>();
+
+  for (const edge of graph.edges) {
+    if (edge.kind !== 'handles_route') continue;
+    const method = routeMethod(edge.properties?.method);
+    const target = nodes.get(edge.to);
+    const path = stringProperty(edge.properties?.path) ?? target?.label;
+    if (!method || !path) continue;
+    const file = edge.evidence.find(item => item.span?.file)?.span?.file
+      ?? nodes.get(edge.from)?.label
+      ?? files[0]
+      ?? '';
+    const normalized = normalizeRoute(path);
+    if (!normalized) continue;
+    const key = `${method} ${normalized} ${file}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    routes.push({ method, path, normalized, file });
+  }
+
+  return routes;
 }
 
 // Find all files in a directory tree (no extension filter — caller filters via micromatch)
@@ -139,7 +176,7 @@ export async function runContractGate(
     // ── IMPLEMENTS check ─────────────────────────────────────────────────────
     // Every route extracted from this file must appear in AT LEAST ONE declared contract.
     if (cc.implements.length > 0) {
-      const extractedRoutes = await extractServerRoutes([filePath]);
+      const extractedRoutes = routesFromAgIr([filePath], componentName);
       for (const route of extractedRoutes) {
         const key = `${route.method} ${route.normalized}`;
         const foundInContract = cc.implements.some(name => contractEndpointIndex.get(name)?.has(key));
@@ -156,7 +193,7 @@ export async function runContractGate(
             extracted: `${route.method} ${route.path}`,
             proof: {
               contract_assertion: `none of [${contractNames}] declares endpoint ${route.method} ${route.normalized}`,
-              extractor_result: `Found route '${route.path}' in ${filePath}`,
+              extractor_result: `Found Ag-IR handles_route '${route.path}' in ${filePath}`,
               explanation:
                 `Component '${componentName}' implements [${contractNames}], but route ` +
                 `'${route.method} ${route.path}' (normalized: '${route.normalized}') is not declared in any of those contracts. ` +
@@ -170,7 +207,7 @@ export async function runContractGate(
       if (checkCompleteness && projectRoot && !processedComponents.has(componentName)) {
         processedComponents.add(componentName);
         const allComponentFiles = globToFiles(artifact.mappings[componentName]!, projectRoot);
-        const allRoutes = await extractServerRoutes(allComponentFiles);
+        const allRoutes = routesFromAgIr(allComponentFiles, componentName);
         const allNormalized = new Map(allRoutes.map(r => [`${r.method} ${r.normalized}`, r]));
 
         for (const contractName of cc.implements) {
@@ -190,7 +227,7 @@ export async function runContractGate(
                 extracted: null,
                 proof: {
                   contract_assertion: `contract ${contractName} declares endpoint ${ep.method} ${ep.path}`,
-                  extractor_result: `No matching route found in any file of component '${componentName}'`,
+                  extractor_result: `No matching Ag-IR handles_route edge found in any file of component '${componentName}'`,
                   explanation:
                     `Contract '${contractName}' declares endpoint '${ep.method} ${ep.path}' ` +
                     `(normalized: '${key}'), but no matching route was found in component '${componentName}' ` +

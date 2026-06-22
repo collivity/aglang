@@ -17,6 +17,7 @@ interface LoadedParsers {
   golang?: TreeSitterLanguage;
   rust?: TreeSitterLanguage;
   java?: TreeSitterLanguage;
+  swift?: TreeSitterLanguage;
 }
 
 const require = createRequire(import.meta.url);
@@ -56,6 +57,7 @@ export function getTreeSitter(): LoadedParsers | null {
       golang: tryLoadLanguage('golang', () => require('tree-sitter-go') as TreeSitterLanguage),
       rust: tryLoadLanguage('rust', () => require('tree-sitter-rust') as TreeSitterLanguage),
       java: tryLoadLanguage('java', () => require('tree-sitter-java') as TreeSitterLanguage),
+      swift: tryLoadLanguage('swift', () => require('tree-sitter-swift') as TreeSitterLanguage),
     };
     return cached;
   } catch (err) {

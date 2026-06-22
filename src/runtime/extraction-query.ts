@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import YAML from 'yaml';
 import type { Confidence, FlowFact, GraphFact } from '../analyzers/plugin.ts';
+import type { AgIrGraph, AgIrNode } from '../ir/types.ts';
 
 type Scalar = string | number | boolean | string[];
 
@@ -215,6 +216,102 @@ export interface ExtractionQueryTrace {
   skipped_reason?: string;
 }
 
+export function loadExtractionQueryFile(file: string): ExtractionQuery {
+  let raw: unknown;
+  try {
+    raw = YAML.parse(readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw new Error(`failed to parse extraction query '${file}': ${(err as Error).message}`);
+  }
+  return parseQuery(raw, file);
+}
+
+export function normalizeFixtureFacts(raw: unknown, file: string): GraphFact[] {
+  if (!Array.isArray(raw)) throw new Error(`fixture '${file}' must be an array of facts`);
+  return raw.map((entry, index) => {
+    if (!isRecord(entry)) throw new Error(`fixture '${file}'[${index}] must be an object`);
+    if (typeof entry.kind !== 'string' || entry.kind.length === 0) {
+      throw new Error(`fixture '${file}'[${index}] missing kind`);
+    }
+    const confidence = entry.confidence === undefined ? 'definite' : validateConfidence(entry.confidence);
+    return {
+      id: typeof entry.id === 'string' && entry.id.length > 0 ? entry.id : `fixture-${index}`,
+      kind: entry.kind,
+      subject: typeof entry.subject === 'string' ? entry.subject : 'FixtureSubject',
+      ...(typeof entry.target === 'string' ? { target: entry.target } : {}),
+      ...(isRecord(entry.properties) ? { properties: entry.properties as GraphFact['properties'] } : {}),
+      confidence,
+      evidence: {
+        extractor: 'query-test',
+        strategy: 'graph',
+        file,
+        message: `fixture entry ${index}`,
+      },
+    };
+  });
+}
+
+function firstEvidence(edge: AgIrGraph['edges'][number]) {
+  return edge.evidence[0];
+}
+
+function nodeProperties(prefix: string, node: AgIrNode): Record<string, Scalar> {
+  const properties: Record<string, Scalar> = {};
+  for (const [key, value] of Object.entries(node.properties ?? {})) {
+    properties[`${prefix}${key}`] = value;
+  }
+  return properties;
+}
+
+export function agIrGraphToExtractionQueryFacts(graph: AgIrGraph): GraphFact[] {
+  const nodes = new Map(graph.nodes.map(node => [node.id, node]));
+  const containingComponentByFile = new Map<string, string>();
+  for (const edge of graph.edges) {
+    if (edge.kind !== 'contains') continue;
+    const from = nodes.get(edge.from);
+    const to = nodes.get(edge.to);
+    if (from?.kind === 'component' && to?.kind === 'file') containingComponentByFile.set(to.id, from.label);
+  }
+
+  return graph.edges.map((edge): GraphFact => {
+    const fromNode = nodes.get(edge.from);
+    const toNode = nodes.get(edge.to);
+    const evidence = firstEvidence(edge);
+    const file = evidence?.span?.file ?? (fromNode?.kind === 'file' ? fromNode.label : undefined);
+    const component =
+      (fromNode?.kind === 'component' ? fromNode.label : undefined) ??
+      (fromNode?.kind === 'file' ? containingComponentByFile.get(fromNode.id) : undefined) ??
+      (typeof fromNode?.properties?.component === 'string' ? fromNode.properties.component : undefined);
+    return {
+      id: `ag-ir:${edge.id}`,
+      kind: edge.kind,
+      subject: component ?? fromNode?.label ?? edge.from,
+      target: toNode?.label ?? edge.to,
+      confidence: evidence?.confidence ?? 'definite',
+      properties: {
+        kind: edge.kind,
+        edge: edge.kind,
+        fromKind: fromNode?.kind ?? 'symbol',
+        from: fromNode?.label ?? edge.from,
+        toKind: toNode?.kind ?? 'symbol',
+        to: toNode?.label ?? edge.to,
+        ...(component ? { component } : {}),
+        ...(file ? { file } : {}),
+        ...(edge.properties ?? {}),
+        ...(fromNode ? nodeProperties('from.', fromNode) : {}),
+        ...(toNode ? nodeProperties('to.', toNode) : {}),
+      },
+      evidence: {
+        extractor: evidence?.extractor ?? 'ag-ir',
+        strategy: evidence?.strategy ?? 'ast',
+        file,
+        line: evidence?.span?.startLine,
+        message: evidence?.message ?? `Ag-IR ${edge.kind} edge`,
+      },
+    };
+  });
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -239,7 +336,7 @@ function validateScalarMap(value: unknown, label: string): Record<string, Scalar
   return out;
 }
 
-function parseQuery(raw: unknown, file: string): ExtractionQuery {
+export function parseQuery(raw: unknown, file: string): ExtractionQuery {
   if (!isRecord(raw)) throw new Error(`query file '${file}' must contain an object`);
   if (typeof raw.id !== 'string' || raw.id.length === 0) throw new Error(`query '${file}' missing id`);
   if (typeof raw.owner !== 'string' || raw.owner.length === 0) throw new Error(`query '${raw.id}' missing owner`);
@@ -440,7 +537,7 @@ function emitTemplates(query: ExtractionQuery): Record<string, string | undefine
   );
 }
 
-function traceExtractionQueries(queries: ExtractionQuery[], graphFacts: GraphFact[]): ExtractionQueryTrace[] {
+export function traceExtractionQueries(queries: ExtractionQuery[], graphFacts: GraphFact[]): ExtractionQueryTrace[] {
   const traces: ExtractionQueryTrace[] = [];
   for (const query of queries) {
     for (const graphFact of graphFacts) {

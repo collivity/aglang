@@ -72,6 +72,27 @@ Project-specific semantic extraction can live in committed `.aglang/extractors/*
 
 Root self-spec queries should be scoped to the component that owns the evidence, usually with an exact `subject` filter. Do not target tests, generated site output, or intentional violation fixtures unless the goal is to make those files block normal checks.
 
+### Starter templates
+
+```bash
+aglc install-extractors [--project <dir>] [--force]
+```
+
+Scaffolds two starter `.agq.yml` files into `<project>/.aglang/extractors/`. They become normal, locally-owned, reviewable files at that point — edit, narrow, or delete them like any other committed source file. Re-running the command skips files that already exist unless `--force` is passed.
+
+- `resolved-calls-as-flow.agq.yml` — promotes a resolved cross-component method call (e.g. `repo.save(order)` resolving into a data-access component) into a `flow` fact, the same way importing a database driver package already does automatically.
+- `resolved-internal-imports-as-flow.agq.yml` — does the same for a resolved relative import between components.
+
+Both match on the `resolved: true` property that the extractor stamps on `calls`/`imports` edges once it has traced the call or import to its target across files. **That cross-file resolution exists for TypeScript, JavaScript, C#** (`src/ir/semantic-index.ts`) **and Python, Go, Rust, Java, Swift** (`src/ir/cross-file-linker.ts`). The two resolvers cover different shapes of the same problem: `semantic-index.ts` resolves arbitrary symbol references (including instance-method calls when traceable) for the first group; `cross-file-linker.ts` resolves in-project imports and free-function/package-or-module-qualified calls (Go's `pkg.Func()`, Python's `module.func()`, Java's `ClassName.staticMethod()`, Rust's `module::func()`, Swift's `Target.func()`) for the second group, but not instance-variable-mediated calls (`x := New(); x.Method()`) in any language — that needs real type inference, not call-graph resolution, and is out of scope for both resolvers today. Both ship with `confidence: probable`, which `aglc check` treats as non-blocking evidence rather than a violation (only `confidence: definite` facts block by default) — review what they surface in your own call graph before tightening the confidence level.
+
+### Abstraction (extends/implements) resolution
+
+A class/struct/protocol/trait relationship — `class X extends Y implements Z`, Rust's `impl Trait for Type`, Swift's conformance list — is extracted as an `extends`/`implements` Ag-IR edge and resolved against the project's declared symbols the same way `calls`/`imports` are, for **TypeScript/JavaScript/C#** (`src/ir/semantic-index.ts`) and **Python/Java/Rust/Swift** (`src/ir/abstraction-resolver.ts`). Once resolved, it carries `resolved: true`/`targetComponent` just like the starter templates above, so the same pattern works today with no new code: `match: { kind: [extends, implements], resolved: true }`.
+
+**Go is structurally different and handled separately**: Go interfaces are satisfied implicitly — a struct never references the interface it satisfies anywhere in its own syntax, so there's nothing to read like the other languages' explicit clauses. `abstraction-resolver.ts` instead compares method **name+arity** sets project-wide (not real type checking — no parameter/return type comparison, no embedded-interface handling) and emits a `probable`-confidence `implements` edge when a struct's methods are a superset of an interface's. Interfaces with fewer than 2 required methods are skipped entirely to avoid false matches on common single-method interfaces (`Close() error`, `String() string`-style) that would otherwise match unrelated structs by name alone.
+
+This layer deliberately does not resolve calls through an interface-typed field or parameter (`this.repo.save()` where `repo: IRepository`) — that needs tracking a variable's *declared* type first, which is a separate, not-yet-built piece. What's built today is the relationship graph and an interface-to-implementors index (`buildImplementorIndex` in `abstraction-resolver.ts`), ready for that future work to consume.
+
 ```yaml
 id: OrderLifecycleTransitions
 owner: payments
@@ -122,6 +143,94 @@ emit:
 ```
 
 When a query emits a blocking fact, JSON verdicts include the query id, version, query file, and matched graph fact id when available so the extraction result is auditable. Transition facts without a resolved `from` state are warning-only: they are reported as evidence, but are not asserted into Z3.
+
+A query can match the abstraction-resolution edges from the section above directly — no new code, just a `match` clause on `kind` and `resolved`:
+
+```yaml
+id: RepositoryInterfaceFlow
+owner: platform
+version: 1
+confidence: probable
+match:
+  kind: [extends, implements]
+  resolved: true
+emit:
+  kind: flow
+  from: "$subject"
+  to: "$targetComponent"
+```
+
+## Testing a query before wiring it in
+
+Real bugs have shipped in this project's *own* `.agq.yml` queries — a typo'd capture variable, a `match` clause that looked right but never matched a real fact — because there was no way to check a query in isolation. `aglc query-test` closes that gap: it runs one query against hand-written fixture facts and reports, per fact, whether it matched, what it would emit, or exactly why it didn't.
+
+A fixture is a short YAML list — only `kind` and `properties` are required, everything else (id, subject, evidence) gets a sensible default:
+
+```yaml
+# facts.yml
+- kind: calls
+  properties:
+    resolved: true
+    component: ApiControllers
+    targetComponent: DataLayer
+```
+
+```bash
+aglc query-test --query resolved-calls-as-flow.agq.yml --fixture facts.yml
+```
+
+```
+Query: ResolvedCallsAsFlow (resolved-calls-as-flow.agq.yml)
+
+✓ fixture-0: matched, emits flow — from=ApiControllers, to=DataLayer
+
+1/1 fixture fact(s) matched and emitted.
+```
+
+Don't already know what fields to put in the fixture? `aglc query-test --query <file> --init-fixture` scaffolds a starter fixture from the query's own `match` clause.
+
+**Here's the exact bug class this catches**, shown deliberately broken. This query has a typo — `propery` instead of `property` — that's easy to miss reading the YAML:
+
+```yaml
+# typo-transition.agq.yml — note "propery", not "property"
+id: OrderLifecycleTransitionsBroken
+owner: payments
+version: 1
+confidence: definite
+match:
+  kind: assignment
+  propery: status
+emit:
+  kind: transition
+  data: Order
+  field: status
+  from: "$previousMember"
+  to: "$valueMember"
+```
+
+```yaml
+# facts.yml
+- kind: assignment
+  properties:
+    property: status
+    valueEnum: OrderStatus
+    valueMember: Archived
+    previousMember: Active
+```
+
+```bash
+aglc query-test --query typo-transition.agq.yml --fixture facts.yml
+```
+
+```
+Query: OrderLifecycleTransitionsBroken (typo-transition.agq.yml)
+
+✗ fixture-0: match criteria did not match graph fact
+
+0/1 fixture fact(s) matched and emitted.
+```
+
+The `match` clause asked for a field called `propery`, which doesn't exist on the fact, so the match silently fails — exactly the kind of mistake that, without this command, would only surface as "the query isn't catching anything in real code," with no indication of why. `aglc query-test` turns that into an immediate, specific answer before the query is ever wired into `.aglang/extractors/`.
 
 ## OpenAPI import
 

@@ -30,11 +30,12 @@ export const EXPRESS_ROUTE_QUERY = `
 (call_expression
   function: (member_expression
     object: (identifier) @receiver
+    (#match? @receiver "^(app|router|server|fastify)$")
     property: (property_identifier) @method
     (#match? @method "^(get|post|put|delete|patch|head|options)$"))
   arguments: (arguments
     (string (string_fragment) @route_path)
-    (_) @route_handler))
+    (_)? @route_handler))
 ` as const;
 
 // ── NestJS class-level @Controller decorator ──────────────────────────────────
@@ -56,6 +57,47 @@ export const NESTJS_METHOD_QUERY = `
     (#match? @http_method "^(Get|Post|Put|Delete|Patch)$")
     arguments: (arguments
       (string (string_fragment) @route_suffix)?)))
+` as const;
+
+// ── Node http.createServer route guards ───────────────────────────────────────
+// Matches:
+//   req.method === 'GET' && url.pathname === '/api/files'
+//   req.method === 'GET' && url.pathname.startsWith('/api/runs/')
+export const NODE_HTTP_ROUTE_QUERY = `
+(binary_expression
+  left: (binary_expression
+    left: (member_expression
+      object: (identifier) @request_object
+      property: (property_identifier) @request_method_property)
+    right: (string (string_fragment) @method))
+  right: (binary_expression
+    left: (member_expression
+      object: (identifier) @url_object
+      property: (property_identifier) @url_pathname_property)
+    right: (string (string_fragment) @route_path))
+  (#eq? @request_object "req")
+  (#eq? @request_method_property "method")
+  (#eq? @url_object "url")
+  (#eq? @url_pathname_property "pathname"))
+
+(binary_expression
+  left: (binary_expression
+    left: (member_expression
+      object: (identifier) @request_object
+      property: (property_identifier) @request_method_property)
+    right: (string (string_fragment) @method))
+  right: (call_expression
+    function: (member_expression
+      object: (member_expression
+        object: (identifier) @url_object
+        property: (property_identifier) @url_pathname_property)
+      property: (property_identifier) @starts_with)
+    arguments: (arguments (string (string_fragment) @route_path)))
+  (#eq? @request_object "req")
+  (#eq? @request_method_property "method")
+  (#eq? @url_object "url")
+  (#eq? @url_pathname_property "pathname")
+  (#eq? @starts_with "startsWith"))
 ` as const;
 
 // ── New expressions (infrastructure instantiation) ───────────────────────────

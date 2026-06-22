@@ -147,6 +147,8 @@ The JSON payload will include `extractor_debug[]` with parser availability, AST 
 
 If a declared extractor plugin fails before emitting facts, JSON mode returns `extractor_error` in the verdict envelope.
 
+`extractor_debug[]`'s parser-availability check reflects the native `tree-sitter` core version (`^0.22.1`) and the currently-wired grammars: TypeScript, JavaScript, Python, C#, Go, Rust, Java. `tree-sitter-swift` ships as a dependency but has no extraction wiring yet, so it never appears in this output.
+
 ---
 
 ## `aglc explain`
@@ -158,6 +160,34 @@ aglc explain --arch <architecture.o> --project <dir> --violation <id> [--json] [
 ```
 
 The command re-runs the selected check scope, finds the matching violation, and reports the violated rule, source evidence, graph fact chain when available, proof details, `fix_class`, and suggested fix text. Use the same `--diff` or `--all` scope that produced the violation ID.
+
+---
+
+## `aglc graph`
+
+Emit extracted graph evidence for a file, project diff, or full guarded project. Use `--ir` to inspect the canonical Ag-IR graph created from generic tree-sitter extraction plus compatibility adapters for existing graph facts.
+
+```bash
+aglc graph --arch <architecture.o> [--file <path> | --project <dir>] [--all] [--json] [--ir] [--debug-extractors] [--require-ast]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--file` | Analyze one file that belongs to a declared component |
+| `--project` | Project root to scan when using diff or `--all` mode |
+| `--all` | Scan all tracked component files instead of the staged diff |
+| `--json` | Output machine-readable graph JSON |
+| `--ir` | Emit Ag-IR `nodes[]` and typed `edges[]` instead of the legacy graph report |
+| `--debug-extractors` | Include extractor trace events and fallback reasons |
+| `--require-ast` | Fail when an AST-capable extractor falls back to regex for a detected fact |
+
+Example:
+
+```bash
+aglc graph --arch architecture.o --file src/api/orders.ts --json --ir
+```
+
+The Ag-IR graph uses closed edge kinds such as `imports`, `calls`, `assigns`, `handles_route`, `depends_on`, and `accesses_resource`. Every edge includes provenance with source span, language, query name, confidence, extractor, and strategy when available.
 
 ---
 
@@ -233,6 +263,18 @@ Opt out of postinstall skill installation:
 ```bash
 AGLANG_SKIP_AGENT_SKILL_INSTALL=1 npm install -g @collivity/aglang
 ```
+
+---
+
+## `aglc install-extractors`
+
+Scaffold starter `.agq.yml` extraction-query templates into a project.
+
+```bash
+aglc install-extractors [--project <dir>] [--force]
+```
+
+Copies the templates shipped in the npm package (currently `resolved-calls-as-flow.agq.yml` and `resolved-internal-imports-as-flow.agq.yml` — see [Extractors → Starter templates](../extractors.md#starter-templates)) into `<project>/.aglang/extractors/`. Default `--project` is `.`. Files become normal, locally-owned, reviewable artifacts at that point — `aglc check` only ever reads what's committed there. Re-running without `--force` skips files that already exist so local edits aren't clobbered; `--force` overwrites them.
 
 ---
 

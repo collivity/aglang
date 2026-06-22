@@ -29,7 +29,7 @@ aglc install-agent-skill
 
 `.ag` files are engineer-guided architecture source, not normal implementation files. Do not create, edit, regenerate, import into, or compile changes to `.ag` specs unless the engineer explicitly asks for architecture/spec work.
 
-Semantic query files are architecture source too. `.aglang/extractors/*.agq.yml` files are reviewed artifacts that map deterministic graph facts into domain facts such as architecture flows, named operations, state-machine transitions, value facts, operation before/after facts, or scoped events. LLMs may help author them when requested, but `aglc check` never calls an LLM; it runs the committed `.ag`, `.agq.yml`, and source facts deterministically.
+Semantic query files are architecture source too. `.aglang/extractors/*.agq.yml` files are reviewed artifacts that map deterministic graph facts into domain facts such as architecture flows, named operations, state-machine transitions, value facts, operation before/after facts, or scoped events. LLMs may help author them when requested, but `aglc check` never calls an LLM; it runs the committed `.ag`, `.agq.yml`, and source facts deterministically. This includes `extends`/`implements` relationships (class/interface/protocol/trait, plus a structural name+arity heuristic for Go's implicit interfaces) — `match: { kind: [extends, implements], resolved: true }` works the same way as resolved `calls`/`imports`.
 
 Generated architecture artifacts are also permissioned:
 
@@ -54,6 +54,7 @@ aglc explain --arch architecture.o --project . --violation <id> [--json] [--diff
 aglc debug --arch architecture.o --project . [--file <path>] [--all] [--diff <ref>] [--out .aglang/debug]
 aglc emit-context --arch architecture.o --out AGENTS.md
 aglc emit-skill --arch architecture.o --out skill.json
+aglc install-extractors [--project <dir>] [--force]
 aglc import-openapi <swagger.json> [--out <file.ag>]
 aglc import-tf <main.tf> [--out <file.ag>]
 ```

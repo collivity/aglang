@@ -205,6 +205,8 @@
     "(assert (IsComp UiWorkbench))",
     "(declare-const ExtractorAnalyzers Entity)",
     "(assert (IsComp ExtractorAnalyzers))",
+    "(declare-const IrCore Entity)",
+    "(assert (IsComp IrCore))",
     "(declare-const GraphProjection Entity)",
     "(assert (IsComp GraphProjection))",
     "(declare-const Emitters Entity)",
@@ -255,6 +257,8 @@
     "(assert (IsComp ReleaseWorkflow))",
     "(declare-const DocsWorkflow Entity)",
     "(assert (IsComp DocsWorkflow))",
+    "(declare-const CiWorkflow Entity)",
+    "(assert (IsComp CiWorkflow))",
     "(declare-const VscodeExtension Entity)",
     "(assert (IsComp VscodeExtension))",
     "(declare-const Tests Entity)",
@@ -286,11 +290,27 @@
     "; --- CompilerEntrypointBoundary ---",
     "(assert (=> (Flow ExtractorAnalyzers CliCompiler) false))",
     "; --- CompilerEntrypointBoundary ---",
+    "(assert (=> (Flow IrCore CliCompiler) false))",
+    "; --- CompilerEntrypointBoundary ---",
     "(assert (=> (Flow GraphProjection CliCompiler) false))",
     "; --- CompilerEntrypointBoundary ---",
     "(assert (=> (Flow Emitters CliCompiler) false))",
     "; --- CompilerEntrypointBoundary ---",
     "(assert (=> (Flow SpecGenerator CliCompiler) false))",
+    "; --- IrCoreBoundary ---",
+    "(assert (=> (Flow IrCore CliCompiler) false))",
+    "; --- IrCoreBoundary ---",
+    "(assert (=> (Flow IrCore Emitters) false))",
+    "; --- IrCoreBoundary ---",
+    "(assert (=> (Flow IrCore RuntimeCore) false))",
+    "; --- IrCoreBoundary ---",
+    "(assert (=> (Flow IrCore PolicyGates) false))",
+    "; --- IrCoreBoundary ---",
+    "(assert (=> (Flow IrCore SemanticQueryEngine) false))",
+    "; --- IrCoreBoundary ---",
+    "(assert (=> (Flow IrCore StateMachineRuntime) false))",
+    "; --- IrCoreBoundary ---",
+    "(assert (=> (Flow IrCore UiWorkbench) false))",
     "; --- LanguageFrontendPurity ---",
     "(assert (=> (Flow LanguageFrontend RuntimeCore) false))",
     "; --- LanguageFrontendPurity ---",
@@ -315,6 +335,8 @@
     "(assert (=> (Flow SmtBackend StateMachineRuntime) false))",
     "; --- SmtBackendIsolation ---",
     "(assert (=> (Flow SmtBackend ExtractorAnalyzers) false))",
+    "; --- SmtBackendIsolation ---",
+    "(assert (=> (Flow SmtBackend IrCore) false))",
     "; --- SmtBackendIsolation ---",
     "(assert (=> (Flow SmtBackend GraphProjection) false))",
     "; --- SmtBackendIsolation ---",
@@ -352,6 +374,8 @@
     "; --- UiWorkbenchBoundary ---",
     "(assert (=> (Flow UiWorkbench ExtractorAnalyzers) false))",
     "; --- UiWorkbenchBoundary ---",
+    "(assert (=> (Flow UiWorkbench IrCore) false))",
+    "; --- UiWorkbenchBoundary ---",
     "(assert (=> (Flow UiWorkbench GraphProjection) false))",
     "; --- UiWorkbenchBoundary ---",
     "(assert (=> (Flow UiWorkbench StateMachineRuntime) false))",
@@ -367,6 +391,8 @@
     "(assert (=> (Flow VscodeExtension StateMachineRuntime) false))",
     "; --- VscodeApiBoundary ---",
     "(assert (=> (Flow VscodeExtension ExtractorAnalyzers) false))",
+    "; --- VscodeApiBoundary ---",
+    "(assert (=> (Flow VscodeExtension IrCore) false))",
     "; --- VscodeApiBoundary ---",
     "(assert (=> (Flow VscodeExtension SmtBackend) false))",
     "; --- VscodeApiBoundary ---",
@@ -486,6 +512,7 @@
     "StateMachineRuntime": "src/runtime/state-machine.ts",
     "UiWorkbench": "src/runtime/ui-server.ts",
     "ExtractorAnalyzers": "src/analyzers/**/*.ts",
+    "IrCore": "src/ir/**/*.ts",
     "GraphProjection": "src/runtime/graph-projection.ts",
     "Emitters": "src/emitters/**/*.ts",
     "SpecGenerator": "src/generate.ts",
@@ -511,6 +538,7 @@
     "ExampleSpecs": "examples/**/*.ag",
     "ReleaseWorkflow": ".github/workflows/release.yml",
     "DocsWorkflow": ".github/workflows/docs.yml",
+    "CiWorkflow": ".github/workflows/ci.yml",
     "VscodeExtension": "editors/vscode-aglang/src/**/*.ts",
     "Tests": "tests/**/*.ts",
     "ArchitectureSpec": "architecture.ag",
@@ -560,6 +588,11 @@
         },
         {
           "kind": "DenyFlow",
+          "from": "IrCore",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
           "from": "GraphProjection",
           "to": "CliCompiler"
         },
@@ -572,6 +605,46 @@
           "kind": "DenyFlow",
           "from": "SpecGenerator",
           "to": "CliCompiler"
+        }
+      ]
+    },
+    {
+      "name": "IrCoreBoundary",
+      "rules": [
+        {
+          "kind": "DenyFlow",
+          "from": "IrCore",
+          "to": "CliCompiler"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "IrCore",
+          "to": "Emitters"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "IrCore",
+          "to": "RuntimeCore"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "IrCore",
+          "to": "PolicyGates"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "IrCore",
+          "to": "SemanticQueryEngine"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "IrCore",
+          "to": "StateMachineRuntime"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "IrCore",
+          "to": "UiWorkbench"
         }
       ]
     },
@@ -642,6 +715,11 @@
           "kind": "DenyFlow",
           "from": "SmtBackend",
           "to": "ExtractorAnalyzers"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "SmtBackend",
+          "to": "IrCore"
         },
         {
           "kind": "DenyFlow",
@@ -751,6 +829,11 @@
         {
           "kind": "DenyFlow",
           "from": "UiWorkbench",
+          "to": "IrCore"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "UiWorkbench",
           "to": "GraphProjection"
         },
         {
@@ -792,6 +875,11 @@
           "kind": "DenyFlow",
           "from": "VscodeExtension",
           "to": "ExtractorAnalyzers"
+        },
+        {
+          "kind": "DenyFlow",
+          "from": "VscodeExtension",
+          "to": "IrCore"
         },
         {
           "kind": "DenyFlow",
@@ -1254,6 +1342,7 @@
     "StateMachineRuntime": "node_runtime",
     "UiWorkbench": "node_runtime",
     "ExtractorAnalyzers": "node_runtime",
+    "IrCore": "node_runtime",
     "GraphProjection": "node_runtime",
     "Emitters": "node_runtime",
     "SpecGenerator": "node_runtime",
@@ -1279,6 +1368,7 @@
     "ExampleSpecs": "node_runtime",
     "ReleaseWorkflow": "github_actions",
     "DocsWorkflow": "github_actions",
+    "CiWorkflow": "github_actions",
     "VscodeExtension": "node_runtime",
     "Tests": "node_runtime",
     "ArchitectureSpec": "node_runtime",
@@ -1398,6 +1488,23 @@
           }
         }
       ]
+    },
+    {
+      "name": "CiSafety",
+      "rules": [
+        {
+          "kind": "BeforeRule",
+          "workflow": "CiWorkflow",
+          "before": "npm run typecheck",
+          "after": "npm run build"
+        },
+        {
+          "kind": "BeforeRule",
+          "workflow": "CiWorkflow",
+          "before": "npm run build",
+          "after": "npm run arch:check"
+        }
+      ]
     }
   ],
   "diPolicies": [],
@@ -1451,6 +1558,11 @@
           "kind": "RequireTouched",
           "required": "ArchitectureSpec",
           "trigger": "RuntimeCore"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ArchitectureSpec",
+          "trigger": "IrCore"
         },
         {
           "kind": "RequireTouched",

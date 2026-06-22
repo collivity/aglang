@@ -17,6 +17,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
@@ -38,3 +40,18 @@ jobs:
 
       - name: Architecture check
         run: npm run arch:check
+
+      - name: Architecture change-policy check (diff-aware)
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # The exact base SHA GitHub resolved for this PR — more robust than a ref name,
+            # which needs a remote-tracking branch to exist locally.
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            echo "No previous commit to diff against (new branch) — skipping change-policy check."
+            exit 0
+          fi
+          node build/aglc.js check --arch architecture.o --project . --diff "$BASE"

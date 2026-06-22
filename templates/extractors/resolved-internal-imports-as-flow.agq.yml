@@ -1,0 +1,31 @@
+# Starter template shipped with aglang (`aglc install-extractors`).
+#
+# Promotes a resolved internal (relative-path) import into a `flow` fact, so
+# importing a symbol from another declared component counts as a structural
+# capability to reach it — the same way importing an external DB driver
+# package already does automatically.
+#
+# Scope: only fires where the extractor stamped `resolved: true` on an
+# `imports` edge. That covers TypeScript/JavaScript/C# (via
+# `src/ir/semantic-index.ts`) and Python/Go/Rust/Java (via
+# `src/ir/cross-file-linker.ts`) for in-project specifiers it can resolve to
+# a file on disk (e.g. Go/Rust's own module, Python relative/absolute
+# package imports, Java single-class imports). Wildcard-style package
+# imports (e.g. Java's `import com.foo.*`, Rust's `super::`/`self::`) are a
+# documented gap — see `cross-file-linker.ts`. Swift is not yet wired into
+# tree-sitter extraction at all, so this template is a no-op there.
+#
+# `confidence: probable` means this is non-blocking by default — only
+# `confidence: definite` facts block `aglc check` — review what it surfaces
+# before tightening it.
+id: ResolvedInternalImportsAsFlow
+owner: architecture
+version: 1
+confidence: probable
+match:
+  kind: imports
+  resolved: true
+emit:
+  kind: flow
+  from: "$component"
+  to: "$targetComponent"

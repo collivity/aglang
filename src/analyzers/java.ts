@@ -4,11 +4,12 @@
 // Uses tree-sitter AST for Java when available, falls back to regex silently.
 
 import { readFileSync } from 'fs';
-import type { ExtractorPlugin, ExtractorInput, FlowFact, ExtractionStrategy } from './plugin.ts';
+import type { ExtractorPlugin, ExtractorInput, FlowFact, GraphFact, ExtractionStrategy } from './plugin.ts';
 import { normalizeRoute } from './typescript.ts';
 import { makeParser, getTreeSitter } from './ast/loader.ts';
 import { parseAndQuery } from './ast/walker.ts';
 import { IMPORT_QUERY, ANNOTATION_QUERY, NEW_OBJECT_QUERY, METHOD_INVOCATION_QUERY } from './ast/queries/java.ts';
+import { extractAssignmentGraphFacts } from './assignment-guard.ts';
 
 export interface RouteFact {
   method: string;
@@ -385,6 +386,33 @@ export const javaPlugin: ExtractorPlugin = {
       facts.push(...analyzeJavaFile(content, filePath, input.componentName));
     }
     return facts;
+  },
+  async extractGraph(input: ExtractorInput): Promise<GraphFact[]> {
+    const graphFacts: GraphFact[] = [];
+    const flowFacts = await this.extract!(input);
+    graphFacts.push(...flowFacts.map((fact, index) => ({
+      id: `java-flow:${index}:${fact.from}:${fact.to}:${fact.file}:${fact.line ?? 0}`,
+      kind: 'accesses_technology',
+      subject: fact.from,
+      technology: fact.to,
+      confidence: fact.confidence,
+      evidence: {
+        extractor: javaPlugin.name,
+        strategy: fact.strategy ?? 'legacy-flow',
+        file: fact.file,
+        line: fact.line,
+        message: fact.evidence,
+      },
+    } satisfies GraphFact)));
+    for (const filePath of input.files) {
+      let content: string;
+      try { content = readFileSync(filePath, 'utf8'); } catch { continue; }
+      graphFacts.push(...extractAssignmentGraphFacts(content, filePath, input.componentName, javaPlugin.name, {
+        enumSeparator: '.',
+        guardOperators: ['=='],
+      }));
+    }
+    return graphFacts;
   },
 };
 

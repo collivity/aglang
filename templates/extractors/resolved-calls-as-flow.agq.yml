@@ -1,0 +1,33 @@
+# Starter template shipped with aglang (`aglc install-extractors`).
+#
+# Promotes a resolved cross-component method call into a `flow` fact, so a
+# call into another component's class/function (e.g. `repo.save(order)`
+# resolving into a Data-access component) is reachable in the same way a
+# direct DB-driver import already is.
+#
+# Scope: only fires where the extractor stamped `resolved: true` on a
+# `calls` edge. That covers TypeScript/JavaScript/C# (cross-file resolution
+# via `src/ir/semantic-index.ts`) and Python/Go/Rust/Java (via
+# `src/ir/cross-file-linker.ts`) for direct/free-function and
+# package-or-module-qualified calls (e.g. Go's `pkg.Func()`, Python's
+# `module.func()`, Java's `ClassName.staticMethod()`). It does NOT resolve
+# instance-variable-mediated calls in any language (e.g. `repo := New(); repo.Save()`),
+# since that needs real type inference, not just call-graph resolution.
+# Swift is not yet wired into tree-sitter extraction at all, so this
+# template is a no-op there.
+#
+# `confidence: probable` means this is non-blocking by default — only
+# `confidence: definite` facts block `aglc check` — review what it surfaces
+# before tightening it. Narrow `match` (e.g. add a `from.file` path filter)
+# once you've seen what your codebase's call graph actually produces.
+id: ResolvedCallsAsFlow
+owner: architecture
+version: 1
+confidence: probable
+match:
+  kind: calls
+  resolved: true
+emit:
+  kind: flow
+  from: "$component"
+  to: "$targetComponent"

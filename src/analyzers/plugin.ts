@@ -5,6 +5,7 @@
 import { spawnSync } from 'child_process';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, resolve } from 'path';
+import type { AgIrGraph } from '../ir/types.ts';
 
 export type Confidence = 'definite' | 'probable' | 'possible';
 export type ExtractionStrategy = 'ast' | 'regex' | 'graph' | 'legacy-flow';
@@ -125,6 +126,11 @@ export interface ExtractorPlugin {
    * into graph facts for compatibility.
    */
   extractGraph?(input: ExtractorInput): Promise<GraphFact[]> | GraphFact[];
+  /**
+   * Optional canonical Ag-IR extraction path. The runtime can merge this with
+   * generic tree-sitter IR and compatibility adapters from GraphFact/FlowFact.
+   */
+  extractIr?(input: ExtractorInput): Promise<AgIrGraph> | AgIrGraph;
 }
 
 // ─── Subprocess plugin protocol ───────────────────────────────────────────────

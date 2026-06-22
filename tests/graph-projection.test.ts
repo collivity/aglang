@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { emitArtifact } from '../src/emitters/artifact.ts';
 import { tokenize } from '../src/lexer.ts';
 import { parse } from '../src/parser.ts';
 import { projectGraphToFlows } from '../src/runtime/graph-projection.ts';
 import { generateDeltaAssertions } from '../src/runtime/delta-assert.ts';
 import { runGate } from '../src/runtime/gate.ts';
-import type { ExtractorPlugin, GraphFact } from '../src/analyzers/plugin.ts';
+import type { ExtractorPlugin, FlowFact, GraphFact } from '../src/analyzers/plugin.ts';
 
 function compileSpec(source: string) {
   const tokens = tokenize(source);
@@ -181,6 +184,59 @@ describe('graph to flow projection', () => {
     expect(verdict.violations[0]!.graph_evidence?.graphFactId).toBe('fact-1');
     expect(verdict.violations[0]!.graph_evidence?.extractor).toBe('test-graph');
   });
+
+  it('reports unmatched blocking flow facts as unresolved warnings, not unknown violations', async () => {
+    const artifact = compileSpec(`
+      node runtime : node_runtime { trust: trusted }
+      component A { runs_on: runtime paths: "**/*.mock" }
+      component B { runs_on: runtime paths: "**/*.mock" }
+      component C { runs_on: runtime paths: "**/*.mock" }
+      component D { runs_on: runtime paths: "**/*.mock" }
+      invariant NamedBoundary {
+        deny flow A -> B
+      }
+    `);
+    const facts: FlowFact[] = [
+      {
+        from: 'A',
+        to: 'B',
+        confidence: 'definite',
+        evidence: 'A calls B',
+        file: 'x.mock',
+      },
+      {
+        from: 'C',
+        to: 'D',
+        confidence: 'definite',
+        evidence: 'C calls D',
+        file: 'x.mock',
+      },
+    ];
+    const plugin: ExtractorPlugin = {
+      name: 'flow-mock',
+      extensions: ['.mock'],
+      extract: () => facts,
+    };
+
+    const delta = await generateDeltaAssertions(
+      [{ componentName: 'A', files: ['x.mock'] }],
+      artifact,
+      { plugins: [plugin] },
+    );
+    const verdict = await runGate(artifact, delta);
+
+    expect(verdict.passed).toBe(false);
+    expect(verdict.violations).toHaveLength(1);
+    expect(verdict.violations[0]!.invariant).toBe('NamedBoundary');
+    expect(verdict.violations.some(violation => violation.invariant === 'unknown')).toBe(false);
+    expect(verdict.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        from: 'C',
+        to: 'D',
+        evidence: expect.stringContaining('unresolved'),
+      }),
+    ]));
+  });
 });
 
 describe('graph-backed extractor path', () => {
@@ -267,5 +323,30 @@ describe('graph-backed extractor path', () => {
 
     expect(delta.graphReport.facts[0]!.evidence.strategy).toBe('regex');
     expect(delta.graphReport.projections.flow[0]!.graphEvidence?.strategy).toBe('regex');
+  });
+
+  it('delta output carries canonical Ag-IR alongside legacy graph facts', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aglang-ir-delta-'));
+    try {
+      const file = join(dir, 'api.ts');
+      writeFileSync(file, `import { Pool } from 'pg';\nconst pool = new Pool();\n`, 'utf8');
+      const artifact = compileSpec(`
+        node runtime : agent_runtime { trust: trusted }
+        component Api { runs_on: runtime paths: "*.ts" }
+      `);
+
+      const delta = await generateDeltaAssertions(
+        [{ componentName: 'Api', files: [file] }],
+        artifact,
+        { projectRoot: dir },
+      );
+
+      expect(delta.irGraph.schema_version).toBe(1);
+      expect(delta.irGraph.nodes.some(node => node.kind === 'file' && node.label === file)).toBe(true);
+      expect(delta.irGraph.edges.some(edge => edge.kind === 'imports')).toBe(true);
+      expect(delta.irGraph.edges.some(edge => edge.kind === 'calls')).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
