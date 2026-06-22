@@ -311,3 +311,7 @@ emit:
 ```
 
 These facts carry the same provenance fields as transitions: query id, version, query file, source file, line, and matched graph fact id.
+
+### Numeric requirements get real Z3 arithmetic, not symbol matching
+
+When a `value_policy`/`operation_policy` requirement's field resolves to a numeric `data` type (`Int`, `Float`, or `Money`), the compiled check uses real SMT-LIB `Int`/`Real` comparisons (`FieldValueInt`/`FieldValueReal`, with genuine literals and operators) instead of treating the relation and value as opaque atoms. `require Order.total <= 1000` compiles to an actual arithmetic constraint; if an extracted fact later asserts the observed total is `1500`, Z3 derives the contradiction itself — `1500 > 1000` — rather than being told one exists. String/bool/enum comparisons (`require Cart.phase == SingleItem`) are unaffected and still use the original symbolic model, since there's no arithmetic to do there. A bare `$capture` of a numeric `GraphFact` property (no surrounding text in the `value:` template) preserves its numeric-ness through extraction; a captured property embedded in a larger string template, or one that isn't a number at all, falls back to the symbolic path automatically — no `.agq.yml` authoring changes are needed either way.

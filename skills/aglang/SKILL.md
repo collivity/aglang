@@ -95,6 +95,8 @@ event_policy ConsentProtocol {
 
 These policies consume reviewed `kind: value`, `kind: operation_event`, and `kind: event` query emits. Missing evidence is non-blocking; only definite contradictory facts produce `value_policy_violation`, `operation_policy_violation`, or `event_policy_violation`. Scope committed queries to the owning component with exact `subject` filters; avoid matching tests, generated site assets, and intentional violation fixtures in ordinary project gates.
 
+When the requirement's field is a numeric `data` type (`Int`/`Float`/`Money`), the Z3 proof is real arithmetic (`FieldValueInt`/`FieldValueReal` with genuine literals and operators) — Z3 actually derives the contradiction (e.g. `1500 > 1000`) rather than matching pre-decided symbols. String/bool/enum fields are unaffected.
+
 ## Workflow Policies
 
 GitHub Actions workflows can be modeled as components and checked with `workflow_policy`.
