@@ -9,6 +9,10 @@ type Scalar = string | number | boolean | string[];
 interface SubstitutionResult {
   value: string;
   missing: string[];
+  // Set when the template was a single bare "$capture" (no surrounding text) and the captured
+  // GraphFact property was itself a JS number — preserved alongside the stringified `value` so
+  // numeric value_policy/operation_policy facts can reach gate.ts as real numbers, not just text.
+  numeric?: number;
 }
 
 export interface ExtractionQuery {
@@ -163,6 +167,9 @@ export interface ValueFact {
   path: string[];
   relation: string;
   value: string;
+  // Set when the extracted value was itself a JS number, captured via a bare "$capture" template —
+  // lets gate.ts emit a real SMT-LIB Int/Real comparison instead of an opaque ScalarValue atom.
+  numericValue?: number;
   confidence: Confidence;
   file: string;
   line?: number;
@@ -510,9 +517,19 @@ function valueMatches(expected: Scalar, actual: Scalar | undefined): boolean {
   return actual === expected;
 }
 
+const BARE_CAPTURE_RE = /^\$([A-Za-z_][A-Za-z0-9_]*)$/;
+
 function substitute(template: string | undefined, fact: GraphFact): SubstitutionResult | undefined {
   if (!template) return undefined;
   const missing: string[] = [];
+  const bareCapture = template.match(BARE_CAPTURE_RE);
+  if (bareCapture) {
+    const raw = graphValue(fact, bareCapture[1]!);
+    if (raw === undefined || raw === '') return { value: '', missing: [bareCapture[1]!] };
+    if (typeof raw === 'number') return { value: String(raw), missing: [], numeric: raw };
+    if (Array.isArray(raw)) return { value: raw[0] ?? '', missing: [] };
+    return { value: String(raw), missing: [] };
+  }
   const value = template.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, key: string) => {
     const value = graphValue(fact, key);
     if (Array.isArray(value)) return value[0] ?? '';
@@ -670,6 +687,7 @@ export function applyExtractionQueryFacts(queries: ExtractionQuery[], graphFacts
           path: pathRaw.value.split('.').filter(Boolean),
           relation: relation.value,
           value: value.value,
+          ...(value.numeric !== undefined ? { numericValue: value.numeric } : {}),
           confidence: query.confidence,
           file: graphFact.evidence.file ?? '',
           line: graphFact.evidence.line,

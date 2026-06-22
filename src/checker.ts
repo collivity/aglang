@@ -11,6 +11,51 @@ const PRIMITIVE_TYPES = new Set([
   'UUID', 'String', 'Int', 'Float', 'Bool', 'Money', 'Timestamp', 'DateTime', 'Bytes', 'Json',
 ]);
 
+// Numeric primitive types — value_policy/operation_policy relations like '<'/'>=' require one of these.
+const NUMERIC_TYPES = new Set(['Int', 'Float', 'Money']);
+
+function unwrapOptionalType(expr: string): string {
+  return expr.replace(/^Optional<(.+)>$/, '$1').trim();
+}
+
+function unwrapListType(expr: string): string | undefined {
+  const match = expr.trim().match(/^List<(.+)>$/);
+  return match?.[1]?.trim();
+}
+
+// Side-effect-free re-derivation of validateValueExpression's field-path walk, used to attach a
+// resolved final type (and therefore numeric-ness) to a ValueExpression for SMT-sort selection at
+// artifact-emission time. Assumes the expression has already passed checker validation — returns
+// undefined on any unresolvable step rather than reporting an error (the validator already did that).
+export function resolveValueExpressionFinalType(
+  declaredData: Map<string, DataDecl>,
+  expr: ValueExpression,
+): string | undefined {
+  const dataDecl = declaredData.get(expr.subject);
+  if (!dataDecl) return undefined;
+  let currentType: string | undefined = expr.subject;
+  let currentData: DataDecl | undefined = dataDecl;
+  let lastFieldType: string | undefined;
+  for (const part of expr.path) {
+    if (part === 'length') {
+      currentType = 'Int';
+      lastFieldType = 'Int';
+      continue;
+    }
+    if (!currentData) return undefined;
+    const field = currentData.fields.find(f => f.key === part);
+    if (!field) return undefined;
+    lastFieldType = unwrapOptionalType(field.typeExpr);
+    currentType = lastFieldType;
+    currentData = declaredData.get(currentType);
+  }
+  return unwrapOptionalType(lastFieldType ?? '');
+}
+
+export function isNumericValueType(finalType: string | undefined): boolean {
+  return finalType !== undefined && NUMERIC_TYPES.has(finalType);
+}
+
 // Validate a type expression string against known types
 // Supports: UUID, String, List<X>, Map<K,V>, Optional<X>, user-defined enums/data
 function validateTypeExpr(

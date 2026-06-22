@@ -16,6 +16,9 @@ import {
   transitionAllowed,
   transitionRuleMatches,
 } from './state-machine.ts';
+import { smtId, relationSmtId, scalarSmtId, fieldPathSmtId, valuePolicyDeltaAssertions, valuePolicyPermanentConstraint, operationPolicyDeltaAssertion, operationPolicyPermanentConstraint } from './smt-ids.ts';
+import type { ValueFact } from './extraction-query.ts';
+import type { ArtifactValueExpression } from '../emitters/artifact.ts';
 
 export interface Z3Proof {
   // The permanent constraint assertion from the compiled .arch spec
@@ -92,23 +95,6 @@ export interface SolverSliceDiagnostic {
   fanout?: number;
   reason?: string;
   suggested_refactor?: string;
-}
-
-function smtId(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_]/g, '_');
-}
-
-function relationSmtId(relation: string): string {
-  return `Relation__${relation.replace(/[^a-zA-Z0-9_]/g, token => ({ '=': 'eq', '!': 'not', '>': 'gt', '<': 'lt' }[token] ?? '_'))}`;
-}
-
-function scalarSmtId(value: unknown): string {
-  if (value === null) return 'Value__null';
-  return `Value__${smtId(String(value))}`;
-}
-
-function fieldPathSmtId(subject: string, path: string[]): string {
-  return `FieldPath__${smtId(subject)}__${path.map(smtId).join('__')}`;
 }
 
 function stableId(parts: Array<string | number | undefined>): string {
@@ -215,6 +201,8 @@ function buildSolverSlices(
     blockingDataFlowFacts: DeltaResult['blockingDataFlowFacts'];
     blockingDiFacts: RuntimeDiFact[];
     blockingTransitionFacts: DeltaResult['blockingTransitionFacts'];
+    blockingValuePolicyFacts: DeltaResult['blockingValuePolicyFacts'];
+    blockingOperationPolicyFacts: DeltaResult['blockingOperationPolicyFacts'];
   },
 ): SolverSlice[] {
   const slices: SolverSlice[] = [];
@@ -351,6 +339,38 @@ function buildSolverSlices(
       line: fact.line,
       components: [fact.data],
       data: `${fact.data}.${fact.field}`,
+      fact_count: 1,
+    });
+  }
+
+  for (const item of runtime.blockingValuePolicyFacts) {
+    const { policy, rule, fact, conditionFact } = item;
+    const deltaParts = valuePolicyDeltaAssertions(rule.requirement, fact, rule.when, conditionFact);
+    push({
+      rule: policy,
+      declaration: 'value_policy',
+      permanent: valuePolicyPermanentConstraint(rule.requirement, rule.when),
+      delta: deltaParts.join('\n'),
+      source_file: fact.file,
+      line: fact.line,
+      components: [fact.subject],
+      data: `${fact.subject}.${fact.path.join('.')}`,
+      fact_count: deltaParts.length,
+    });
+  }
+
+  for (const item of runtime.blockingOperationPolicyFacts) {
+    const { policy, rule, fact } = item;
+    const phase = rule.kind === 'RequireBefore' ? 'Phase__before' : 'Phase__after';
+    push({
+      rule: policy,
+      declaration: 'operation_policy',
+      permanent: operationPolicyPermanentConstraint(rule.operation, phase, rule.requirement),
+      delta: operationPolicyDeltaAssertion(fact.operation, phase, rule.requirement, fact),
+      source_file: fact.file,
+      line: fact.line,
+      components: [fact.subject],
+      data: `${fact.subject}.${fact.path.join('.')}`,
       fact_count: 1,
     });
   }
@@ -540,6 +560,8 @@ export async function runGate(
     blockingDataFlowFacts,
     blockingDiFacts,
     blockingTransitionFacts,
+    blockingValuePolicyFacts,
+    blockingOperationPolicyFacts,
   });
   const solverDiagnostics = await runSolverSlices(artifact, solverSlices);
   const solverHotspots = solverDiagnostics.filter(d => d.status === 'unknown' || d.status === 'error');
@@ -1055,13 +1077,10 @@ export async function runGate(
 
   for (const item of blockingValuePolicyFacts) {
     const { policy, rule, fact, conditionFact } = item;
-    const deltaAssertion = `(assert (ValueContradiction ${smtId(fact.subject)} ${fieldPathSmtId(fact.subject, fact.path)} ${relationSmtId(rule.requirement.relation)} ${scalarSmtId(rule.requirement.value)}))`;
-    const conditionAssertion = conditionFact && rule.when
-      ? `(assert (ValueFact ${smtId(conditionFact.subject)} ${fieldPathSmtId(conditionFact.subject, conditionFact.path)} ${relationSmtId(rule.when.relation)} ${scalarSmtId(rule.when.value)}))`
-      : undefined;
-    const permanentConstraint = rule.when
-      ? `(assert (=> (and (ValueFact ${smtId(rule.when.subject)} ${fieldPathSmtId(rule.when.subject, rule.when.path)} ${relationSmtId(rule.when.relation)} ${scalarSmtId(rule.when.value)}) (ValueContradiction ${smtId(rule.requirement.subject)} ${fieldPathSmtId(rule.requirement.subject, rule.requirement.path)} ${relationSmtId(rule.requirement.relation)} ${scalarSmtId(rule.requirement.value)})) false))`
-      : `(assert (=> (ValueContradiction ${smtId(rule.requirement.subject)} ${fieldPathSmtId(rule.requirement.subject, rule.requirement.path)} ${relationSmtId(rule.requirement.relation)} ${scalarSmtId(rule.requirement.value)}) false))`;
+    const deltaParts = valuePolicyDeltaAssertions(rule.requirement, fact, rule.when, conditionFact);
+    const deltaAssertion = deltaParts[deltaParts.length - 1]!;
+    const conditionAssertion = rule.when && conditionFact ? deltaParts[0] : undefined;
+    const permanentConstraint = valuePolicyPermanentConstraint(rule.requirement, rule.when);
     violations.push({
       type: 'value_policy_violation',
       invariant: policy,
@@ -1099,8 +1118,8 @@ export async function runGate(
   for (const item of blockingOperationPolicyFacts) {
     const { policy, rule, fact } = item;
     const phase = rule.kind === 'RequireBefore' ? 'Phase__before' : 'Phase__after';
-    const permanentConstraint = `(assert (=> (OperationStateContradiction Operation__${smtId(rule.operation)} ${phase} ${smtId(rule.requirement.subject)} ${fieldPathSmtId(rule.requirement.subject, rule.requirement.path)} ${relationSmtId(rule.requirement.relation)} ${scalarSmtId(rule.requirement.value)}) false))`;
-    const deltaAssertion = `(assert (OperationStateContradiction Operation__${smtId(fact.operation)} ${phase} ${smtId(fact.subject)} ${fieldPathSmtId(fact.subject, fact.path)} ${relationSmtId(rule.requirement.relation)} ${scalarSmtId(rule.requirement.value)}))`;
+    const permanentConstraint = operationPolicyPermanentConstraint(rule.operation, phase, rule.requirement);
+    const deltaAssertion = operationPolicyDeltaAssertion(fact.operation, phase, rule.requirement, fact);
     violations.push({
       type: 'operation_policy_violation',
       invariant: policy,

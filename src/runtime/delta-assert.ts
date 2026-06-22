@@ -27,6 +27,7 @@ import {
 } from './graph-projection.ts';
 import { agIrGraphToExtractionQueryFacts, applyExtractionQueryFacts, loadExtractionQueries, type AuthCounterexampleFact, type DependencyFact, type EncryptionCounterexampleFact, type EventFact, type ExtractionQueryFacts, type ExtractionQueryTrace, type OperationEventFact, type OperationFact, type TransitionFact, type ValueFact } from './extraction-query.ts';
 import { buildTransitionDeltaAssertions, shouldBlockTransitionFact } from './state-machine.ts';
+import { smtId, relationSmtId, scalarSmtId, fieldPathSmtId, valuePolicyDeltaAssertions, operationPolicyDeltaAssertion } from './smt-ids.ts';
 import type { AgIrGraph } from '../ir/types.ts';
 import { AG_IR_SCHEMA_VERSION } from '../ir/types.ts';
 import { mergeAgIrGraphs } from '../ir/builders.ts';
@@ -194,23 +195,6 @@ export interface DeltaResult {
   unresolvedIrEdges: IrUnresolvedEdge[];
   irLoweringProvenance: IrLoweredFlowProvenance[];
   extractorDebug: ExtractorDebugEvent[];
-}
-
-function smtId(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_]/g, '_');
-}
-
-function relationSmtId(relation: string): string {
-  return `Relation__${relation.replace(/[^a-zA-Z0-9_]/g, token => ({ '=': 'eq', '!': 'not', '>': 'gt', '<': 'lt' }[token] ?? '_'))}`;
-}
-
-function scalarSmtId(value: unknown): string {
-  if (value === null) return 'Value__null';
-  return `Value__${smtId(String(value))}`;
-}
-
-function fieldPathSmtId(subject: string, path: string[]): string {
-  return `FieldPath__${smtId(subject)}__${path.map(smtId).join('__')}`;
 }
 
 function normalizeScalar(value: unknown): string | number | boolean | null {
@@ -925,12 +909,11 @@ export async function generateDeltaAssertions(
         : [],
     )),
   );
-  const valuePolicyAssertions = blockingValuePolicyFacts.flatMap(({ rule, fact, conditionFact }) => [
-    ...(conditionFact ? [`(assert (ValueFact ${smtId(conditionFact.subject)} ${fieldPathSmtId(conditionFact.subject, conditionFact.path)} ${relationSmtId(rule.when!.relation)} ${scalarSmtId(rule.when!.value)}))`] : []),
-    `(assert (ValueContradiction ${smtId(fact.subject)} ${fieldPathSmtId(fact.subject, fact.path)} ${relationSmtId(rule.requirement.relation)} ${scalarSmtId(rule.requirement.value)}))`,
-  ]);
+  const valuePolicyAssertions = blockingValuePolicyFacts.flatMap(({ rule, fact, conditionFact }) =>
+    valuePolicyDeltaAssertions(rule.requirement, fact, rule.when, conditionFact),
+  );
   const operationPolicyAssertions = blockingOperationPolicyFacts.map(({ rule, fact }) =>
-    `(assert (OperationStateContradiction Operation__${smtId(fact.operation)} ${rule.kind === 'RequireBefore' ? 'Phase__before' : 'Phase__after'} ${smtId(fact.subject)} ${fieldPathSmtId(fact.subject, fact.path)} ${relationSmtId(rule.requirement.relation)} ${scalarSmtId(rule.requirement.value)}))`,
+    operationPolicyDeltaAssertion(fact.operation, rule.kind === 'RequireBefore' ? 'Phase__before' : 'Phase__after', rule.requirement, fact),
   );
   const eventPolicyAssertions = blockingEventPolicyFacts.map(({ rule }) =>
     `(assert (EventMissingPrecedence Event__${smtId(rule.event)} Event__${smtId(rule.precededBy)} ${smtId(rule.scope)}))`,

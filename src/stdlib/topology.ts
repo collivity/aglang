@@ -182,6 +182,20 @@ export const BASE_SMT_DECLARATIONS: string[] = [
   '(declare-fun ValueFact (DataType FieldPath ValueRelation ScalarValue) Bool)',
   '(declare-fun ValueContradiction (DataType FieldPath ValueRelation ScalarValue) Bool)',
   '(declare-fun OperationStateContradiction (Operation OperationPhase DataType FieldPath ValueRelation ScalarValue) Bool)',
+  // Numeric counterpart of the ValueFact/ValueContradiction model above, used when a field's
+  // declared type is Int/Float/Money. Unlike ValueFact (an opaque Bool atom asserted directly —
+  // Z3 never compares anything, it just checks the atom was both required-false and asserted-
+  // true), these are real-valued uninterpreted functions: the permanent constraint asserts the
+  // policy threshold using a genuine SMT-LIB comparison operator (<=, >=, <, >, =, distinct), and
+  // the delta assertion pins the function to the observed value. UNSAT is then an actual Int/Real
+  // arithmetic derivation, not symbol matching. Each numeric violation must be checked in its own
+  // isolated solver slice (see buildSolverSlices) — asserting two different observed values for
+  // the same (DataType, FieldPath) in one global solve is unsat by construction regardless of any
+  // policy, which would be a false positive, not a real architectural contradiction.
+  '(declare-fun FieldValueInt (DataType FieldPath) Int)',
+  '(declare-fun FieldValueReal (DataType FieldPath) Real)',
+  '(declare-fun OperationFieldValueInt (Operation OperationPhase DataType FieldPath) Int)',
+  '(declare-fun OperationFieldValueReal (Operation OperationPhase DataType FieldPath) Real)',
   '(declare-fun EventMissingPrecedence (EventType EventType DataType) Bool)',
   '(declare-sort InterfaceType 0)',
   '(declare-fun DependencyWithoutInterface (Entity Entity InterfaceType) Bool)',

@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
-import { agIrGraphToExtractionQueryFacts, applyExtractionQueries, applyExtractionQueryFacts, loadExtractionQueries } from '../src/runtime/extraction-query.ts';
+import { agIrGraphToExtractionQueryFacts, applyExtractionQueries, applyExtractionQueryFacts, loadExtractionQueries, parseQuery } from '../src/runtime/extraction-query.ts';
 import type { GraphFact } from '../src/analyzers/plugin.ts';
 import { agIrEdge, agIrId, agIrNode, emptyAgIrGraph } from '../src/ir/builders.ts';
 import { installExtractorTemplates } from '../src/runtime/install-extractors.ts';
@@ -425,5 +425,56 @@ emit:
       event: 'AcceptConsent',
       scope: 'ConsentExampleUserSession',
     });
+  });
+
+  it('preserves numericValue when a value capture is a bare "$capture" of a JS number', () => {
+    const query = parseQuery({
+      id: 'NumericCapture',
+      owner: 'test',
+      version: 1,
+      confidence: 'definite',
+      match: { kind: 'value' },
+      emit: { kind: 'value', subject: '$subject', path: '$path', relation: '$relation', value: '$value' },
+    }, 'inline.agq.yml');
+    const facts = applyExtractionQueryFacts([query], [
+      graphFact({ subject: 'Order', path: 'total', relation: '<=', value: 1000 }, 'Tests', 'value'),
+    ]);
+    expect(facts.valueFacts).toHaveLength(1);
+    expect(facts.valueFacts[0]!.value).toBe('1000');
+    expect(facts.valueFacts[0]!.numericValue).toBe(1000);
+  });
+
+  it('does not set numericValue when the value capture is embedded in surrounding text', () => {
+    const query = parseQuery({
+      id: 'TemplatedCapture',
+      owner: 'test',
+      version: 1,
+      confidence: 'definite',
+      match: { kind: 'value' },
+      emit: { kind: 'value', subject: '$subject', path: '$path', relation: '$relation', value: 'observed:$value' },
+    }, 'inline.agq.yml');
+    const facts = applyExtractionQueryFacts([query], [
+      graphFact({ subject: 'Order', path: 'total', relation: '<=', value: 1000 }, 'Tests', 'value'),
+    ]);
+    expect(facts.valueFacts).toHaveLength(1);
+    expect(facts.valueFacts[0]!.value).toBe('observed:1000');
+    expect(facts.valueFacts[0]!.numericValue).toBeUndefined();
+  });
+
+  it('does not set numericValue when the captured property is already a non-numeric string', () => {
+    const query = parseQuery({
+      id: 'StringCapture',
+      owner: 'test',
+      version: 1,
+      confidence: 'definite',
+      match: { kind: 'value' },
+      emit: { kind: 'value', subject: '$subject', path: '$path', relation: '$relation', value: '$value' },
+    }, 'inline.agq.yml');
+    const facts = applyExtractionQueryFacts([query], [
+      graphFact({ subject: 'Cart', path: 'phase', relation: '==', value: 'SingleItem' }, 'Tests', 'value'),
+    ]);
+    expect(facts.valueFacts).toHaveLength(1);
+    expect(facts.valueFacts[0]!.value).toBe('SingleItem');
+    expect(facts.valueFacts[0]!.numericValue).toBeUndefined();
   });
 });

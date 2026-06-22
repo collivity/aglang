@@ -2,10 +2,8 @@
 import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDecl, ResourceDecl, DiPolicyDecl, DataPolicyDecl, TrustPolicyDecl, PermissionDecl, StateMachineDecl, TransitionRule, ValuePolicyDecl, OperationPolicyDecl, EventPolicyDecl, ValueExpression, PolicyValue } from '../ast.ts';
 import { BASE_SMT_DECLARATIONS } from '../stdlib/topology.ts';
 import { expandInvariantRules } from '../invariant-selectors.ts';
-
-function smtId(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_]/g, '_');
-}
+import { resolveValueExpressionFinalType, isNumericValueType } from '../checker.ts';
+import { smtId, relationSmtId, scalarSmtId, fieldPathSmtId, numericSmtLiteral, smtRelationOperator, fieldValueTerm, operationFieldValueTerm, negateRelation } from '../runtime/smt-ids.ts';
 
 export function translate(program: Program): string[] {
   const stmts: string[] = [...BASE_SMT_DECLARATIONS, ''];
@@ -311,23 +309,32 @@ export function translate(program: Program): string[] {
     stmts.push('');
   }
 
-  const fieldPathId = (expr: ValueExpression): string => `FieldPath__${smtId(expr.subject)}__${expr.path.map(smtId).join('__')}`;
-  const relationId = (relation: string): string => `Relation__${relation.replace(/[^a-zA-Z0-9_]/g, token => ({ '=': 'eq', '!': 'not', '>': 'gt', '<': 'lt' }[token] ?? '_'))}`;
-  const scalarId = (value: PolicyValue): string => {
-    if (value === null) return 'Value__null';
-    return `Value__${smtId(String(value))}`;
+  // Resolve each ValueExpression's declared field type once, to decide whether it gets the real
+  // Int/Real arithmetic encoding (FieldValueInt/Real + a genuine SMT-LIB comparison operator) or
+  // the opaque ScalarValue/ValueRelation atom encoding (string/bool/enum comparisons — unchanged).
+  const declaredDataForValueTypes = new Map<string, DataDecl>();
+  for (const d of dataTypes) declaredDataForValueTypes.set(d.name, d);
+  const numericSort = (expr: ValueExpression): 'Int' | 'Real' | undefined => {
+    const finalType = resolveValueExpressionFinalType(declaredDataForValueTypes, expr);
+    if (!isNumericValueType(finalType)) return undefined;
+    return finalType === 'Float' ? 'Real' : 'Int';
   };
+
+  const fieldPathId = (expr: ValueExpression): string => fieldPathSmtId(expr.subject, expr.path);
   const declaredFieldPaths = new Set<string>();
   const declaredRelations = new Set<string>();
   const declaredScalarValues = new Set<string>();
-  const declareValueExpr = (expr: ValueExpression): void => {
+  // Always declares the FieldPath const (needed by both encodings); only declares the
+  // ValueRelation/ScalarValue atom consts when the numeric encoding isn't being used for this expr.
+  const declareValueExpr = (expr: ValueExpression, sort: 'Int' | 'Real' | undefined): void => {
     const fieldId = fieldPathId(expr);
-    const relId = relationId(expr.relation);
-    const valId = scalarId(expr.value);
     if (!declaredFieldPaths.has(fieldId)) {
       stmts.push(`(declare-const ${fieldId} FieldPath)`);
       declaredFieldPaths.add(fieldId);
     }
+    if (sort) return;
+    const relId = relationSmtId(expr.relation);
+    const valId = scalarSmtId(expr.value);
     if (!declaredRelations.has(relId)) {
       stmts.push(`(declare-const ${relId} ValueRelation)`);
       declaredRelations.add(relId);
@@ -337,21 +344,33 @@ export function translate(program: Program): string[] {
       declaredScalarValues.add(valId);
     }
   };
+  // The condition's "this is a violation" term (requirement side): negated numeric comparison, or
+  // the existing opaque ValueContradiction atom.
+  const violationTerm = (expr: ValueExpression, sort: 'Int' | 'Real' | undefined): string =>
+    sort
+      ? `(${smtRelationOperator(negateRelation(expr.relation))} ${fieldValueTerm(expr.subject, expr.path, sort)} ${numericSmtLiteral(expr.value as number, sort)})`
+      : `(ValueContradiction ${smtId(expr.subject)} ${fieldPathId(expr)} ${relationSmtId(expr.relation)} ${scalarSmtId(expr.value)})`;
+  // The condition's "this was observed true, as stated" term (when side): positive numeric
+  // comparison, or the existing opaque ValueFact atom.
+  const observedTerm = (expr: ValueExpression, sort: 'Int' | 'Real' | undefined): string =>
+    sort
+      ? `(${smtRelationOperator(expr.relation)} ${fieldValueTerm(expr.subject, expr.path, sort)} ${numericSmtLiteral(expr.value as number, sort)})`
+      : `(ValueFact ${smtId(expr.subject)} ${fieldPathId(expr)} ${relationSmtId(expr.relation)} ${scalarSmtId(expr.value)})`;
 
   if (valuePolicies.length > 0) {
     stmts.push('; === value policy rules ===');
     for (const policy of valuePolicies) {
       stmts.push(`; --- ${policy.name} ---`);
       for (const rule of policy.rules) {
-        declareValueExpr(rule.requirement);
-        if (rule.when) declareValueExpr(rule.when);
-        const req = rule.requirement;
-        const contradiction = `(ValueContradiction ${smtId(req.subject)} ${fieldPathId(req)} ${relationId(req.relation)} ${scalarId(req.value)})`;
+        const reqSort = numericSort(rule.requirement);
+        declareValueExpr(rule.requirement, reqSort);
+        if (rule.when) declareValueExpr(rule.when, numericSort(rule.when));
+        const violation = violationTerm(rule.requirement, reqSort);
         if (rule.when) {
-          const cond = rule.when;
-          stmts.push(`(assert (=> (and (ValueFact ${smtId(cond.subject)} ${fieldPathId(cond)} ${relationId(cond.relation)} ${scalarId(cond.value)}) ${contradiction}) false))`);
+          const cond = observedTerm(rule.when, numericSort(rule.when));
+          stmts.push(`(assert (=> (and ${cond} ${violation}) false))`);
         } else {
-          stmts.push(`(assert (=> ${contradiction} false))`);
+          stmts.push(`(assert (=> ${violation} false))`);
         }
       }
     }
@@ -368,10 +387,14 @@ export function translate(program: Program): string[] {
           stmts.push(`(declare-const ${operationId} Operation)`);
           declaredOperations.add(operationId);
         }
-        declareValueExpr(rule.requirement);
         const req = rule.requirement;
+        const reqSort = numericSort(req);
+        declareValueExpr(req, reqSort);
         const phase = rule.kind === 'RequireBefore' ? 'Phase__before' : 'Phase__after';
-        stmts.push(`(assert (=> (OperationStateContradiction ${operationId} ${phase} ${smtId(req.subject)} ${fieldPathId(req)} ${relationId(req.relation)} ${scalarId(req.value)}) false))`);
+        const violation = reqSort
+          ? `(${smtRelationOperator(negateRelation(req.relation))} ${operationFieldValueTerm(rule.operation, phase, req.subject, req.path, reqSort)} ${numericSmtLiteral(req.value as number, reqSort)})`
+          : `(OperationStateContradiction ${operationId} ${phase} ${smtId(req.subject)} ${fieldPathId(req)} ${relationSmtId(req.relation)} ${scalarSmtId(req.value)})`;
+        stmts.push(`(assert (=> ${violation} false))`);
       }
     }
     stmts.push('');

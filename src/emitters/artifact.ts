@@ -1,8 +1,9 @@
 // Emits the compiled architecture.o artifact
-import type { Program } from '../ast.ts';
+import type { DataDecl, Program, ValueExpression } from '../ast.ts';
 import type { PolicyValue, ValueRelation } from '../ast.ts';
 import { translate } from '../smt/translator.ts';
 import { expandInvariantRules } from '../invariant-selectors.ts';
+import { resolveValueExpressionFinalType, isNumericValueType } from '../checker.ts';
 import { writeFileSync } from 'fs';
 
 export type ArtifactEndpoint =
@@ -37,6 +38,10 @@ export interface ArtifactValueExpression {
   path: string[];
   relation: ValueRelation;
   value: PolicyValue;
+  // Set when the resolved field type is numeric (Int/Float/Money) — lets gate.ts emit a real
+  // SMT-LIB Int/Real literal via the *Num predicates instead of an opaque ScalarValue atom.
+  // Money maps to Int (treated as integer cents, not decimal dollars).
+  valueType?: 'Int' | 'Real';
 }
 
 export interface ArchitectureArtifact {
@@ -224,6 +229,20 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
   const trustPolicies: ArchitectureArtifact['trustPolicies'] = [];
   const changePolicies: ArchitectureArtifact['changePolicies'] = [];
 
+  // Pre-pass so value/operation policy emission can resolve field types regardless of whether the
+  // referenced `data` block appears before or after the policy in the source file.
+  const declaredDataForValueTypes = new Map<string, DataDecl>();
+  for (const decl of program.declarations) {
+    if (decl.kind === 'DataDecl') declaredDataForValueTypes.set(decl.name, decl);
+  }
+  function withValueType(expr: ValueExpression): ArtifactValueExpression {
+    const finalType = resolveValueExpressionFinalType(declaredDataForValueTypes, expr);
+    return {
+      ...expr,
+      ...(isNumericValueType(finalType) ? { valueType: finalType === 'Float' ? 'Real' : 'Int' } : {}),
+    };
+  }
+
   for (const decl of program.declarations) {
     if (decl.kind === 'ComponentDecl') {
       mappings[decl.name] = decl.paths;
@@ -322,13 +341,20 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
     if (decl.kind === 'ValuePolicyDecl') {
       valuePolicies.push({
         name: decl.name,
-        rules: decl.rules.map(rule => ({ ...rule })),
+        rules: decl.rules.map(rule => ({
+          ...rule,
+          requirement: withValueType(rule.requirement),
+          ...(rule.when ? { when: withValueType(rule.when) } : {}),
+        })),
       });
     }
     if (decl.kind === 'OperationPolicyDecl') {
       operationPolicies.push({
         name: decl.name,
-        rules: decl.rules.map(rule => ({ ...rule })),
+        rules: decl.rules.map(rule => ({
+          ...rule,
+          requirement: withValueType(rule.requirement),
+        })),
       });
     }
     if (decl.kind === 'EventPolicyDecl') {
