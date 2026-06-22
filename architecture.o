@@ -142,6 +142,10 @@
     "(declare-fun ValueFact (DataType FieldPath ValueRelation ScalarValue) Bool)",
     "(declare-fun ValueContradiction (DataType FieldPath ValueRelation ScalarValue) Bool)",
     "(declare-fun OperationStateContradiction (Operation OperationPhase DataType FieldPath ValueRelation ScalarValue) Bool)",
+    "(declare-fun FieldValueInt (DataType FieldPath) Int)",
+    "(declare-fun FieldValueReal (DataType FieldPath) Real)",
+    "(declare-fun OperationFieldValueInt (Operation OperationPhase DataType FieldPath) Int)",
+    "(declare-fun OperationFieldValueReal (Operation OperationPhase DataType FieldPath) Real)",
     "(declare-fun EventMissingPrecedence (EventType EventType DataType) Bool)",
     "(declare-sort InterfaceType 0)",
     "(declare-fun DependencyWithoutInterface (Entity Entity InterfaceType) Bool)",
@@ -193,6 +197,8 @@
     "(assert (IsComp LanguageFrontend))",
     "(declare-const SmtBackend Entity)",
     "(assert (IsComp SmtBackend))",
+    "(declare-const Stdlib Entity)",
+    "(assert (IsComp Stdlib))",
     "(declare-const RuntimeCore Entity)",
     "(assert (IsComp RuntimeCore))",
     "(declare-const PolicyGates Entity)",
@@ -474,15 +480,12 @@
     "; === value policy rules ===",
     "; --- ConsentExampleCartShape ---",
     "(declare-const FieldPath__ConsentExampleSharedCart__items__length FieldPath)",
-    "(declare-const Relation__eqeq ValueRelation)",
-    "(declare-const Value__1 ScalarValue)",
     "(declare-const FieldPath__ConsentExampleSharedCart__phase FieldPath)",
+    "(declare-const Relation__eqeq ValueRelation)",
     "(declare-const Value__SingleItem ScalarValue)",
-    "(assert (=> (and (ValueFact ConsentExampleSharedCart FieldPath__ConsentExampleSharedCart__phase Relation__eqeq Value__SingleItem) (ValueContradiction ConsentExampleSharedCart FieldPath__ConsentExampleSharedCart__items__length Relation__eqeq Value__1)) false))",
+    "(assert (=> (and (ValueFact ConsentExampleSharedCart FieldPath__ConsentExampleSharedCart__phase Relation__eqeq Value__SingleItem) (distinct (FieldValueInt ConsentExampleSharedCart FieldPath__ConsentExampleSharedCart__items__length) 1)) false))",
     "(declare-const FieldPath__ConsentExampleOrder__total FieldPath)",
-    "(declare-const Relation__gteq ValueRelation)",
-    "(declare-const Value__0 ScalarValue)",
-    "(assert (=> (ValueContradiction ConsentExampleOrder FieldPath__ConsentExampleOrder__total Relation__gteq Value__0) false))",
+    "(assert (=> (< (FieldValueInt ConsentExampleOrder FieldPath__ConsentExampleOrder__total) 0) false))",
     "(declare-const FieldPath__ConsentExampleUserSession__gdprAccepted FieldPath)",
     "(declare-const Value__true ScalarValue)",
     "(assert (=> (ValueContradiction ConsentExampleUserSession FieldPath__ConsentExampleUserSession__gdprAccepted Relation__eqeq Value__true) false))",
@@ -506,6 +509,7 @@
     "CliCompiler": "src/index.ts",
     "LanguageFrontend": "src/{ast,checker,importer,import-openapi,import-tf,lexer,parser}.ts",
     "SmtBackend": "src/smt/**/*.ts",
+    "Stdlib": "src/stdlib/**/*.ts",
     "RuntimeCore": "src/runtime/{delta-assert,diff-parser,diagnostic,extraction-cache,gate}.ts",
     "PolicyGates": "src/runtime/{contract-gate,workflow-gate,change-gate}.ts",
     "SemanticQueryEngine": "src/runtime/extraction-query.ts",
@@ -1202,7 +1206,8 @@
               "length"
             ],
             "relation": "==",
-            "value": 1
+            "value": 1,
+            "valueType": "Int"
           },
           "when": {
             "subject": "ConsentExampleSharedCart",
@@ -1221,7 +1226,8 @@
               "total"
             ],
             "relation": ">=",
-            "value": 0
+            "value": 0,
+            "valueType": "Int"
           }
         },
         {
@@ -1336,6 +1342,7 @@
     "CliCompiler": "node_runtime",
     "LanguageFrontend": "node_runtime",
     "SmtBackend": "node_runtime",
+    "Stdlib": "node_runtime",
     "RuntimeCore": "node_runtime",
     "PolicyGates": "node_runtime",
     "SemanticQueryEngine": "node_runtime",
@@ -1583,6 +1590,11 @@
           "kind": "RequireTouched",
           "required": "ArchitectureSpec",
           "trigger": "SmtBackend"
+        },
+        {
+          "kind": "RequireTouched",
+          "required": "ArchitectureSpec",
+          "trigger": "Stdlib"
         },
         {
           "kind": "RequireTouched",

@@ -92,6 +92,9 @@ These logical components map your code files to the architecture nodes above.
   - [UiWorkbenchBoundary] **FORBIDDEN**: `UiWorkbench` must NOT directly access `SmtBackend`
   - [VscodeApiBoundary] **FORBIDDEN**: `VscodeExtension` must NOT directly access `SmtBackend`
 
+### `Stdlib`
+- **File glob**: `src/stdlib/**/*.ts`
+
 ### `RuntimeCore`
 - **File glob**: `src/runtime/{delta-assert,diff-parser,diagnostic,extraction-cache,gate}.ts`
 - **Rules affecting this component:**
@@ -570,6 +573,7 @@ These are the canonical data shapes for this system.
 - **REQUIRE TOUCHED** `ArchitectureSpec` when `SemanticQueryEngine` changes
 - **REQUIRE TOUCHED** `ArchitectureSpec` when `StateMachineRuntime` changes
 - **REQUIRE TOUCHED** `ArchitectureSpec` when `SmtBackend` changes
+- **REQUIRE TOUCHED** `ArchitectureSpec` when `Stdlib` changes
 - **REQUIRE TOUCHED** `ArchitectureSpec` when `Emitters` changes
 - **REQUIRE TOUCHED** `CompiledArchitecture` when `ArchitectureSpec` changes
 - **REQUIRE TOUCHED** `AgentContext` when `ArchitectureSpec` changes

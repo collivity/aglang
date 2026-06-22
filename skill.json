@@ -631,5 +631,12 @@
     "probable": "WARNING — Pattern is likely present (e.g. new-instantiation) but not certain. Non-blocking.",
     "possible": "INFO — Pattern may be present. Informational only. Never blocks."
   },
-  "advisory_note": "Enforcement is declaration-specific. Flow deny invariants, state machines, and change_policy rules are Z3-backed. Reachability, require-flow paths, require-operation placement, propagated dataflow, trust boundary, DI, contract, workflow, value, operation, and event policies are enforced when extractors or reviewed queries produce definite evidence. Auth, encryption, dependency, operation, value, operation_event, and event facts must come from deterministic extractors or reviewed .agq.yml files, not LLM calls during check. Ask before changing .ag or .agq.yml files to satisfy a require or rich policy violation."
+  "advisory_note": "Enforcement is declaration-specific. Flow deny invariants, state machines, and change_policy rules are Z3-backed. Reachability, require-flow paths, require-operation placement, propagated dataflow, trust boundary, DI, contract, workflow, value, operation, and event policies are enforced when extractors or reviewed queries produce definite evidence. Auth, encryption, dependency, operation, value, operation_event, and event facts must come from deterministic extractors or reviewed .agq.yml files, not LLM calls during check. Ask before changing .ag or .agq.yml files to satisfy a require or rich policy violation.",
+  "known_limitations": [
+    "Instance-variable-mediated calls (e.g. `x := New(); x.Method()`, `this.repo.save()` through an injected field) are not resolved in any supported language. Only direct/free-function/static calls and traced imports reach confidence: definite. A clean check result does not mean every real call graph edge was seen.",
+    "Go's interface satisfaction is a structural name+arity heuristic (no parameter/return type comparison, no embedded-interface handling) and is always confidence: probable, never definite.",
+    "Python fact quality depends on the codebase using type hints; untyped Python yields weaker evidence than typed Python or statically-typed languages.",
+    "Cross-file import/call and extends/implements resolution exist for all 8 supported languages, but coverage and maturity vary by language — see docs/extractors.md for the current per-language breakdown rather than assuming uniform depth.",
+    "Treat an empty violations[] list as \"nothing the extractors could see was wrong,\" not \"this code is architecturally correct.\" Coverage gaps fail silent, not loud."
+  ]
 }

@@ -101,6 +101,15 @@ component SmtBackend {
   paths: "src/smt/**/*.ts"
 }
 
+// Foundational SMT theory (sorts, base predicates, valid-value enums) that SmtBackend,
+// RuntimeCore, and LanguageFrontend's checker all depend on. Was never brought into the
+// self-hosted model -- found while adding FieldValueInt/Real, the first new base predicate
+// family added since aglang started checking its own architecture.
+component Stdlib {
+  runs_on: node_runtime
+  paths: "src/stdlib/**/*.ts"
+}
+
 component RuntimeCore {
   runs_on: node_runtime
   paths: "src/runtime/{delta-assert,diff-parser,diagnostic,extraction-cache,gate}.ts"
@@ -469,6 +478,7 @@ change_policy DocsFreshness {
   require touched ArchitectureSpec when touched SemanticQueryEngine
   require touched ArchitectureSpec when touched StateMachineRuntime
   require touched ArchitectureSpec when touched SmtBackend
+  require touched ArchitectureSpec when touched Stdlib
   require touched ArchitectureSpec when touched Emitters
   require touched CompiledArchitecture when touched ArchitectureSpec
   require touched AgentContext when touched ArchitectureSpec
