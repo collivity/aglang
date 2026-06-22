@@ -265,6 +265,11 @@ component DocsWorkflow {
   paths: ".github/workflows/docs.yml"
 }
 
+component CiWorkflow {
+  runs_on: github_actions
+  paths: ".github/workflows/ci.yml"
+}
+
 component VscodeExtension {
   runs_on: node_runtime
   paths: "editors/vscode-aglang/src/**/*.ts"
@@ -442,6 +447,11 @@ workflow_policy ReleaseSafety {
   require before ReleaseWorkflow "npm pack --dry-run" -> "npm publish"
   require before ReleaseWorkflow "npm run docs:build" -> "npm publish"
   deny permission * contents: write when pull_request
+}
+
+workflow_policy CiSafety {
+  require before CiWorkflow "npm run typecheck" -> "npm run build"
+  require before CiWorkflow "npm run build" -> "npm run arch:check"
 }
 
 change_policy DocsFreshness {

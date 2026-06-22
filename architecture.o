@@ -257,6 +257,8 @@
     "(assert (IsComp ReleaseWorkflow))",
     "(declare-const DocsWorkflow Entity)",
     "(assert (IsComp DocsWorkflow))",
+    "(declare-const CiWorkflow Entity)",
+    "(assert (IsComp CiWorkflow))",
     "(declare-const VscodeExtension Entity)",
     "(assert (IsComp VscodeExtension))",
     "(declare-const Tests Entity)",
@@ -536,6 +538,7 @@
     "ExampleSpecs": "examples/**/*.ag",
     "ReleaseWorkflow": ".github/workflows/release.yml",
     "DocsWorkflow": ".github/workflows/docs.yml",
+    "CiWorkflow": ".github/workflows/ci.yml",
     "VscodeExtension": "editors/vscode-aglang/src/**/*.ts",
     "Tests": "tests/**/*.ts",
     "ArchitectureSpec": "architecture.ag",
@@ -1365,6 +1368,7 @@
     "ExampleSpecs": "node_runtime",
     "ReleaseWorkflow": "github_actions",
     "DocsWorkflow": "github_actions",
+    "CiWorkflow": "github_actions",
     "VscodeExtension": "node_runtime",
     "Tests": "node_runtime",
     "ArchitectureSpec": "node_runtime",
@@ -1482,6 +1486,23 @@
           "when": {
             "kind": "pull_request"
           }
+        }
+      ]
+    },
+    {
+      "name": "CiSafety",
+      "rules": [
+        {
+          "kind": "BeforeRule",
+          "workflow": "CiWorkflow",
+          "before": "npm run typecheck",
+          "after": "npm run build"
+        },
+        {
+          "kind": "BeforeRule",
+          "workflow": "CiWorkflow",
+          "before": "npm run build",
+          "after": "npm run arch:check"
         }
       ]
     }

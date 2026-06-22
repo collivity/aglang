@@ -1,5 +1,10 @@
 // backend/components.ag — .NET API layer components and invariants
 
+contract CaptureSessionsApi {
+  GET  "/api/products/{productId}/capture-sessions"    -> CaptureSessionDto[]
+  POST "/api/products/{productId}/capture-sessions"    -> CaptureSessionDto
+}
+
 component ApiControllers {
   runs_on: api_backend
   paths:   "web/api/Controllers/**/*.cs"

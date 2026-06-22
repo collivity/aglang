@@ -278,6 +278,9 @@ These logical components map your code files to the architecture nodes above.
 ### `DocsWorkflow`
 - **File glob**: `.github/workflows/docs.yml`
 
+### `CiWorkflow`
+- **File glob**: `.github/workflows/ci.yml`
+
 ### `VscodeExtension`
 - **File glob**: `editors/vscode-aglang/src/**/*.ts`
 - **Rules affecting this component:**
@@ -542,6 +545,10 @@ These are the canonical data shapes for this system.
 - **REQUIRE BEFORE** `ReleaseWorkflow`: `npm pack --dry-run` → `npm publish`
 - **REQUIRE BEFORE** `ReleaseWorkflow`: `npm run docs:build` → `npm publish`
 - **DENY** permission `*` `contents: write` when pull_request
+
+### `CiSafety`
+- **REQUIRE BEFORE** `CiWorkflow`: `npm run typecheck` → `npm run build`
+- **REQUIRE BEFORE** `CiWorkflow`: `npm run build` → `npm run arch:check`
 
 ## Change Policies
 
