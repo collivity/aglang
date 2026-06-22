@@ -78,6 +78,13 @@ export const DECL_QUERY = `
 (class_definition name: (identifier) @type_name)
 ` as const;
 
+// class Derived(Base1, Base2): ...  →  base_name = Base1, Base2
+// Python has no separate interface concept — multiple inheritance is just multiple bases.
+export const INHERITANCE_QUERY = `
+(class_definition
+  superclasses: (argument_list (identifier) @base_name))
+` as const;
+
 // ── Infrastructure call expressions ──────────────────────────────────────────
 // MongoClient(uri)  redis.Redis(...)  create_engine(...)  store.save_order(...)
 export const CALL_EXPR_QUERY = `

@@ -132,6 +132,9 @@ component ExtractorAnalyzers {
   paths: "src/analyzers/**/*.ts"
 }
 
+// Includes cross-file-linker.ts (imports/calls resolution), specifier-resolvers.ts,
+// and abstraction-resolver.ts (extends/implements graph + Go's structural interface
+// heuristic) alongside the core graph types/builders/lowerer.
 component IrCore {
   runs_on: node_runtime
   paths: "src/ir/**/*.ts"

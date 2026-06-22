@@ -34,7 +34,7 @@ export function emitSkillManifest(artifact: ArchitectureArtifact, archPath: stri
 
   return {
     skill: 'aglang-architecture-guard',
-    version: '1.1',
+    version: '1.2',
     description:
       'Verifies extracted and reviewed architecture facts against Z3-backed rules and deterministic policies. ' +
       'Use check_file or check_project_diff while coding, then explain_violation to repair failed checks from stable ids.',

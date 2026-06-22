@@ -24,6 +24,15 @@ export const DECL_QUERY = `
   name: (type_identifier) @type_name)
 ` as const;
 
+// class X: Base, Repo {}  — Swift doesn't syntactically distinguish a superclass from a
+// protocol in the inheritance list, so this is treated uniformly as `implements` (a
+// documented simplification — disambiguating would need declaration-kind tracking).
+export const INHERITANCE_QUERY = `
+(class_declaration
+  (inheritance_specifier
+    inherits_from: (user_type (type_identifier) @interface_name)))
+` as const;
+
 // repo.save(order)   OrderRepository.create()   save()
 export const CALL_EXPR_QUERY = `
 (call_expression

@@ -16,7 +16,7 @@ import type { AgIrEdgeKind, AgIrEvidence, AgIrGraph, AgIrNodeKind } from '../../
 
 export type TreeSitterIrLanguage = 'typescript' | 'javascript' | 'python' | 'csharp' | 'golang' | 'rust' | 'java' | 'swift';
 
-type SemanticIntent = 'imports' | 'calls' | 'assignments' | 'routes' | 'types';
+type SemanticIntent = 'imports' | 'calls' | 'assignments' | 'routes' | 'types' | 'inheritance';
 
 interface QuerySpec {
   intent: SemanticIntent;
@@ -68,6 +68,7 @@ const QUERY_REGISTRY: Record<TreeSitterIrLanguage, QuerySpec[]> = {
     { intent: 'routes', queryName: 'FLASK_ROUTE_QUERY', querySource: pythonQueries.FLASK_ROUTE_QUERY },
     { intent: 'routes', queryName: 'DJANGO_PATH_QUERY', querySource: pythonQueries.DJANGO_PATH_QUERY },
     { intent: 'types', queryName: 'DECL_QUERY', querySource: pythonQueries.DECL_QUERY },
+    { intent: 'inheritance', queryName: 'INHERITANCE_QUERY', querySource: pythonQueries.INHERITANCE_QUERY },
   ],
   csharp: [
     { intent: 'imports', queryName: 'USING_QUERY', querySource: csharpQueries.USING_QUERY },
@@ -91,6 +92,7 @@ const QUERY_REGISTRY: Record<TreeSitterIrLanguage, QuerySpec[]> = {
     { intent: 'calls', queryName: 'CALL_QUERY', querySource: rustQueries.CALL_QUERY },
     { intent: 'routes', queryName: 'ROUTE_ATTR_QUERY', querySource: rustQueries.ROUTE_ATTR_QUERY },
     { intent: 'types', queryName: 'DECL_QUERY', querySource: rustQueries.DECL_QUERY },
+    { intent: 'inheritance', queryName: 'INHERITANCE_QUERY', querySource: rustQueries.INHERITANCE_QUERY },
   ],
   java: [
     { intent: 'imports', queryName: 'IMPORT_QUERY', querySource: javaQueries.IMPORT_QUERY },
@@ -98,11 +100,13 @@ const QUERY_REGISTRY: Record<TreeSitterIrLanguage, QuerySpec[]> = {
     { intent: 'calls', queryName: 'NEW_OBJECT_QUERY', querySource: javaQueries.NEW_OBJECT_QUERY },
     { intent: 'routes', queryName: 'ANNOTATION_QUERY', querySource: javaQueries.ANNOTATION_QUERY },
     { intent: 'types', queryName: 'DECL_QUERY', querySource: javaQueries.DECL_QUERY },
+    { intent: 'inheritance', queryName: 'INHERITANCE_QUERY', querySource: javaQueries.INHERITANCE_QUERY },
   ],
   swift: [
     { intent: 'imports', queryName: 'IMPORT_QUERY', querySource: swiftQueries.IMPORT_QUERY },
     { intent: 'calls', queryName: 'CALL_EXPR_QUERY', querySource: swiftQueries.CALL_EXPR_QUERY },
     { intent: 'types', queryName: 'DECL_QUERY', querySource: swiftQueries.DECL_QUERY },
+    { intent: 'inheritance', queryName: 'INHERITANCE_QUERY', querySource: swiftQueries.INHERITANCE_QUERY },
   ],
 };
 
@@ -275,7 +279,9 @@ function addRouteEdge(graph: AgIrGraph, input: {
   });
 }
 
-function captureToEdge(query: QuerySpec, row: CaptureMatch[], file: string, language: TreeSitterIrLanguage, fileNodeId: string, sourceLines: string[]): { label: string; edge: AgIrEdgeKind; node: AgIrNodeKind; capture: CaptureMatch; properties?: Record<string, string | number | boolean | string[]> } | undefined {
+type SemanticEdgeResult = { label: string; edge: AgIrEdgeKind; node: AgIrNodeKind; capture: CaptureMatch; properties?: Record<string, string | number | boolean | string[]> };
+
+function captureToEdge(query: QuerySpec, row: CaptureMatch[], file: string, language: TreeSitterIrLanguage, fileNodeId: string, sourceLines: string[]): SemanticEdgeResult | SemanticEdgeResult[] | undefined {
   if (query.intent === 'imports') {
     const capture = first(row, 'module_specifier', 'module_name', 'import_path');
     if (!capture) return undefined;
@@ -339,6 +345,24 @@ function captureToEdge(query: QuerySpec, row: CaptureMatch[], file: string, lang
     const capture = first(row, 'class_name', 'type_name', 'property_name', 'field_name', 'attribute_name');
     if (!capture) return undefined;
     return { label: capture.text, edge: 'declares', node: 'symbol', capture };
+  }
+  if (query.intent === 'inheritance') {
+    // From is always the FILE node (same convention as every other intent here), not the
+    // specific declaring class/struct — a file with multiple types each extending something
+    // different loses per-type precision. Acceptable simplification: resolution only needs
+    // the target name, and a file's owning component is already correct either way.
+    // Returns one result PER base/interface capture in the row, not just the first — a single
+    // `implements A, B, C` clause produces multiple captures on the same source line, and the
+    // generic one-result-per-row model elsewhere in this file would silently drop B and C.
+    const results: SemanticEdgeResult[] = [];
+    for (const capture of row) {
+      if (capture.name === 'base_name') {
+        results.push({ label: capture.text, edge: 'extends', node: 'type', capture, properties: { baseType: capture.text } });
+      } else if (capture.name === 'interface_name') {
+        results.push({ label: capture.text, edge: 'implements', node: 'type', capture, properties: { interface: capture.text } });
+      }
+    }
+    return results.length > 0 ? results : undefined;
   }
   if (query.intent === 'assignments') {
     const capture = first(row, 'property', 'field', 'value');
@@ -458,24 +482,26 @@ export function extractTreeSitterIrForFile(file: string, componentName?: string)
         continue;
       }
       for (const row of capturesByRow(captures)) {
-        const semantic = captureToEdge(query, row, file, languageName, fileNodeId, sourceLines);
-        if (!semantic) continue;
-        addSemanticEdge(graph, {
-          edgeKind: semantic.edge,
-          from: fileNodeId,
-          targetKind: semantic.node,
-          targetLabel: semantic.label,
-          targetProperties: {
-            language: languageName,
-            intent: query.intent,
-          },
-          edgeProperties: {
-            intent: query.intent,
-            query: query.queryName,
-            ...(semantic.properties ?? {}),
-          },
-          evidence: evidence(file, languageName, query, semantic.capture),
-        });
+        const result = captureToEdge(query, row, file, languageName, fileNodeId, sourceLines);
+        if (!result) continue;
+        for (const semantic of Array.isArray(result) ? result : [result]) {
+          addSemanticEdge(graph, {
+            edgeKind: semantic.edge,
+            from: fileNodeId,
+            targetKind: semantic.node,
+            targetLabel: semantic.label,
+            targetProperties: {
+              language: languageName,
+              intent: query.intent,
+            },
+            edgeProperties: {
+              intent: query.intent,
+              query: query.queryName,
+              ...(semantic.properties ?? {}),
+            },
+            evidence: evidence(file, languageName, query, semantic.capture),
+          });
+        }
       }
     }
 

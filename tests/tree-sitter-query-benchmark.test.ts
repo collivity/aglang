@@ -36,6 +36,7 @@ const cases: QueryCase[] = [
   { language: 'python', queryName: 'FLASK_ROUTE_QUERY', querySource: pythonQueries.FLASK_ROUTE_QUERY, snippet: `@app.route("/orders", methods=["POST"])\ndef create_order():\n    pass`, minCaptures: 2 },
   { language: 'python', queryName: 'DJANGO_PATH_QUERY', querySource: pythonQueries.DJANGO_PATH_QUERY, snippet: `path("orders/", orders_view)`, minCaptures: 3 },
   { language: 'python', queryName: 'CALL_EXPR_QUERY', querySource: pythonQueries.CALL_EXPR_QUERY, snippet: `create_engine("sqlite:///")`, minCaptures: 1 },
+  { language: 'python', queryName: 'INHERITANCE_QUERY', querySource: pythonQueries.INHERITANCE_QUERY, snippet: `class Derived(Base1, Base2):\n    pass`, minCaptures: 2 },
 
   { language: 'csharp', queryName: 'USING_QUERY', querySource: csharpQueries.USING_QUERY, snippet: `using MongoDB.Driver;`, minCaptures: 1 },
   { language: 'csharp', queryName: 'ATTRIBUTE_QUERY', querySource: csharpQueries.ATTRIBUTE_QUERY, snippet: `[HttpGet("items")]\npublic void Get() {}`, minCaptures: 2 },
@@ -53,14 +54,17 @@ const cases: QueryCase[] = [
   { language: 'java', queryName: 'ANNOTATION_QUERY', querySource: javaQueries.ANNOTATION_QUERY, snippet: `@GetMapping("/items")\nclass OrdersController {}`, minCaptures: 2 },
   { language: 'java', queryName: 'NEW_OBJECT_QUERY', querySource: javaQueries.NEW_OBJECT_QUERY, snippet: `class App { void go() { var c = new MongoClient(); } }`, minCaptures: 1 },
   { language: 'java', queryName: 'METHOD_INVOCATION_QUERY', querySource: javaQueries.METHOD_INVOCATION_QUERY, snippet: `class App { void go() { MongoClients.create(); } }`, minCaptures: 2 },
+  { language: 'java', queryName: 'INHERITANCE_QUERY', querySource: javaQueries.INHERITANCE_QUERY, snippet: `class Derived extends Base implements IRepo, IOther {}`, minCaptures: 3 },
 
   { language: 'rust', queryName: 'USE_QUERY', querySource: rustQueries.USE_QUERY, snippet: `use sqlx::PgPool;`, minCaptures: 1 },
   { language: 'rust', queryName: 'ROUTE_ATTR_QUERY', querySource: rustQueries.ROUTE_ATTR_QUERY, snippet: `#[get("/items")]\nasync fn list_items() {}`, minCaptures: 2 },
   { language: 'rust', queryName: 'CALL_QUERY', querySource: rustQueries.CALL_QUERY, snippet: `fn main() { PgPool::connect(); }`, minCaptures: 2 },
+  { language: 'rust', queryName: 'INHERITANCE_QUERY', querySource: rustQueries.INHERITANCE_QUERY, snippet: `trait Repo {}\nstruct OrderRepository {}\nimpl Repo for OrderRepository {}`, minCaptures: 2 },
 
   { language: 'swift', queryName: 'IMPORT_QUERY', querySource: swiftQueries.IMPORT_QUERY, snippet: `import Foundation`, minCaptures: 1 },
   { language: 'swift', queryName: 'DECL_QUERY', querySource: swiftQueries.DECL_QUERY, snippet: `class HomeViewController {}\nstruct ItemView {}`, minCaptures: 2 },
   { language: 'swift', queryName: 'CALL_EXPR_QUERY', querySource: swiftQueries.CALL_EXPR_QUERY, snippet: `client.get()`, minCaptures: 2 },
+  { language: 'swift', queryName: 'INHERITANCE_QUERY', querySource: swiftQueries.INHERITANCE_QUERY, snippet: `protocol Repo {}\nclass OrderRepository: Base, Repo {}`, minCaptures: 2 },
 ];
 
 describe('tree-sitter query benchmark', () => {

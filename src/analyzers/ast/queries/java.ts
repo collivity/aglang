@@ -14,10 +14,17 @@ export const PACKAGE_DECLARATION_QUERY = `
   (scoped_identifier) @package_name)
 ` as const;
 
-// ── Declarations (classes/methods this file defines) ─────────────────────────
+// ── Declarations (classes/interfaces/methods this file defines) ──────────────
 export const DECL_QUERY = `
 (class_declaration name: (identifier) @type_name)
+(interface_declaration name: (identifier) @type_name)
 (method_declaration name: (identifier) @type_name)
+` as const;
+
+// class Derived extends Base implements IRepo, IOther {}
+export const INHERITANCE_QUERY = `
+(class_declaration superclass: (superclass (type_identifier) @base_name))
+(class_declaration interfaces: (super_interfaces (type_list (type_identifier) @interface_name)))
 ` as const;
 
 // ── Annotation (route) detection ──────────────────────────────────────────────
