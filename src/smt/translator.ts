@@ -3,7 +3,7 @@ import type { Program, NodeDecl, ComponentDecl, InvariantDecl, EnumDecl, DataDec
 import { BASE_SMT_DECLARATIONS } from '../stdlib/topology.ts';
 import { expandInvariantRules } from '../invariant-selectors.ts';
 import { resolveValueExpressionFinalType, isNumericValueType } from '../checker.ts';
-import { smtId, relationSmtId, scalarSmtId, fieldPathSmtId, numericSmtLiteral, smtRelationOperator, fieldValueTerm, operationFieldValueTerm, negateRelation } from '../runtime/smt-ids.ts';
+import { smtId, relationSmtId, scalarSmtId, fieldPathSmtId, numericSmtLiteral, smtRelationOperator, fieldValueTerm, operationFieldValueTerm, negateRelation, transitionPermanentConstraint } from './smt-ids.ts';
 
 export function translate(program: Program): string[] {
   const stmts: string[] = [...BASE_SMT_DECLARATIONS, ''];
@@ -270,48 +270,10 @@ export function translate(program: Program): string[] {
     stmts.push('');
   }
 
-  if (stateMachines.length > 0) {
-    stmts.push('; === state machine transition rules ===');
-    const declaredStateValues = new Set<string>();
-    for (const machine of stateMachines) {
-      const dataDecl = dataTypes.find(d => d.name === machine.onType);
-      const field = dataDecl?.fields.find(f => f.key === machine.onField);
-      const enumName = field?.typeExpr.replace(/^Optional<(.+)>$/, '$1').trim();
-      const enumDecl = enums.find(e => e.name === enumName);
-      if (!enumDecl) continue;
-      const stateNamespace = enumName!;
-      const fieldId = `Field__${smtId(machine.onType)}__${smtId(machine.onField)}`;
-      const stateId = (value: string): string => `State__${smtId(stateNamespace)}__${smtId(value)}`;
-      stmts.push(`; --- ${machine.name} ---`);
-      stmts.push(`(declare-const ${fieldId} Field)`);
-      for (const value of enumDecl.values) {
-        const id = stateId(value);
-        if (!declaredStateValues.has(id)) {
-          stmts.push(`(declare-const ${id} StateValue)`);
-          declaredStateValues.add(id);
-        }
-      }
-      const denyTransition = (from: string, to: string): void => {
-        stmts.push(`(assert (=> (Transition ${smtId(machine.onType)} ${fieldId} ${stateId(from)} ${stateId(to)}) false))`);
-      };
-      const matches = (rule: TransitionRule, from: string, to: string): boolean =>
-        (rule.from === '*' || rule.from === from) && (rule.to === '*' || rule.to === to);
-      const allowRules = machine.transitions.filter(t => t.kind === 'allow');
-      for (const from of enumDecl.values) {
-        for (const to of enumDecl.values) {
-          if (from === to) continue;
-          const explicitlyDenied = machine.transitions.some(t => t.kind === 'deny' && matches(t, from, to));
-          const allowed = allowRules.length === 0 || allowRules.some(t => matches(t, from, to));
-          if (explicitlyDenied || !allowed) denyTransition(from, to);
-        }
-      }
-    }
-    stmts.push('');
-  }
-
   // Resolve each ValueExpression's declared field type once, to decide whether it gets the real
   // Int/Real arithmetic encoding (FieldValueInt/Real + a genuine SMT-LIB comparison operator) or
   // the opaque ScalarValue/ValueRelation atom encoding (string/bool/enum comparisons — unchanged).
+  // Moved before the state-machine block so guarded transitions can reuse it too.
   const declaredDataForValueTypes = new Map<string, DataDecl>();
   for (const d of dataTypes) declaredDataForValueTypes.set(d.name, d);
   const numericSort = (expr: ValueExpression): 'Int' | 'Real' | undefined => {
@@ -344,6 +306,56 @@ export function translate(program: Program): string[] {
       declaredScalarValues.add(valId);
     }
   };
+  if (stateMachines.length > 0) {
+    stmts.push('; === state machine transition rules ===');
+    const declaredStateValues = new Set<string>();
+    for (const machine of stateMachines) {
+      const dataDecl = dataTypes.find(d => d.name === machine.onType);
+      const field = dataDecl?.fields.find(f => f.key === machine.onField);
+      const enumName = field?.typeExpr.replace(/^Optional<(.+)>$/, '$1').trim();
+      const enumDecl = enums.find(e => e.name === enumName);
+      if (!enumDecl) continue;
+      const stateNamespace = enumName!;
+      const fieldId = `Field__${smtId(machine.onType)}__${smtId(machine.onField)}`;
+      const stateId = (value: string): string => `State__${smtId(stateNamespace)}__${smtId(value)}`;
+      stmts.push(`; --- ${machine.name} ---`);
+      stmts.push(`(declare-const ${fieldId} Field)`);
+      for (const value of enumDecl.values) {
+        const id = stateId(value);
+        if (!declaredStateValues.has(id)) {
+          stmts.push(`(declare-const ${id} StateValue)`);
+          declaredStateValues.add(id);
+        }
+      }
+      const denyTransition = (from: string, to: string): void => {
+        stmts.push(`(assert (=> (Transition ${smtId(machine.onType)} ${fieldId} ${stateId(from)} ${stateId(to)}) false))`);
+      };
+      const denyTransitionGuarded = (from: string, to: string, guard: ValueExpression): void => {
+        const sort = numericSort(guard);
+        declareValueExpr(guard, sort);
+        const transitionTerm = `(Transition ${smtId(machine.onType)} ${fieldId} ${stateId(from)} ${stateId(to)})`;
+        stmts.push(transitionPermanentConstraint(transitionTerm, { ...guard, valueType: sort }));
+      };
+      const matches = (rule: TransitionRule, from: string, to: string): boolean =>
+        (rule.from === '*' || rule.from === from) && (rule.to === '*' || rule.to === to);
+      const allowRules = machine.transitions.filter(t => t.kind === 'allow');
+      for (const from of enumDecl.values) {
+        for (const to of enumDecl.values) {
+          if (from === to) continue;
+          const matchingDenyRules = machine.transitions.filter(t => t.kind === 'deny' && matches(t, from, to));
+          const unconditionalDenyRules = matchingDenyRules.filter(t => !t.guard);
+          const guardedDenyRules = matchingDenyRules.filter(t => t.guard);
+          const allowed = allowRules.length === 0 || allowRules.some(t => matches(t, from, to));
+          // Lack of allow-coverage is an unconditional reason to deny regardless of any guard on
+          // an explicit deny rule for this pair -- a guard narrows when an *explicit* deny fires,
+          // it doesn't carve out allowance that the spec never granted.
+          if (unconditionalDenyRules.length > 0 || !allowed) denyTransition(from, to);
+          for (const rule of guardedDenyRules) denyTransitionGuarded(from, to, rule.guard!);
+        }
+      }
+    }
+    stmts.push('');
+  }
   // The condition's "this is a violation" term (requirement side): negated numeric comparison, or
   // the existing opaque ValueContradiction atom.
   const violationTerm = (expr: ValueExpression, sort: 'Int' | 'Real' | undefined): string =>

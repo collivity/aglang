@@ -75,7 +75,7 @@ export interface ArchitectureArtifact {
     name: string;
     onType: string;
     onField: string;
-    transitions: Array<{ kind: 'allow' | 'deny'; from: string; to: string }>;
+    transitions: Array<{ kind: 'allow' | 'deny'; from: string; to: string; guard?: ArtifactValueExpression }>;
   }>;
   valuePolicies: Array<{
     name: string;
@@ -335,7 +335,12 @@ export function emitArtifact(program: Program, sourcePath: string): Architecture
         name: decl.name,
         onType: decl.onType,
         onField: decl.onField,
-        transitions: decl.transitions.map(t => ({ kind: t.kind, from: t.from, to: t.to })),
+        transitions: decl.transitions.map(t => ({
+          kind: t.kind,
+          from: t.from,
+          to: t.to,
+          ...(t.guard ? { guard: withValueType(t.guard) } : {}),
+        })),
       });
     }
     if (decl.kind === 'ValuePolicyDecl') {

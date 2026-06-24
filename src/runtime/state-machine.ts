@@ -1,6 +1,7 @@
 import type { ArchitectureArtifact } from '../emitters/artifact.ts';
-import type { TransitionFact } from './extraction-query.ts';
+import type { TransitionFact, ValueFact } from './extraction-query.ts';
 import { isBlocking } from '../analyzers/plugin.ts';
+import { factSatisfies, conditionObservedAssertion } from '../smt/smt-ids.ts';
 
 function smtId(name: string): string {
   return name.replace(/[^a-zA-Z0-9_]/g, '_');
@@ -24,15 +25,27 @@ export function findMachineForTransition(
   return (artifact.stateMachines ?? []).find(sm => sm.onType === fact.data && sm.onField === fact.field);
 }
 
+// A guarded deny rule only counts as matching when some ValueFact in the same check-run batch
+// satisfies its guard (reusing value_policy.when's exact subject+path correlation pattern via
+// factSatisfies) -- without guardFacts (or with no satisfying fact), a guarded rule is treated as
+// not matching, i.e. fail-closed. This deliberately does not disambiguate multiple instances of
+// the same data type in one batch; see docs/extractors.md for the documented limitation.
+export function guardSatisfied(rule: { guard?: { subject: string; path: string[]; relation: string; value: unknown } }, guardFacts: ValueFact[] | undefined): boolean {
+  if (!rule.guard) return true;
+  if (!guardFacts) return false;
+  return guardFacts.some(f => factSatisfies(f, rule.guard!));
+}
+
 export function transitionAllowed(
   machine: ArchitectureArtifact['stateMachines'][number],
   fact: { from?: string; to: string },
+  guardFacts?: ValueFact[],
 ): boolean {
   if (fact.from) {
-    if (machine.transitions.some(t => t.kind === 'deny' && transitionRuleMatches(t, fact))) {
+    if (machine.transitions.some(t => t.kind === 'deny' && transitionRuleMatches(t, fact) && guardSatisfied(t, guardFacts))) {
       return false;
     }
-  } else if (machine.transitions.some(t => t.kind === 'deny' && t.from === '*' && (t.to === '*' || t.to === fact.to))) {
+  } else if (machine.transitions.some(t => t.kind === 'deny' && t.from === '*' && (t.to === '*' || t.to === fact.to) && guardSatisfied(t, guardFacts))) {
     return false;
   }
   const allowRules = machine.transitions.filter(t => t.kind === 'allow');
@@ -55,6 +68,7 @@ export function shouldBlockTransitionFact(
   fact: TransitionFact,
   artifact: ArchitectureArtifact,
   strict: boolean,
+  guardFacts?: ValueFact[],
 ): boolean {
   if (!isBlocking({
     from: fact.data,
@@ -67,7 +81,7 @@ export function shouldBlockTransitionFact(
   }
   const machine = findMachineForTransition(artifact, fact);
   if (!machine) return Boolean(fact.from);
-  return !transitionAllowed(machine, fact);
+  return !transitionAllowed(machine, fact, guardFacts);
 }
 
 export function buildTransitionDeltaAssertion(
@@ -80,18 +94,49 @@ export function buildTransitionDeltaAssertion(
   return `(assert (Transition ${smtId(fact.data)} Field__${smtId(fact.data)}__${smtId(fact.field)} ${stateSmtId(artifact, fact.data, fact.field, fact.from)} ${stateSmtId(artifact, fact.data, fact.field, fact.to)}))`;
 }
 
-/** Emit one delta assertion per illegal source state when the extracted transition has no guard. */
+/** Emit one delta assertion per illegal source state when the extracted transition's previous
+ * value couldn't be resolved (unrelated to machine `when` guards — "guard" here means the fact's
+ * own from-state is unknown, the pre-existing sense of the word in this function). */
+/** For each guarded deny rule matching this transition with a satisfying correlated ValueFact,
+ * pin that fact's observed value to the guard's FieldValueInt/Real (or ValueFact atom) term —
+ * without this, the permanent constraint's guard term stays unconstrained and the conjunction
+ * can never go UNSAT, by design (fail-closed: no evidence, no block). */
+// Always called with a resolved `from` (both call sites in buildTransitionDeltaAssertions below
+// resolve it before calling), so a plain transitionRuleMatches check is sufficient.
+function buildGuardConditionAssertions(
+  artifact: ArchitectureArtifact,
+  fact: { data: string; field: string; from: string; to: string },
+  guardFacts: ValueFact[] | undefined,
+): string[] {
+  if (!guardFacts) return [];
+  const machine = findMachineForTransition(artifact, fact);
+  if (!machine) return [];
+  const out: string[] = [];
+  for (const rule of machine.transitions) {
+    if (rule.kind !== 'deny' || !rule.guard) continue;
+    if (!transitionRuleMatches(rule, fact)) continue;
+    const conditionFact = guardFacts.find(f => factSatisfies(f, rule.guard!));
+    if (!conditionFact) continue;
+    out.push(conditionObservedAssertion(rule.guard, conditionFact));
+  }
+  return out;
+}
+
 export function buildTransitionDeltaAssertions(
   artifact: ArchitectureArtifact,
   fact: { data: string; field: string; from?: string; to: string },
+  guardFacts?: ValueFact[],
 ): string[] {
   if (fact.from) {
-    return [buildTransitionDeltaAssertion(artifact, fact)];
+    return [buildTransitionDeltaAssertion(artifact, fact), ...buildGuardConditionAssertions(artifact, { ...fact, from: fact.from }, guardFacts)];
   }
   const machine = findMachineForTransition(artifact, fact);
   if (!machine) return [];
   const illegalFroms = enumValuesForField(artifact, fact.data, fact.field).filter(
-    from => !transitionAllowed(machine, { from, to: fact.to }),
+    from => !transitionAllowed(machine, { from, to: fact.to }, guardFacts),
   );
-  return illegalFroms.map(from => buildTransitionDeltaAssertion(artifact, { ...fact, from }));
+  return illegalFroms.flatMap(from => [
+    buildTransitionDeltaAssertion(artifact, { ...fact, from }),
+    ...buildGuardConditionAssertions(artifact, { ...fact, from }, guardFacts),
+  ]);
 }

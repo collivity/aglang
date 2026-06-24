@@ -477,6 +477,9 @@ export function check(program: Program): CheckError[] {
               if (t.to !== '*' && !validValues.has(t.to)) {
                 errors.push({ message: `machine '${decl.name}': '${t.to}' is not a value of enum '${rawType}'` });
               }
+              if (t.guard) {
+                validateValueExpression('machine', decl.name, t.guard);
+              }
             }
           }
         }

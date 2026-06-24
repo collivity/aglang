@@ -1,5 +1,55 @@
 // Shared SMT identifier formatting — used by gate.ts and delta-assert.ts to keep
 // permanent constraints and delta assertions naming-compatible with each other.
+//
+// Lives under src/smt/ (SmtBackend), not src/runtime/ (RuntimeCore), deliberately: this module is
+// a dependency of both SmtBackend (translator.ts) and RuntimeCore (gate.ts/delta-assert.ts/
+// state-machine.ts), and architecture.ag's SmtBackendIsolation invariant denies the
+// SmtBackend -> RuntimeCore direction (RuntimeCore -> SmtBackend is the allowed one). It was
+// briefly placed under src/runtime/ during development, which silently violated that invariant --
+// caught only once smt-ids.ts itself was brought into the self-hosted model (it wasn't, until this
+// round). For the same reason, the fact-correlation helpers below take a structural ValueFactLike
+// rather than importing ValueFact from extraction-query.ts (SemanticQueryEngine), which
+// SmtBackendIsolation also denies SmtBackend depending on.
+
+// Fact-correlation helpers — moved here from delta-assert.ts so state-machine.ts can reuse the
+// same value_policy.when correlation pattern for guarded transitions without a circular import
+// (delta-assert.ts already imports from state-machine.ts).
+export function normalizeScalar(value: unknown): string | number | boolean | null {
+  if (value === null) return null;
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  const text = String(value);
+  if (text === 'true') return true;
+  if (text === 'false') return false;
+  if (text === 'null') return null;
+  if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
+  return text;
+}
+
+export function relationHolds(actual: unknown, relation: string, expected: unknown): boolean {
+  const left = normalizeScalar(actual);
+  const right = normalizeScalar(expected);
+  if (relation === '==') return left === right;
+  if (relation === '!=') return left !== right;
+  if (typeof left === 'number' && typeof right === 'number') {
+    if (relation === '>=') return left >= right;
+    if (relation === '<=') return left <= right;
+    if (relation === '>') return left > right;
+    if (relation === '<') return left < right;
+  }
+  return false;
+}
+
+export function sameValueTarget(fact: Pick<ValueFactLike, 'subject' | 'path'>, expr: { subject: string; path: string[] }): boolean {
+  return fact.subject === expr.subject && fact.path.join('.') === expr.path.join('.');
+}
+
+export function factSatisfies(fact: ValueFactLike, expr: { subject: string; path: string[]; relation: string; value: unknown }): boolean {
+  return sameValueTarget(fact, expr) && relationHolds(fact.value, expr.relation, expr.value);
+}
+
+export function factContradicts(fact: ValueFactLike, expr: { subject: string; path: string[]; relation: string; value: unknown }): boolean {
+  return sameValueTarget(fact, expr) && !relationHolds(fact.value, expr.relation, expr.value);
+}
 
 export function smtId(name: string): string {
   return name.replace(/[^a-zA-Z0-9_]/g, '_');
@@ -65,6 +115,27 @@ export function operationFieldValueTerm(operation: string, phase: string, subjec
   return `(${fn} Operation__${smtId(operation)} ${phase} ${smtId(subject)} ${fieldPathSmtId(subject, path)})`;
 }
 
+// A machine guard's "this is the trigger condition" term — positive comparison (not negated,
+// unlike value_policy's requirement-violation framing: a guard as written is what *causes* the
+// deny, there's no "violated" form to invert), real arithmetic when numeric, the existing opaque
+// ValueFact atom otherwise. Single source of truth for translator.ts (permanent, compile-time)
+// and gate.ts (permanent display + solver-slice permanent) so they can't drift apart the way the
+// pre-numeric value_policy code did.
+export function guardConditionTerm(guard: ValueExprLike): string {
+  return guard.valueType
+    ? `(${smtRelationOperator(guard.relation)} ${fieldValueTerm(guard.subject, guard.path, guard.valueType)} ${numericSmtLiteral(guard.value as number, guard.valueType)})`
+    : `(ValueFact ${smtId(guard.subject)} ${fieldPathSmtId(guard.subject, guard.path)} ${relationSmtId(guard.relation)} ${scalarSmtId(guard.value)})`;
+}
+
+// Full permanent constraint for a (possibly guarded) denied transition — `transitionTerm` is the
+// caller-built `(Transition ...)` SMT term (depends on stateSmtId/artifact, kept in gate.ts/
+// translator.ts rather than threaded through here).
+export function transitionPermanentConstraint(transitionTerm: string, guard?: ValueExprLike): string {
+  return guard
+    ? `(assert (=> (and ${transitionTerm} ${guardConditionTerm(guard)}) false))`
+    : `(assert (=> ${transitionTerm} false))`;
+}
+
 // Resolves the observed numeric value for a fact whose field is known (from the policy's resolved
 // valueType) to be numeric. Prefers an already-typed numericValue (e.g. a real number captured
 // straight from a GraphFact property); falls back to parsing the extracted fact's string value,
@@ -93,6 +164,17 @@ interface ValueFactLike {
   numericValue?: number;
 }
 
+// The delta assertion pinning a satisfied "condition" expression (value_policy's `when`, or a
+// machine transition's `guard`) to its correlated fact's observed value — shared by both so they
+// never drift out of sync. Numeric when possible (real literal), the opaque ValueFact atom
+// otherwise (string/bool/enum conditions, unchanged from the pre-numeric model).
+export function conditionObservedAssertion(condition: ValueExprLike, conditionFact: ValueFactLike): string {
+  const observed = condition.valueType ? resolveNumericFactValue(conditionFact.numericValue, conditionFact.value) : undefined;
+  return condition.valueType && observed !== undefined
+    ? `(assert (= ${fieldValueTerm(conditionFact.subject, conditionFact.path, condition.valueType)} ${numericSmtLiteral(observed, condition.valueType)}))`
+    : `(assert (ValueFact ${smtId(conditionFact.subject)} ${fieldPathSmtId(conditionFact.subject, conditionFact.path)} ${relationSmtId(condition.relation)} ${scalarSmtId(condition.value)}))`;
+}
+
 // Single source of truth for the *delta* (runtime-observed) SMT-LIB assertions for a value_policy
 // violation — used identically by delta-assert.ts (the actual solver input) and gate.ts (the
 // z3_proof display), so they can never drift out of sync the way the pre-numeric code did.
@@ -104,12 +186,7 @@ export function valuePolicyDeltaAssertions(
 ): string[] {
   const out: string[] = [];
   if (when && conditionFact) {
-    const observed = when.valueType ? resolveNumericFactValue(conditionFact.numericValue, conditionFact.value) : undefined;
-    out.push(
-      when.valueType && observed !== undefined
-        ? `(assert (= ${fieldValueTerm(conditionFact.subject, conditionFact.path, when.valueType)} ${numericSmtLiteral(observed, when.valueType)}))`
-        : `(assert (ValueFact ${smtId(conditionFact.subject)} ${fieldPathSmtId(conditionFact.subject, conditionFact.path)} ${relationSmtId(when.relation)} ${scalarSmtId(when.value)}))`,
-    );
+    out.push(conditionObservedAssertion(when, conditionFact));
   }
   const reqObserved = requirement.valueType ? resolveNumericFactValue(fact.numericValue, fact.value) : undefined;
   out.push(

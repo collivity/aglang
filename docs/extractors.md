@@ -368,3 +368,31 @@ Once wired into a real check, an extracted fact reporting an observed total of `
 ```
 
 Z3 genuinely derives `1500 > 1000`; it isn't told the answer. String/bool/enum comparisons (`require Cart.phase == SingleItem`) are unaffected and still use the original symbolic model, since there's no arithmetic to do there. Numeric-ness is detected automatically — from the field's declared type, and from whether the captured value is a bare `$capture` (no surrounding text in the `value:` template) — so no `.agq.yml` authoring changes are needed either way.
+
+### Guarded state-machine transitions
+
+A `machine` transition can carry a `when` guard, reusing the exact same `ValueExpression` syntax as `value_policy`/`operation_policy`:
+
+```ag
+data Order {
+  status: OrderStatus
+  total: Int
+}
+
+machine OrderLifecycle on Order.status {
+  deny transition Pending -> Shipped when Order.total > 1000;
+  allow transition Pending -> Shipped;
+}
+```
+
+This compiles to one combined assertion — a boolean `Transition` fact conjoined with a real numeric comparison, not two disconnected predicates:
+
+```
+(assert (=> (and (Transition Order Field__Order__status State__OrderStatus__Pending State__OrderStatus__Shipped)
+                  (> (FieldValueInt Order FieldPath__Order__total) 1000))
+            false))
+```
+
+The guard is satisfied when a `kind: value` query in the same check run emits a fact matching the guard's subject and path (the exact correlation `value_policy`'s `when` clause already uses — see above). A transition with no correlated value evidence at all is **not** treated as guarded-and-blocked; it fails closed, the same way a `value_policy.when` condition with no matching fact never fires.
+
+**A real limitation, inherited from `value_policy.when`, not introduced by guards**: correlation is by subject+path identity only — there's no instance discriminator. If a check run's evidence includes two different `Order`-typed facts with different `total` values (two genuinely different orders, or just two unrelated extracted facts that both happen to be about something called `Order`), and *either one* satisfies the guard, the guard is considered satisfied for *any* matching transition — even one that has nothing to do with which `Order` actually had which total. This isn't new to guards; it's the same gap `value_policy.when` already has, just newly visible here. If your extraction can capture a real per-instance identifier (an order ID, not just the type name) into a fact's `subject`, correlation becomes precise; without one, treat a guarded `deny` as "this combination of patterns was observed somewhere in this diff," not "this specific transition was proven to violate the guard."

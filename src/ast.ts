@@ -114,6 +114,7 @@ export interface TransitionRule {
   kind: 'allow' | 'deny';
   from: string;  // enum value or '*' (any)
   to: string;    // enum value or '*' (any)
+  guard?: ValueExpression;
 }
 
 export interface StateMachineDecl {

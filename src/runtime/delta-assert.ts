@@ -27,7 +27,7 @@ import {
 } from './graph-projection.ts';
 import { agIrGraphToExtractionQueryFacts, applyExtractionQueryFacts, loadExtractionQueries, type AuthCounterexampleFact, type DependencyFact, type EncryptionCounterexampleFact, type EventFact, type ExtractionQueryFacts, type ExtractionQueryTrace, type OperationEventFact, type OperationFact, type TransitionFact, type ValueFact } from './extraction-query.ts';
 import { buildTransitionDeltaAssertions, shouldBlockTransitionFact } from './state-machine.ts';
-import { smtId, relationSmtId, scalarSmtId, fieldPathSmtId, valuePolicyDeltaAssertions, operationPolicyDeltaAssertion } from './smt-ids.ts';
+import { smtId, relationSmtId, scalarSmtId, fieldPathSmtId, valuePolicyDeltaAssertions, operationPolicyDeltaAssertion, factSatisfies, factContradicts } from '../smt/smt-ids.ts';
 import type { AgIrGraph } from '../ir/types.ts';
 import { AG_IR_SCHEMA_VERSION } from '../ir/types.ts';
 import { mergeAgIrGraphs } from '../ir/builders.ts';
@@ -161,6 +161,10 @@ export interface DeltaResult {
   transitionFacts: TransitionFact[];
   blockingTransitionFacts: TransitionFact[];
   transitionWarningFacts: TransitionFact[];
+  /** Blocking-filtered ValueFacts available for correlating machine transition guards (same
+   * subject+path pattern value_policy.when already uses) -- exposed so gate.ts re-evaluates
+   * transitionAllowed with the same guard context used to decide blockingTransitionFacts. */
+  guardCandidateValueFacts: ValueFact[];
   operationFacts: OperationFact[];
   blockingOperationFacts: OperationFact[];
   operationWarningFacts: OperationFact[];
@@ -195,43 +199,6 @@ export interface DeltaResult {
   unresolvedIrEdges: IrUnresolvedEdge[];
   irLoweringProvenance: IrLoweredFlowProvenance[];
   extractorDebug: ExtractorDebugEvent[];
-}
-
-function normalizeScalar(value: unknown): string | number | boolean | null {
-  if (value === null) return null;
-  if (typeof value === 'number' || typeof value === 'boolean') return value;
-  const text = String(value);
-  if (text === 'true') return true;
-  if (text === 'false') return false;
-  if (text === 'null') return null;
-  if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
-  return text;
-}
-
-function relationHolds(actual: unknown, relation: string, expected: unknown): boolean {
-  const left = normalizeScalar(actual);
-  const right = normalizeScalar(expected);
-  if (relation === '==') return left === right;
-  if (relation === '!=') return left !== right;
-  if (typeof left === 'number' && typeof right === 'number') {
-    if (relation === '>=') return left >= right;
-    if (relation === '<=') return left <= right;
-    if (relation === '>') return left > right;
-    if (relation === '<') return left < right;
-  }
-  return false;
-}
-
-function sameValueTarget(fact: Pick<ValueFact, 'subject' | 'path'>, expr: { subject: string; path: string[] }): boolean {
-  return fact.subject === expr.subject && fact.path.join('.') === expr.path.join('.');
-}
-
-function factSatisfies(fact: ValueFact, expr: { subject: string; path: string[]; relation: string; value: unknown }): boolean {
-  return sameValueTarget(fact, expr) && relationHolds(fact.value, expr.relation, expr.value);
-}
-
-function factContradicts(fact: ValueFact, expr: { subject: string; path: string[]; relation: string; value: unknown }): boolean {
-  return sameValueTarget(fact, expr) && !relationHolds(fact.value, expr.relation, expr.value);
 }
 
 function diFactMatchesPolicy(fact: DiFact, artifact: ArchitectureArtifact): boolean {
@@ -811,7 +778,11 @@ export async function generateDeltaAssertions(
   ];
   const graphReport = buildGraphReport(uniqueGraphFacts, projection);
   const transitionFacts = queryFacts.transitionFacts;
-  const blockingTransitionFacts = transitionFacts.filter(f => shouldBlockTransitionFact(f, artifact, strict));
+  // Guard correlation (machine `when` conditions) reuses the same blocking-filtered ValueFact
+  // pool value_policy.when already correlates against -- computed here, ahead of the `valueFacts`
+  // local binding below, since shouldBlockTransitionFact needs it for guarded deny rules.
+  const guardCandidateValueFacts = queryFacts.valueFacts.filter(f => isBlocking({ from: f.subject, to: f.subject, confidence: f.confidence, evidence: f.evidence, file: f.file }, strict));
+  const blockingTransitionFacts = transitionFacts.filter(f => shouldBlockTransitionFact(f, artifact, strict, guardCandidateValueFacts));
   const transitionWarningFacts = transitionFacts.filter(f =>
     !blockingTransitionFacts.includes(f) && (!f.from || f.confidence === 'probable'),
   );
@@ -893,7 +864,7 @@ export async function generateDeltaAssertions(
   });
   const authFacts = extractAuthFactsFromCSharp(csharpInputs, artifact.permissionPolicies ?? artifact.permissions ?? []);
   const blockingPermissionFacts = inferPermissionViolations(authFacts, artifact);
-  const transitionAssertions = blockingTransitionFacts.flatMap(f => buildTransitionDeltaAssertions(artifact, f));
+  const transitionAssertions = blockingTransitionFacts.flatMap(f => buildTransitionDeltaAssertions(artifact, f, guardCandidateValueFacts));
   const operationAssertions = blockingOperationFacts.flatMap(f => [
     `(assert (OperationIn ${smtId(f.component)} Operation__${smtId(f.operation)}))`,
     ...(f.data ? [`(assert (OperationOnDataIn ${smtId(f.component)} Operation__${smtId(f.operation)} ${smtId(f.data)}))`] : []),
@@ -935,6 +906,7 @@ export async function generateDeltaAssertions(
     blockingPermissionFacts,
     transitionFacts,
     blockingTransitionFacts,
+    guardCandidateValueFacts,
     transitionWarningFacts,
     operationFacts,
     blockingOperationFacts,

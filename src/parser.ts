@@ -506,8 +506,12 @@ export function parse(tokens: Token[]): Program {
       const from = match('STAR') ? (advance(), '*') : expect('IDENT').value;
       expect('ARROW');
       const to = match('STAR') ? (advance(), '*') : expect('IDENT').value;
+      let guard: ValueExpression | undefined;
+      if (consume('KEYWORD', 'when')) {
+        guard = parseValueExpression();
+      }
       consume('SEMICOLON');
-      transitions.push({ kind, from, to });
+      transitions.push({ kind, from, to, ...(guard ? { guard } : {}) });
     }
     expect('RBRACE');
     return { kind: 'StateMachineDecl', name, onType, onField, transitions };

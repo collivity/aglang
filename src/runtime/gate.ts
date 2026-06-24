@@ -15,8 +15,9 @@ import {
   stateSmtId,
   transitionAllowed,
   transitionRuleMatches,
+  guardSatisfied,
 } from './state-machine.ts';
-import { smtId, relationSmtId, scalarSmtId, fieldPathSmtId, valuePolicyDeltaAssertions, valuePolicyPermanentConstraint, operationPolicyDeltaAssertion, operationPolicyPermanentConstraint } from './smt-ids.ts';
+import { smtId, relationSmtId, scalarSmtId, fieldPathSmtId, valuePolicyDeltaAssertions, valuePolicyPermanentConstraint, operationPolicyDeltaAssertion, operationPolicyPermanentConstraint, transitionPermanentConstraint } from '../smt/smt-ids.ts';
 import type { ValueFact } from './extraction-query.ts';
 import type { ArtifactValueExpression } from '../emitters/artifact.ts';
 
@@ -326,15 +327,18 @@ function buildSolverSlices(
 
   for (const fact of runtime.blockingTransitionFacts) {
     const machine = (artifact.stateMachines ?? []).find(sm => sm.onType === fact.data && sm.onField === fact.field);
-    if (!machine || transitionAllowed(machine, fact)) continue;
-    const denied = machine.transitions.find(t => t.kind === 'deny' && transitionRuleMatches(t, fact));
+    if (!machine || transitionAllowed(machine, fact, delta.guardCandidateValueFacts)) continue;
+    const denied = machine.transitions.find(t => t.kind === 'deny' && transitionRuleMatches(t, fact) && guardSatisfied(t, delta.guardCandidateValueFacts));
+    const transitionTerm = denied
+      ? `(Transition ${smtId(fact.data)} Field__${smtId(fact.data)}__${smtId(fact.field)} ${stateSmtId(artifact, fact.data, fact.field, fact.from ?? denied.from)} ${stateSmtId(artifact, fact.data, fact.field, fact.to)})`
+      : undefined;
     push({
       rule: machine.name,
       declaration: 'machine',
-      permanent: denied
-        ? `(assert (=> (Transition ${smtId(fact.data)} Field__${smtId(fact.data)}__${smtId(fact.field)} ${stateSmtId(artifact, fact.data, fact.field, fact.from ?? denied.from)} ${stateSmtId(artifact, fact.data, fact.field, fact.to)}) false))`
+      permanent: transitionTerm
+        ? transitionPermanentConstraint(transitionTerm, denied?.guard)
         : `; machine ${machine.name} permits only declared allow transitions`,
-      delta: buildTransitionDeltaAssertions(artifact, fact).join('\n'),
+      delta: buildTransitionDeltaAssertions(artifact, fact, delta.guardCandidateValueFacts).join('\n'),
       source_file: fact.file,
       line: fact.line,
       components: [fact.data],
@@ -622,7 +626,7 @@ export async function runGate(
     blockingPermissionFacts.length > 0 ||
     blockingTransitionFacts.some(f => {
       const machine = (artifact.stateMachines ?? []).find(sm => sm.onType === f.data && sm.onField === f.field);
-      return machine ? !transitionAllowed(machine, f) : false;
+      return machine ? !transitionAllowed(machine, f, delta.guardCandidateValueFacts) : false;
     }) ||
     blockingDataFlowFacts.some(f => (artifact.dataPolicies ?? []).some(policy => policy.rules.some(rule =>
       rule.kind === 'DenyClassification'
@@ -1036,12 +1040,15 @@ export async function runGate(
 
   for (const fact of blockingTransitionFacts) {
     const machine = (artifact.stateMachines ?? []).find(sm => sm.onType === fact.data && sm.onField === fact.field);
-    if (!machine || transitionAllowed(machine, fact)) continue;
-    const denied = machine.transitions.find(t => t.kind === 'deny' && transitionRuleMatches(t, fact));
-    const permanentConstraint = denied
-      ? `(assert (=> (Transition ${smtId(fact.data)} Field__${smtId(fact.data)}__${smtId(fact.field)} ${stateSmtId(artifact, fact.data, fact.field, fact.from ?? denied.from)} ${stateSmtId(artifact, fact.data, fact.field, fact.to)}) false))`
+    if (!machine || transitionAllowed(machine, fact, delta.guardCandidateValueFacts)) continue;
+    const denied = machine.transitions.find(t => t.kind === 'deny' && transitionRuleMatches(t, fact) && guardSatisfied(t, delta.guardCandidateValueFacts));
+    const transitionTerm = denied
+      ? `(Transition ${smtId(fact.data)} Field__${smtId(fact.data)}__${smtId(fact.field)} ${stateSmtId(artifact, fact.data, fact.field, fact.from ?? denied.from)} ${stateSmtId(artifact, fact.data, fact.field, fact.to)})`
+      : undefined;
+    const permanentConstraint = transitionTerm
+      ? transitionPermanentConstraint(transitionTerm, denied?.guard)
       : `machine ${machine.name} permits only declared allow transitions`;
-    const deltaAssertion = buildTransitionDeltaAssertions(artifact, fact).join('\n');
+    const deltaAssertion = buildTransitionDeltaAssertions(artifact, fact, delta.guardCandidateValueFacts).join('\n');
     violations.push({
       type: 'state_machine_violation',
       invariant: machine.name,
